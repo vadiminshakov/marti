@@ -10,7 +10,7 @@ import (
 var amount *big.Float = big.NewFloat(1)
 
 type Detector interface {
-	NeedAction(pair entity.Pair, price *big.Float) (entity.Action, error)
+	NeedAction(price *big.Float) (entity.Action, error)
 }
 
 type Pricer interface {
@@ -22,43 +22,30 @@ type Trader interface {
 	Sell(pair entity.Pair, amount *big.Float) error
 }
 
-type Wallet interface {
-	BeginTx() wallet.Tx
-	Add(tx wallet.Tx, currency string, amount *big.Float) error
-	Sub(tx wallet.Tx, currency string, amount *big.Float) error
-
-	Balance(currency string) (*big.Float, error)
-}
-
 type TradeService struct {
 	pair     entity.Pair
-	wallet   Wallet
+	wallet   wallet.Wallet
 	pricer   Pricer
 	detector Detector
 	trader   Trader
 }
 
-func NewTradeService(pair entity.Pair, wallet Wallet, pricer Pricer, detector Detector, trader Trader) *TradeService {
+func NewTradeService(pair entity.Pair, wallet wallet.Wallet, pricer Pricer, detector Detector, trader Trader) *TradeService {
 	return &TradeService{pair, wallet, pricer, detector, trader}
 }
 
-type TradeEvent struct {
-	Action entity.Action
-	Amount *big.Float
-}
-
-func (t *TradeService) Trade() (*TradeEvent, error) {
+func (t *TradeService) Trade() (*entity.TradeEvent, error) {
 	price, err := t.pricer.GetPrice(t.pair)
 	if err != nil {
 		return nil, errors.Wrapf(err, "pricer failed for pair %s", t.pair)
 	}
 
-	act, err := t.detector.NeedAction(t.pair, price)
+	act, err := t.detector.NeedAction(price)
 	if err != nil {
 		return nil, errors.Wrapf(err, "detector failed for pair %s", t.pair)
 	}
 
-	var tradeEvent *TradeEvent
+	var tradeEvent *entity.TradeEvent
 	switch act {
 	case entity.ActionBuy:
 		tx := t.wallet.BeginTx()
@@ -88,7 +75,7 @@ func (t *TradeService) Trade() (*TradeEvent, error) {
 			return nil, errors.Wrap(err, "failed to commit")
 		}
 
-		tradeEvent = &TradeEvent{
+		tradeEvent = &entity.TradeEvent{
 			Action: entity.ActionBuy,
 			Amount: amount,
 		}
@@ -120,7 +107,7 @@ func (t *TradeService) Trade() (*TradeEvent, error) {
 			return nil, errors.Wrap(err, "failed to commit")
 		}
 
-		tradeEvent = &TradeEvent{
+		tradeEvent = &entity.TradeEvent{
 			Action: entity.ActionSell,
 			Amount: amount,
 		}
