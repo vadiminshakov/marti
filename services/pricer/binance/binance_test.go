@@ -1,6 +1,7 @@
 package binance
 
 import (
+	"github.com/adshao/go-binance/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/vadimInshakov/marti/entity"
@@ -13,7 +14,8 @@ func Test(t *testing.T) {
 	require.NotEmpty(t, apikey, "APIKEY env is not set")
 	secretkey := os.Getenv("SECRETKEY")
 	require.NotEmpty(t, apikey, "SECRETKEY env is not set")
-	pricer := NewPricer(apikey, secretkey)
+
+	pricer := NewPricer(binance.NewClient(apikey, secretkey))
 	price, err := pricer.GetPrice(entity.Pair{From: "BTC", To: "RUB"})
 	assert.NoError(t, err)
 	f, _ := price.Float64()
