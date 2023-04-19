@@ -14,23 +14,23 @@ type Detector struct {
 	mock.Mock
 }
 
-// NeedAction provides a mock function with given fields: pair, price
-func (_m *Detector) NeedAction(pair entity.Pair, price *big.Float) (entity.Action, error) {
-	ret := _m.Called(pair, price)
+// NeedAction provides a mock function with given fields: price
+func (_m *Detector) NeedAction(price *big.Float) (entity.Action, error) {
+	ret := _m.Called(price)
 
 	var r0 entity.Action
 	var r1 error
-	if rf, ok := ret.Get(0).(func(entity.Pair, *big.Float) (entity.Action, error)); ok {
-		return rf(pair, price)
+	if rf, ok := ret.Get(0).(func(*big.Float) (entity.Action, error)); ok {
+		return rf(price)
 	}
-	if rf, ok := ret.Get(0).(func(entity.Pair, *big.Float) entity.Action); ok {
-		r0 = rf(pair, price)
+	if rf, ok := ret.Get(0).(func(*big.Float) entity.Action); ok {
+		r0 = rf(price)
 	} else {
 		r0 = ret.Get(0).(entity.Action)
 	}
 
-	if rf, ok := ret.Get(1).(func(entity.Pair, *big.Float) error); ok {
-		r1 = rf(pair, price)
+	if rf, ok := ret.Get(1).(func(*big.Float) error); ok {
+		r1 = rf(price)
 	} else {
 		r1 = ret.Error(1)
 	}
