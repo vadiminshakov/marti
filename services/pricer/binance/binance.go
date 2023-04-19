@@ -9,13 +9,10 @@ import (
 )
 
 type Pricer struct {
-	client    *binance.Client
-	apikey    string
-	secretkey string
+	client *binance.Client
 }
 
-func NewPricer(apikey, secretkey string) *Pricer {
-	client := binance.NewClient(apikey, secretkey)
+func NewPricer(client *binance.Client) *Pricer {
 	return &Pricer{client: client}
 }
 
