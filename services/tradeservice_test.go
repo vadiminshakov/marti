@@ -52,15 +52,15 @@ func TestTrade(t *testing.T) {
 	pricer := &pricemock{}
 
 	trader := mocks.NewTrader(t)
-	trader.On("Buy", mock.Anything, mock.Anything).Return(nil)
-	trader.On("Sell", mock.Anything, mock.Anything).Return(nil)
+	trader.On("Buy", mock.Anything).Return(nil)
+	trader.On("Sell", mock.Anything).Return(nil)
 
 	detector := mocks.NewDetector(t)
-	detector.On("NeedAction", mock.Anything, big.NewFloat(1)).Return(entity.ActionBuy, nil)
-	detector.On("NeedAction", mock.Anything, big.NewFloat(3)).Return(entity.ActionSell, nil)
-	detector.On("NeedAction", mock.Anything, big.NewFloat(2)).Return(entity.ActionNull, nil)
-	detector.On("NeedAction", mock.Anything, big.NewFloat(4)).Return(entity.ActionNull, nil)
-	detector.On("NeedAction", mock.Anything, big.NewFloat(5)).Return(entity.ActionNull, nil)
+	detector.On("NeedAction", big.NewFloat(1)).Return(entity.ActionBuy, nil)
+	detector.On("NeedAction", big.NewFloat(3)).Return(entity.ActionSell, nil)
+	detector.On("NeedAction", big.NewFloat(2)).Return(entity.ActionNull, nil)
+	detector.On("NeedAction", big.NewFloat(4)).Return(entity.ActionNull, nil)
+	detector.On("NeedAction", big.NewFloat(5)).Return(entity.ActionNull, nil)
 
 	mockedWallet := &walletmock{
 		t:      t,
