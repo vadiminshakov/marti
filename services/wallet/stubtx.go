@@ -1,4 +1,4 @@
-package binance
+package wallet
 
 import "math/big"
 
