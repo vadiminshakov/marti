@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"math/big"
 	"strings"
@@ -18,8 +19,6 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
-
-var buypoint, window = big.NewFloat(29284), big.NewFloat(100)
 
 func main() {
 	logger, _ := zap.NewProduction()
@@ -42,18 +41,6 @@ func main() {
 	//}
 
 	pairFlag := flag.String("pair", "BTC_USDT", "trade pair, example: BTC_USDT")
-	buypointFlag := flag.Float64("buypoint", 0, "average price, example: 20449")
-	windowFlag := flag.Float64("window", 0, "price window, example: 100")
-	flag.Parse()
-
-	if *buypointFlag < 10 {
-		logger.Fatal("incorrect --buypoint")
-	}
-	if *windowFlag < 10 {
-		logger.Fatal("incorrect --buypoint")
-	}
-
-	buypoint, window := big.NewFloat(*buypointFlag), big.NewFloat(*windowFlag)
 	pairElements := strings.Split(*pairFlag, "_")
 	if len(pairElements) != 2 {
 		logger.Fatal("invalid --par provided", zap.String("--pair", *pairFlag))
@@ -63,7 +50,21 @@ func main() {
 	g := new(errgroup.Group)
 
 	g.Go(func() error {
-		return binanceTradeServiceCreator(logger, binanceClient, pair, buypoint, window)(context.Background())
+		for {
+			ctx, _ := context.WithTimeout(context.Background(), 7*time.Second)
+			fn, err := binanceTradeServiceCreator(logger, binanceClient, pair)
+			if err != nil {
+				return err
+			}
+
+			if err := fn(ctx); err != nil {
+				if errors.Is(err, context.DeadlineExceeded) {
+					logger.Info("recreate instance")
+					continue
+				}
+				return err
+			}
+		}
 	})
 
 	if err := g.Wait(); err != nil {
@@ -71,12 +72,18 @@ func main() {
 	}
 }
 
-func binanceTradeServiceCreator(logger *zap.Logger, binanceClient *binance.Client, pair entity.Pair, buypoint, window *big.Float) func(context.Context) error {
+func binanceTradeServiceCreator(logger *zap.Logger, binanceClient *binance.Client, pair entity.Pair) (func(context.Context) error, error) {
 	balancesStore := make(map[string]*big.Float)
 	memwallet := binancewallet.NewInMemWallet(&binancewallet.InmemTx{Balances: make(map[string]*big.Float)}, balancesStore)
 	pricer := binancepricer.NewPricer(binanceClient)
 
-	detect, err := detector.NewDetector(binanceClient, pair, buypoint, window)
+	buyprice, window, err := getBuyPriceAndWindow(binanceClient, pair)
+
+	logger.Info("start with price and window",
+		zap.String("buyprice", buyprice.String()),
+		zap.String("window", window.String()))
+
+	detect, err := detector.NewDetector(binanceClient, pair, buyprice, window)
 	if err != nil {
 		panic(err)
 	}
@@ -109,5 +116,30 @@ func binanceTradeServiceCreator(logger *zap.Logger, binanceClient *binance.Clien
 		}
 
 		return ctx.Err()
+	}, nil
+}
+
+func getBuyPriceAndWindow(binanceClient *binance.Client, pair entity.Pair) (*big.Float, *big.Float, error) {
+	klines, err := binanceClient.NewKlinesService().Symbol(pair.Symbol()).
+		Interval("2h").Do(context.Background())
+	if err != nil {
+		return nil, nil, err
 	}
+
+	cumulativeBuyPrice, cumulativeWindow := big.NewFloat(0), big.NewFloat(0)
+	for _, k := range klines {
+		klineOpen, _ := new(big.Float).SetString(k.Open)
+		klineClose, _ := new(big.Float).SetString(k.Close)
+
+		klinesum := new(big.Float).Add(klineOpen, klineClose)
+		buyprice := klinesum.Quo(klinesum, big.NewFloat(2))
+		cumulativeBuyPrice.Add(cumulativeBuyPrice, buyprice)
+
+		klinewindow := new(big.Float).Abs(new(big.Float).Sub(klineOpen, klineClose))
+		cumulativeWindow.Add(cumulativeWindow, klinewindow)
+	}
+	cumulativeBuyPrice.Quo(cumulativeBuyPrice, big.NewFloat(float64(len(klines))))
+	cumulativeWindow.Quo(cumulativeWindow, big.NewFloat(float64(len(klines))))
+
+	return cumulativeBuyPrice, cumulativeWindow, nil
 }
