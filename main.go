@@ -2,22 +2,30 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
+	"fmt"
 	"math/big"
 	"strings"
 	"time"
+
+	"github.com/pkg/errors"
+	"github.com/vadimInshakov/marti/services/windowfinder"
 
 	"github.com/adshao/go-binance/v2"
 	"github.com/martinlindhe/notify"
 	"github.com/vadimInshakov/marti/entity"
 	"github.com/vadimInshakov/marti/services"
 	"github.com/vadimInshakov/marti/services/detector"
-	binancepricer "github.com/vadimInshakov/marti/services/pricer/binance"
-	binancetrader "github.com/vadimInshakov/marti/services/trader/binance"
-	binancewallet "github.com/vadimInshakov/marti/services/wallet/binance"
+	binancepricer "github.com/vadimInshakov/marti/services/pricer"
+	binancetrader "github.com/vadimInshakov/marti/services/trader"
+	binancewallet "github.com/vadimInshakov/marti/services/wallet"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+)
+
+const (
+	recreateInterval   = 13 * time.Hour
+	pollPricesInterval = 5 * time.Second
 )
 
 func main() {
@@ -41,6 +49,20 @@ func main() {
 	//}
 
 	pairFlag := flag.String("pair", "BTC_USDT", "trade pair, example: BTC_USDT")
+	klineSize := flag.String("klinesize", "1h", "kline size, example: 1h")
+	usebalance := flag.Float64("usebalance", 100, "percent of balance usage, for example 90 means 90%")
+	koeff := flag.Float64("koeff", 1, "koeff for multiply buyprice and window found, example: 0.98")
+	flag.Parse()
+
+	_, err := time.ParseDuration(*klineSize)
+	if err != nil {
+		logger.Fatal("invalid --klinesize provided", zap.String("--klinesize", *klineSize))
+	}
+
+	if *usebalance < 0 || *usebalance > 100 {
+		logger.Fatal("invalid --usebalance provided", zap.Float64("--usebalance", *usebalance))
+	}
+
 	pairElements := strings.Split(*pairFlag, "_")
 	if len(pairElements) != 2 {
 		logger.Fatal("invalid --par provided", zap.String("--pair", *pairFlag))
@@ -51,8 +73,9 @@ func main() {
 
 	g.Go(func() error {
 		for {
-			ctx, _ := context.WithTimeout(context.Background(), 7*time.Second)
-			fn, err := binanceTradeServiceCreator(logger, binanceClient, pair)
+			ctx, _ := context.WithTimeout(context.Background(), recreateInterval)
+			wf := windowfinder.NewBinanceWindowFinder(binanceClient, pair, *klineSize, *koeff)
+			fn, err := binanceTradeServiceCreator(logger, wf, binanceClient, pair, *usebalance)
 			if err != nil {
 				return err
 			}
@@ -72,16 +95,19 @@ func main() {
 	}
 }
 
-func binanceTradeServiceCreator(logger *zap.Logger, binanceClient *binance.Client, pair entity.Pair) (func(context.Context) error, error) {
+type WindowFinder interface {
+	GetBuyPriceAndWindow() (*big.Float, *big.Float, error)
+}
+
+func binanceTradeServiceCreator(logger *zap.Logger, wf WindowFinder, binanceClient *binance.Client, pair entity.Pair, usebalance float64) (func(context.Context) error, error) {
 	balancesStore := make(map[string]*big.Float)
 	memwallet := binancewallet.NewInMemWallet(&binancewallet.InmemTx{Balances: make(map[string]*big.Float)}, balancesStore)
 	pricer := binancepricer.NewPricer(binanceClient)
 
-	buyprice, window, err := getBuyPriceAndWindow(binanceClient, pair)
-
-	logger.Info("start with price and window",
-		zap.String("buyprice", buyprice.String()),
-		zap.String("window", window.String()))
+	buyprice, window, err := wf.GetBuyPriceAndWindow()
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to find window for %s", pair.String())
+	}
 
 	detect, err := detector.NewDetector(binanceClient, pair, buyprice, window)
 	if err != nil {
@@ -93,10 +119,41 @@ func binanceTradeServiceCreator(logger *zap.Logger, binanceClient *binance.Clien
 		panic(err)
 	}
 
-	ts := services.NewTradeService(pair, memwallet, pricer, detect, trader)
+	res, err := binanceClient.NewGetAccountService().Do(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	var balanceSecondCurrency *big.Float
+	for _, b := range res.Balances {
+		if b.Asset == pair.To {
+			balanceSecondCurrency, _ = new(big.Float).SetString(b.Free)
+			break
+		}
+	}
+
+	price, err := pricer.GetPrice(pair)
+	if err != nil {
+		return nil, err
+	}
+
+	percent := new(big.Float).Quo(big.NewFloat(usebalance), big.NewFloat(100))
+
+	balanceSecondCurrency.Quo(balanceSecondCurrency, price)
+	balanceSecondCurrency.Mul(balanceSecondCurrency, percent)
+
+	f, _ := balanceSecondCurrency.Float64()
+	balanceSecondCurrency, _ = new(big.Float).SetString(fmt.Sprintf("%0.4f", f))
+
+	logger.Info("start",
+		zap.String("buyprice", buyprice.String()),
+		zap.String("window", window.String()),
+		zap.String("use % of "+pair.From+" balance", balanceSecondCurrency.String()))
+
+	ts := services.NewTradeService(pair, balanceSecondCurrency, memwallet, pricer, detect, trader)
 
 	return func(ctx context.Context) error {
-		t := time.NewTicker(4 * time.Second)
+		t := time.NewTicker(pollPricesInterval)
 		for ctx.Err() == nil {
 			select {
 			case <-t.C:
@@ -117,29 +174,4 @@ func binanceTradeServiceCreator(logger *zap.Logger, binanceClient *binance.Clien
 
 		return ctx.Err()
 	}, nil
-}
-
-func getBuyPriceAndWindow(binanceClient *binance.Client, pair entity.Pair) (*big.Float, *big.Float, error) {
-	klines, err := binanceClient.NewKlinesService().Symbol(pair.Symbol()).
-		Interval("2h").Do(context.Background())
-	if err != nil {
-		return nil, nil, err
-	}
-
-	cumulativeBuyPrice, cumulativeWindow := big.NewFloat(0), big.NewFloat(0)
-	for _, k := range klines {
-		klineOpen, _ := new(big.Float).SetString(k.Open)
-		klineClose, _ := new(big.Float).SetString(k.Close)
-
-		klinesum := new(big.Float).Add(klineOpen, klineClose)
-		buyprice := klinesum.Quo(klinesum, big.NewFloat(2))
-		cumulativeBuyPrice.Add(cumulativeBuyPrice, buyprice)
-
-		klinewindow := new(big.Float).Abs(new(big.Float).Sub(klineOpen, klineClose))
-		cumulativeWindow.Add(cumulativeWindow, klinewindow)
-	}
-	cumulativeBuyPrice.Quo(cumulativeBuyPrice, big.NewFloat(float64(len(klines))))
-	cumulativeWindow.Quo(cumulativeWindow, big.NewFloat(float64(len(klines))))
-
-	return cumulativeBuyPrice, cumulativeWindow, nil
 }
