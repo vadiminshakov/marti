@@ -5,6 +5,7 @@ import (
 	"github.com/adshao/go-binance/v2"
 	"github.com/vadimInshakov/marti/entity"
 	"math/big"
+	"time"
 )
 
 type BinanceWindowFinder struct {
@@ -19,13 +20,17 @@ func NewBinanceWindowFinder(client *binance.Client, pair entity.Pair, klineSize 
 }
 
 func (b *BinanceWindowFinder) GetBuyPriceAndWindow() (*big.Float, *big.Float, error) {
-	klines, err := b.client.NewKlinesService().Symbol(b.pair.Symbol()).
+	startTime := time.Now().AddDate(0, 0, -1).Unix() * 1000
+	endTime := time.Now().Unix() * 1000
+	klines, err := b.client.NewKlinesService().Symbol(b.pair.Symbol()).StartTime(startTime).
+		EndTime(endTime).
 		Interval(b.klineSize).Do(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 
 	cumulativeBuyPrice, cumulativeWindow := big.NewFloat(0), big.NewFloat(0)
+
 	for _, k := range klines {
 		klineOpen, _ := new(big.Float).SetString(k.Open)
 		klineClose, _ := new(big.Float).SetString(k.Close)
