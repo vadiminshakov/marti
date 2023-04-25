@@ -3,6 +3,7 @@ package windowfinder
 import (
 	"context"
 	"github.com/adshao/go-binance/v2"
+	"github.com/pkg/errors"
 	"github.com/vadimInshakov/marti/entity"
 	"math/big"
 	"time"
@@ -20,7 +21,12 @@ func NewBinanceWindowFinder(client *binance.Client, pair entity.Pair, klineSize 
 }
 
 func (b *BinanceWindowFinder) GetBuyPriceAndWindow() (*big.Float, *big.Float, error) {
-	startTime := time.Now().AddDate(0, 0, -1).Unix() * 1000
+	ks, err := time.ParseDuration(b.klineSize)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "*BinanceWindowFinder.GetBuyPriceAndWindow: failed to parse klineSize")
+	}
+
+	startTime := time.Now().Add(-ks*3).Unix() * 1000
 	endTime := time.Now().Unix() * 1000
 	klines, err := b.client.NewKlinesService().Symbol(b.pair.Symbol()).StartTime(startTime).
 		EndTime(endTime).
