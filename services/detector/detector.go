@@ -21,7 +21,7 @@ type Detector struct {
 	lastAction entity.Action
 }
 
-func NewDetector(client *binance.Client, pair entity.Pair, buypoint, window *big.Float) (*Detector, error) {
+func NewDetector(client *binance.Client, usebalance float64, pair entity.Pair, buypoint, window *big.Float) (*Detector, error) {
 	res, err := client.NewGetAccountService().Do(context.Background())
 	if err != nil {
 		return nil, err
@@ -51,6 +51,10 @@ func NewDetector(client *binance.Client, pair entity.Pair, buypoint, window *big
 
 	price, _ := new(big.Float).SetString(p[0].Price)
 
+	// определяем процент доступной для операций второй валюты
+	percent := new(big.Float).Quo(big.NewFloat(usebalance), big.NewFloat(100))
+	toBalance.Mul(toBalance, percent)
+
 	// если больше первой валюты, то продаем, если больше второй, то покупаем
 	fromBalanceInSecondCoinsForm := new(big.Float).Mul(fromBalance, price)
 	if fromBalanceInSecondCoinsForm.Cmp(toBalance) < 0 {
@@ -66,7 +70,6 @@ func NewDetector(client *binance.Client, pair entity.Pair, buypoint, window *big
 
 func (d *Detector) NeedAction(price *big.Float) (entity.Action, error) {
 	nevermindChange := new(big.Float).Quo(d.window, big.NewFloat(2))
-
 	// check need to sell
 	{
 		if d.lastAction == entity.ActionBuy {
@@ -92,4 +95,8 @@ func (d *Detector) NeedAction(price *big.Float) (entity.Action, error) {
 	}
 
 	return entity.ActionNull, nil
+}
+
+func (d *Detector) LastAction() entity.Action {
+	return d.lastAction
 }
