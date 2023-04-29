@@ -10,6 +10,7 @@ import (
 
 type Detector interface {
 	NeedAction(price *big.Float) (entity.Action, error)
+	LastAction() entity.Action
 }
 
 type Pricer interface {
@@ -37,19 +38,18 @@ func NewTradeService(pair entity.Pair, amount *big.Float, wallet wallet.Wallet, 
 func (t *TradeService) Trade() (*entity.TradeEvent, error) {
 	price, err := t.pricer.GetPrice(t.pair)
 	if err != nil {
-		return nil, errors.Wrapf(err, "pricer failed for pair %s", t.pair)
+		return nil, errors.Wrapf(err, "pricer failed for pair %s", t.pair.String())
 	}
 
 	act, err := t.detector.NeedAction(price)
 	if err != nil {
-		return nil, errors.Wrapf(err, "detector failed for pair %s", t.pair)
+		return nil, errors.Wrapf(err, "detector failed for pair %s", t.pair.String())
 	}
 
 	var tradeEvent *entity.TradeEvent
 	switch act {
 	case entity.ActionBuy:
 		tx := t.wallet.BeginTx()
-
 		if err := t.wallet.Sub(tx, t.pair.To, (&big.Float{}).Mul(t.amount, price)); err != nil {
 			if err := tx.Rollback(); err != nil {
 				return nil, errors.Wrap(err, "failed to rollback")
@@ -69,7 +69,7 @@ func (t *TradeService) Trade() (*entity.TradeEvent, error) {
 			if err := tx.Rollback(); err != nil {
 				return nil, errors.Wrap(err, "failed to rollback")
 			}
-			return nil, errors.Wrapf(err, "trader buy failed for pair %s", t.pair)
+			return nil, errors.Wrapf(err, "trader buy failed for pair %s", t.pair.String())
 		}
 		if err := tx.Commit(); err != nil {
 			return nil, errors.Wrap(err, "failed to commit")
