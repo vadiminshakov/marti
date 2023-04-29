@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"github.com/adshao/go-binance/v2"
 	"github.com/martinlindhe/notify"
 	"github.com/pkg/errors"
@@ -14,6 +13,7 @@ import (
 	binancewallet "github.com/vadimInshakov/marti/services/wallet"
 	"github.com/vadimInshakov/marti/services/windowfinder"
 	"go.uber.org/zap"
+	"math"
 	"math/big"
 	"time"
 )
@@ -28,7 +28,7 @@ func binanceTradeServiceCreator(logger *zap.Logger, wf windowfinder.WindowFinder
 		return nil, errors.Wrapf(err, "failed to find window for %s", pair.String())
 	}
 
-	detect, err := detector.NewDetector(binanceClient, pair, buyprice, window)
+	detect, err := detector.NewDetector(binanceClient, usebalance, pair, buyprice, window)
 	if err != nil {
 		panic(err)
 	}
@@ -43,11 +43,14 @@ func binanceTradeServiceCreator(logger *zap.Logger, wf windowfinder.WindowFinder
 		return nil, err
 	}
 
+	var balanceFirstCurrency *big.Float
 	var balanceSecondCurrency *big.Float
 	for _, b := range res.Balances {
 		if b.Asset == pair.To {
 			balanceSecondCurrency, _ = new(big.Float).SetString(b.Free)
-			break
+		}
+		if b.Asset == pair.From {
+			balanceFirstCurrency, _ = new(big.Float).SetString(b.Free)
 		}
 	}
 
@@ -62,14 +65,20 @@ func binanceTradeServiceCreator(logger *zap.Logger, wf windowfinder.WindowFinder
 	balanceSecondCurrency.Mul(balanceSecondCurrency, percent)
 
 	f, _ := balanceSecondCurrency.Float64()
-	balanceSecondCurrency, _ = new(big.Float).SetString(fmt.Sprintf("%0.4f", f))
+	var amount *big.Float
+	amount = new(big.Float).SetFloat64(math.Floor(f*10000) / 10000) // round down to 0,000x
+
+	if detect.LastAction() == entity.ActionBuy {
+		f, _ := balanceFirstCurrency.Float64()
+		amount = new(big.Float).SetFloat64(math.Floor(f*10000) / 10000)
+	}
 
 	logger.Info("start",
 		zap.String("buyprice", buyprice.String()),
 		zap.String("window", window.String()),
-		zap.String("use % of "+pair.From+" balance", balanceSecondCurrency.String()))
+		zap.String("use "+pair.From, amount.String()))
 
-	ts := services.NewTradeService(pair, balanceSecondCurrency, memwallet, pricer, detect, trader)
+	ts := services.NewTradeService(pair, amount, memwallet, pricer, detect, trader)
 
 	return func(ctx context.Context) error {
 		t := time.NewTicker(pollPricesInterval)
