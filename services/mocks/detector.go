@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	big "math/big"
+	"github.com/shopspring/decimal"
 
 	mock "github.com/stretchr/testify/mock"
 	entity "github.com/vadimInshakov/marti/entity"
@@ -15,21 +15,21 @@ type Detector struct {
 }
 
 // NeedAction provides a mock function with given fields: price
-func (_m *Detector) NeedAction(price *big.Float) (entity.Action, error) {
+func (_m *Detector) NeedAction(price decimal.Decimal) (entity.Action, error) {
 	ret := _m.Called(price)
 
 	var r0 entity.Action
 	var r1 error
-	if rf, ok := ret.Get(0).(func(*big.Float) (entity.Action, error)); ok {
+	if rf, ok := ret.Get(0).(func(_ decimal.Decimal) (entity.Action, error)); ok {
 		return rf(price)
 	}
-	if rf, ok := ret.Get(0).(func(*big.Float) entity.Action); ok {
+	if rf, ok := ret.Get(0).(func(decimal.Decimal) entity.Action); ok {
 		r0 = rf(price)
 	} else {
 		r0 = ret.Get(0).(entity.Action)
 	}
 
-	if rf, ok := ret.Get(1).(func(*big.Float) error); ok {
+	if rf, ok := ret.Get(1).(func(decimal.Decimal) error); ok {
 		r1 = rf(price)
 	} else {
 		r1 = ret.Error(1)
