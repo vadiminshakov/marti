@@ -1,11 +1,13 @@
 package wallet
 
-import "math/big"
+import (
+	"github.com/shopspring/decimal"
+)
 
 type Wallet interface {
 	BeginTx() Tx
-	Add(tx Tx, currency string, amount *big.Float) error
-	Sub(tx Tx, currency string, amount *big.Float) error
+	Add(tx Tx, currency string, amount decimal.Decimal) error
+	Sub(tx Tx, currency string, amount decimal.Decimal) error
 
-	Balance(currency string) (*big.Float, error)
+	Balance(currency string) (decimal.Decimal, error)
 }
