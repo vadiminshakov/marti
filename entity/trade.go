@@ -2,13 +2,13 @@ package entity
 
 import (
 	"fmt"
-	"math/big"
+	"github.com/shopspring/decimal"
 )
 
 type TradeEvent struct {
 	Action Action
 	Pair   Pair
-	Amount *big.Float
+	Amount decimal.Decimal
 }
 
 func (t *TradeEvent) String() string {
