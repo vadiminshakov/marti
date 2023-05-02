@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"github.com/adshao/go-binance/v2"
+	"github.com/shopspring/decimal"
 	"github.com/vadimInshakov/marti/entity"
-	"math/big"
 )
 
 type Pricer struct {
@@ -16,15 +16,14 @@ func NewPricer(client *binance.Client) *Pricer {
 	return &Pricer{client: client}
 }
 
-func (p *Pricer) GetPrice(pair entity.Pair) (*big.Float, error) {
+func (p *Pricer) GetPrice(pair entity.Pair) (decimal.Decimal, error) {
 	prices, err := p.client.NewListPricesService().Symbol(pair.Symbol()).Do(context.Background())
 	if err != nil {
-		return nil, err
+		return decimal.Decimal{}, err
 	}
 	if len(prices) == 0 {
-		return nil, fmt.Errorf("binance API returned empty prices for %s", pair.String())
+		return decimal.Decimal{}, fmt.Errorf("binance API returned empty prices for %s", pair.String())
 	}
 
-	f, _ := (&big.Float{}).SetString(prices[0].Price)
-	return f, nil
+	return decimal.NewFromString(prices[0].Price)
 }
