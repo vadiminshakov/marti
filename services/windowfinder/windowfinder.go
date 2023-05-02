@@ -1,7 +1,9 @@
 package windowfinder
 
-import "math/big"
+import (
+	"github.com/shopspring/decimal"
+)
 
 type WindowFinder interface {
-	GetBuyPriceAndWindow() (*big.Float, *big.Float, error)
+	GetBuyPriceAndWindow() (decimal.Decimal, decimal.Decimal, error)
 }
