@@ -5,6 +5,7 @@ import (
 	"github.com/adshao/go-binance/v2"
 	"github.com/martinlindhe/notify"
 	"github.com/pkg/errors"
+	"github.com/shopspring/decimal"
 	"github.com/vadimInshakov/marti/entity"
 	"github.com/vadimInshakov/marti/services"
 	"github.com/vadimInshakov/marti/services/detector"
@@ -13,14 +14,12 @@ import (
 	binancewallet "github.com/vadimInshakov/marti/services/wallet"
 	"github.com/vadimInshakov/marti/services/windowfinder"
 	"go.uber.org/zap"
-	"math"
-	"math/big"
 	"time"
 )
 
-func binanceTradeServiceCreator(logger *zap.Logger, wf windowfinder.WindowFinder, binanceClient *binance.Client, pair entity.Pair, usebalance float64) (func(context.Context) error, error) {
-	balancesStore := make(map[string]*big.Float)
-	memwallet := binancewallet.NewInMemWallet(&binancewallet.InmemTx{Balances: make(map[string]*big.Float)}, balancesStore)
+func binanceTradeServiceCreator(logger *zap.Logger, wf windowfinder.WindowFinder, binanceClient *binance.Client, pair entity.Pair, usebalance decimal.Decimal) (func(context.Context) error, error) {
+	balancesStore := make(map[string]decimal.Decimal)
+	memwallet := binancewallet.NewInMemWallet(&binancewallet.InmemTx{Balances: make(map[string]decimal.Decimal)}, balancesStore)
 	pricer := binancepricer.NewPricer(binanceClient)
 
 	buyprice, window, err := wf.GetBuyPriceAndWindow()
@@ -43,14 +42,14 @@ func binanceTradeServiceCreator(logger *zap.Logger, wf windowfinder.WindowFinder
 		return nil, err
 	}
 
-	var balanceFirstCurrency *big.Float
-	var balanceSecondCurrency *big.Float
+	var balanceFirstCurrency decimal.Decimal
+	var balanceSecondCurrency decimal.Decimal
 	for _, b := range res.Balances {
 		if b.Asset == pair.To {
-			balanceSecondCurrency, _ = new(big.Float).SetString(b.Free)
+			balanceSecondCurrency, _ = decimal.NewFromString(b.Free)
 		}
 		if b.Asset == pair.From {
-			balanceFirstCurrency, _ = new(big.Float).SetString(b.Free)
+			balanceFirstCurrency, _ = decimal.NewFromString(b.Free)
 		}
 	}
 
@@ -59,18 +58,17 @@ func binanceTradeServiceCreator(logger *zap.Logger, wf windowfinder.WindowFinder
 		return nil, err
 	}
 
-	percent := new(big.Float).Quo(big.NewFloat(usebalance), big.NewFloat(100))
+	percent := usebalance.Div(decimal.NewFromInt(100))
 
-	balanceSecondCurrency.Quo(balanceSecondCurrency, price)
-	balanceSecondCurrency.Mul(balanceSecondCurrency, percent)
+	balanceSecondCurrency = balanceSecondCurrency.Div(price)
+	balanceSecondCurrency = balanceSecondCurrency.Mul(percent)
 
-	f, _ := balanceSecondCurrency.Float64()
-	var amount *big.Float
-	amount = new(big.Float).SetFloat64(math.Floor(f*10000) / 10000) // round down to 0,000x
+	balanceSecondCurrency = balanceSecondCurrency.RoundFloor(5) // round down to 0,000x
 
+	amount := balanceSecondCurrency
 	if detect.LastAction() == entity.ActionBuy {
-		f, _ := balanceFirstCurrency.Float64()
-		amount = new(big.Float).SetFloat64(math.Floor(f*10000) / 10000)
+		balanceFirstCurrency = balanceFirstCurrency.RoundFloor(5)
+		amount = balanceFirstCurrency
 	}
 
 	logger.Info("start",
