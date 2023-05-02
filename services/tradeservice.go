@@ -1,37 +1,36 @@
 package services
 
 import (
-	"math/big"
-
 	"github.com/pkg/errors"
+	"github.com/shopspring/decimal"
 	"github.com/vadimInshakov/marti/entity"
 	"github.com/vadimInshakov/marti/services/wallet"
 )
 
 type Detector interface {
-	NeedAction(price *big.Float) (entity.Action, error)
+	NeedAction(price decimal.Decimal) (entity.Action, error)
 	LastAction() entity.Action
 }
 
 type Pricer interface {
-	GetPrice(pair entity.Pair) (*big.Float, error)
+	GetPrice(pair entity.Pair) (decimal.Decimal, error)
 }
 
 type Trader interface {
-	Buy(amount *big.Float) error
-	Sell(amount *big.Float) error
+	Buy(amount decimal.Decimal) error
+	Sell(amount decimal.Decimal) error
 }
 
 type TradeService struct {
 	pair     entity.Pair
-	amount   *big.Float
+	amount   decimal.Decimal
 	wallet   wallet.Wallet
 	pricer   Pricer
 	detector Detector
 	trader   Trader
 }
 
-func NewTradeService(pair entity.Pair, amount *big.Float, wallet wallet.Wallet, pricer Pricer, detector Detector, trader Trader) *TradeService {
+func NewTradeService(pair entity.Pair, amount decimal.Decimal, wallet wallet.Wallet, pricer Pricer, detector Detector, trader Trader) *TradeService {
 	return &TradeService{pair, amount, wallet, pricer, detector, trader}
 }
 
@@ -50,12 +49,12 @@ func (t *TradeService) Trade() (*entity.TradeEvent, error) {
 	switch act {
 	case entity.ActionBuy:
 		tx := t.wallet.BeginTx()
-		if err := t.wallet.Sub(tx, t.pair.To, (&big.Float{}).Mul(t.amount, price)); err != nil {
+		if err := t.wallet.Sub(tx, t.pair.To, t.amount.Mul(price)); err != nil {
 			if err := tx.Rollback(); err != nil {
 				return nil, errors.Wrap(err, "failed to rollback")
 			}
 
-			return nil, errors.Wrapf(err, "wallet failed to sub %s for %s", t.amount.Mul(t.amount, price), t.pair.To)
+			return nil, errors.Wrapf(err, "wallet failed to sub %s for %s", t.amount.Mul(price), t.pair.To)
 		}
 		if err := t.wallet.Add(tx, t.pair.From, t.amount); err != nil {
 			if err := tx.Rollback(); err != nil {
@@ -90,12 +89,12 @@ func (t *TradeService) Trade() (*entity.TradeEvent, error) {
 
 			return nil, errors.Wrapf(err, "wallet failed to sub %s for %s", t.amount, t.pair.From)
 		}
-		if err := t.wallet.Add(tx, t.pair.To, (&big.Float{}).Mul(t.amount, price)); err != nil {
+		if err := t.wallet.Add(tx, t.pair.To, t.amount.Mul(price)); err != nil {
 			if err := tx.Rollback(); err != nil {
 				return nil, errors.Wrap(err, "failed to rollback")
 			}
 
-			return nil, errors.Wrapf(err, "wallet failed to add %s for %s", t.amount.Mul(t.amount, price), t.pair.To)
+			return nil, errors.Wrapf(err, "wallet failed to add %s for %s", t.amount.Mul(price), t.pair.To)
 		}
 
 		if err := t.trader.Sell(t.amount); err != nil {
