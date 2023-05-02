@@ -6,6 +6,7 @@ require (
 	github.com/adshao/go-binance/v2 v2.4.2
 	github.com/martinlindhe/notify v0.0.0-20181008203735-20632c9a275a
 	github.com/pkg/errors v0.9.1
+	github.com/shopspring/decimal v1.3.1
 	github.com/stretchr/testify v1.8.2
 	go.uber.org/zap v1.24.0
 	golang.org/x/sync v0.1.0
