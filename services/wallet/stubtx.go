@@ -1,9 +1,11 @@
 package wallet
 
-import "math/big"
+import (
+	"github.com/shopspring/decimal"
+)
 
 type InmemTx struct {
-	Balances map[string]*big.Float
+	Balances map[string]decimal.Decimal
 }
 
 func (tx *InmemTx) Rollback() error {
