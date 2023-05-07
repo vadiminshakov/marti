@@ -11,15 +11,12 @@ import (
 	"github.com/vadimInshakov/marti/services/detector"
 	binancepricer "github.com/vadimInshakov/marti/services/pricer"
 	binancetrader "github.com/vadimInshakov/marti/services/trader"
-	binancewallet "github.com/vadimInshakov/marti/services/wallet"
 	"github.com/vadimInshakov/marti/services/windowfinder"
 	"go.uber.org/zap"
 	"time"
 )
 
 func binanceTradeServiceCreator(logger *zap.Logger, wf windowfinder.WindowFinder, binanceClient *binance.Client, pair entity.Pair, usebalance decimal.Decimal) (func(context.Context) error, error) {
-	balancesStore := make(map[string]decimal.Decimal)
-	memwallet := binancewallet.NewInMemWallet(&binancewallet.InmemTx{Balances: make(map[string]decimal.Decimal)}, balancesStore)
 	pricer := binancepricer.NewPricer(binanceClient)
 
 	buyprice, window, err := wf.GetBuyPriceAndWindow()
@@ -29,12 +26,12 @@ func binanceTradeServiceCreator(logger *zap.Logger, wf windowfinder.WindowFinder
 
 	detect, err := detector.NewDetector(binanceClient, usebalance, pair, buyprice, window)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	trader, err := binancetrader.NewTrader(binanceClient, pair)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	res, err := binanceClient.NewGetAccountService().Do(context.Background())
@@ -76,7 +73,7 @@ func binanceTradeServiceCreator(logger *zap.Logger, wf windowfinder.WindowFinder
 		zap.String("window", window.String()),
 		zap.String("use "+pair.From, amount.String()))
 
-	ts := services.NewTradeService(pair, amount, memwallet, pricer, detect, trader)
+	ts := services.NewTradeService(pair, amount, pricer, detect, trader)
 
 	return func(ctx context.Context) error {
 		t := time.NewTicker(pollPricesInterval)
