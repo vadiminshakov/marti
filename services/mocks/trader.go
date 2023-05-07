@@ -3,8 +3,7 @@
 package mocks
 
 import (
-	big "math/big"
-
+	decimal "github.com/shopspring/decimal"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -14,11 +13,11 @@ type Trader struct {
 }
 
 // Buy provides a mock function with given fields: amount
-func (_m *Trader) Buy(amount *big.Float) error {
+func (_m *Trader) Buy(amount decimal.Decimal) error {
 	ret := _m.Called(amount)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*big.Float) error); ok {
+	if rf, ok := ret.Get(0).(func(decimal.Decimal) error); ok {
 		r0 = rf(amount)
 	} else {
 		r0 = ret.Error(0)
@@ -28,11 +27,11 @@ func (_m *Trader) Buy(amount *big.Float) error {
 }
 
 // Sell provides a mock function with given fields: amount
-func (_m *Trader) Sell(amount *big.Float) error {
+func (_m *Trader) Sell(amount decimal.Decimal) error {
 	ret := _m.Called(amount)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*big.Float) error); ok {
+	if rf, ok := ret.Get(0).(func(decimal.Decimal) error); ok {
 		r0 = rf(amount)
 	} else {
 		r0 = ret.Error(0)
