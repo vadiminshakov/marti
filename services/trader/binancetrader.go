@@ -2,7 +2,6 @@ package trader
 
 import (
 	"context"
-	"fmt"
 	"github.com/adshao/go-binance/v2"
 	"github.com/shopspring/decimal"
 	"github.com/vadimInshakov/marti/entity"
@@ -18,7 +17,7 @@ func NewTrader(client *binance.Client, pair entity.Pair) (*Trader, error) {
 }
 
 func (t *Trader) Buy(amount decimal.Decimal) error {
-	fmt.Println(amount.String())
+	amount = amount.RoundFloor(4)
 	_, err := t.client.NewCreateOrderService().Symbol(t.pair.Symbol()).
 		Side(binance.SideTypeBuy).Type(binance.OrderTypeMarket).
 		Quantity(amount.String()).
@@ -28,6 +27,7 @@ func (t *Trader) Buy(amount decimal.Decimal) error {
 }
 
 func (t *Trader) Sell(amount decimal.Decimal) error {
+	amount = amount.RoundFloor(4)
 	_, err := t.client.NewCreateOrderService().Symbol(t.pair.Symbol()).
 		Side(binance.SideTypeSell).Type(binance.OrderTypeMarket).
 		Quantity(amount.String()).
