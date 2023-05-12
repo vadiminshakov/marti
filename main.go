@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	recreateInterval   = 6 * time.Hour
+	recreateInterval   = 26 * time.Hour
 	pollPricesInterval = 3 * time.Second
 	restartWaitSec     = 30
 )
@@ -24,7 +24,7 @@ func main() {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
-	pair, klineSize, koeff, usebalance, err := config.Get()
+	pair, klineSize, koeff, usebalance, minwindow, err := config.Get()
 	if err != nil {
 		logger.Fatal("failed to get configuration", zap.Error(err))
 	}
@@ -47,15 +47,18 @@ func main() {
 
 	g.Go(func() error {
 		for {
-			ctx, _ := context.WithTimeout(context.Background(), recreateInterval)
-			go timer(ctx, recreateInterval)
-			wf := windowfinder.NewBinanceWindowFinder(binanceClient, pair, klineSize, koeff)
+			ctx, cancel := context.WithTimeout(context.Background(), recreateInterval)
+			wf := windowfinder.NewBinanceWindowFinder(binanceClient, minwindow, pair, klineSize, koeff)
 			fn, err := binanceTradeServiceCreator(logger, wf, binanceClient, pair, usebalance)
 			if err != nil {
-				return err
+				logger.Error(fmt.Sprintf("failed to create binance trader service, recreate instance after %ds", restartWaitSec*2), zap.Error(err))
+				time.Sleep(restartWaitSec * 2 * time.Second)
+				continue
 			}
 
+			go timer(ctx, recreateInterval)
 			if err := fn(ctx); err != nil {
+				cancel()
 				if errors.Is(err, context.DeadlineExceeded) {
 					logger.Info("recreate instance")
 					continue
