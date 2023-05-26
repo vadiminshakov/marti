@@ -11,15 +11,16 @@ import (
 )
 
 type BinanceWindowFinder struct {
-	client    *binance.Client
-	pair      entity.Pair
-	klineSize string
-	koeff     decimal.Decimal
-	minwindow decimal.Decimal
+	client      *binance.Client
+	pair        entity.Pair
+	klineSize   string
+	koeff       decimal.Decimal
+	minwindow   decimal.Decimal
+	klineInPast uint64
 }
 
-func NewBinanceWindowFinder(client *binance.Client, minwindow decimal.Decimal, pair entity.Pair, klineSize string, koeff decimal.Decimal) *BinanceWindowFinder {
-	return &BinanceWindowFinder{client: client, pair: pair, klineSize: klineSize, koeff: koeff, minwindow: minwindow}
+func NewBinanceWindowFinder(client *binance.Client, minwindow decimal.Decimal, pair entity.Pair, klineSize string, klineInPast uint64, koeff decimal.Decimal) *BinanceWindowFinder {
+	return &BinanceWindowFinder{client: client, pair: pair, klineSize: klineSize, koeff: koeff, minwindow: minwindow, klineInPast: klineInPast}
 }
 
 func (b *BinanceWindowFinder) GetBuyPriceAndWindow() (decimal.Decimal, decimal.Decimal, error) {
@@ -28,7 +29,7 @@ func (b *BinanceWindowFinder) GetBuyPriceAndWindow() (decimal.Decimal, decimal.D
 		return decimal.Decimal{}, decimal.Decimal{}, errors.Wrap(err, "*BinanceWindowFinder.GetBuyPriceAndWindow: failed to parse klineSize")
 	}
 
-	startTime := time.Now().Add(-ks*5).Unix() * 1000
+	startTime := time.Now().Add(-ks*time.Duration(b.klineInPast)).Unix() * 1000
 	endTime := time.Now().Unix() * 1000
 	klines, err := b.client.NewKlinesService().Symbol(b.pair.Symbol()).StartTime(startTime).
 		EndTime(endTime).
