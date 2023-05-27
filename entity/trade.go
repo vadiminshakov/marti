@@ -9,6 +9,7 @@ type TradeEvent struct {
 	Action Action
 	Pair   Pair
 	Amount decimal.Decimal
+	Price  decimal.Decimal
 }
 
 func (t *TradeEvent) String() string {
