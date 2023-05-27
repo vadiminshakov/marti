@@ -5,7 +5,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/vadimInshakov/marti/entity"
-	"github.com/vadimInshakov/marti/services/mocks"
+	detectormock "github.com/vadimInshakov/marti/services/detector/mock"
+	tradermock "github.com/vadimInshakov/marti/services/trader/mock"
 	"testing"
 )
 
@@ -23,11 +24,11 @@ func TestTrade(t *testing.T) {
 
 	pricer := &pricemock{}
 
-	trader := mocks.NewTrader(t)
+	trader := tradermock.NewTrader(t)
 	trader.On("Buy", mock.Anything).Return(nil)
 	trader.On("Sell", mock.Anything).Return(nil)
 
-	detector := mocks.NewDetector(t)
+	detector := detectormock.NewDetector(t)
 	detector.On("NeedAction", decimal.NewFromInt(1)).Return(entity.ActionBuy, nil)
 	detector.On("NeedAction", decimal.NewFromInt(3)).Return(entity.ActionSell, nil)
 	detector.On("NeedAction", decimal.NewFromInt(2)).Return(entity.ActionNull, nil)
