@@ -1,9 +1,9 @@
 package detector
 
 import (
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 	"github.com/vadimInshakov/marti/entity"
-	"math/big"
 	"testing"
 )
 
@@ -12,8 +12,8 @@ func TestNeedAction(t *testing.T) {
 		From: "BTC",
 		To:   "USDT",
 	}
-	buypoint := big.NewFloat(100)
-	window := big.NewFloat(6)
+	buypoint := decimal.NewFromInt(100)
+	window := decimal.NewFromInt(6)
 
 	d := Detector{
 		pair:       pair,
@@ -22,80 +22,80 @@ func TestNeedAction(t *testing.T) {
 		lastAction: entity.ActionBuy,
 	}
 
-	act, err := d.NeedAction(big.NewFloat(100))
+	act, err := d.NeedAction(decimal.NewFromInt(100))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionNull, act)
 
-	act, err = d.NeedAction(big.NewFloat(101))
+	act, err = d.NeedAction(decimal.NewFromInt(101))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionNull, act)
 
-	act, err = d.NeedAction(big.NewFloat(102))
+	act, err = d.NeedAction(decimal.NewFromInt(102))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionNull, act)
 
-	act, err = d.NeedAction(big.NewFloat(103))
+	act, err = d.NeedAction(decimal.NewFromInt(103))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionSell, act)
 
 	// после продажи ждем понижения курса
-	act, err = d.NeedAction(big.NewFloat(104))
+	act, err = d.NeedAction(decimal.NewFromInt(104))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionNull, act)
 
-	act, err = d.NeedAction(big.NewFloat(101))
+	act, err = d.NeedAction(decimal.NewFromInt(101))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionNull, act)
 
-	act, err = d.NeedAction(big.NewFloat(100))
+	act, err = d.NeedAction(decimal.NewFromInt(100))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionNull, act)
 
-	act, err = d.NeedAction(big.NewFloat(98))
+	act, err = d.NeedAction(decimal.NewFromInt(98))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionNull, act)
 
 	// покупаем снова
-	act, err = d.NeedAction(big.NewFloat(97))
+	act, err = d.NeedAction(decimal.NewFromInt(97))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionBuy, act)
 
-	act, err = d.NeedAction(big.NewFloat(102))
+	act, err = d.NeedAction(decimal.NewFromInt(102))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionNull, act)
 
 	// продажа
-	act, err = d.NeedAction(big.NewFloat(103))
+	act, err = d.NeedAction(decimal.NewFromInt(103))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionSell, act)
 
-	act, err = d.NeedAction(big.NewFloat(99))
+	act, err = d.NeedAction(decimal.NewFromInt(99))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionNull, act)
 
-	act, err = d.NeedAction(big.NewFloat(98))
+	act, err = d.NeedAction(decimal.NewFromInt(98))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionNull, act)
 
 	// покупка
-	act, err = d.NeedAction(big.NewFloat(97))
+	act, err = d.NeedAction(decimal.NewFromInt(97))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionBuy, act)
 
 	// больше не покупаем до продажи
-	act, err = d.NeedAction(big.NewFloat(96))
+	act, err = d.NeedAction(decimal.NewFromInt(96))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionNull, act)
 
-	act, err = d.NeedAction(big.NewFloat(95))
+	act, err = d.NeedAction(decimal.NewFromInt(95))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionNull, act)
 
-	act, err = d.NeedAction(big.NewFloat(94))
+	act, err = d.NeedAction(decimal.NewFromInt(94))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionNull, act)
 
-	act, err = d.NeedAction(big.NewFloat(93))
+	act, err = d.NeedAction(decimal.NewFromInt(93))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionNull, act)
 }
