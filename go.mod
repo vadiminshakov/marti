@@ -10,6 +10,7 @@ require (
 	github.com/stretchr/testify v1.8.2
 	go.uber.org/zap v1.24.0
 	golang.org/x/sync v0.1.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -28,5 +29,4 @@ require (
 	go.uber.org/multierr v1.6.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
 	gopkg.in/toast.v1 v1.0.0-20180812000517-0a84660828b2 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
