@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	recreateInterval   = 26 * time.Hour
+	recreateInterval   = 9 * time.Hour
 	pollPricesInterval = 3 * time.Second
 	restartWaitSec     = 30
 )
@@ -24,7 +24,7 @@ func main() {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
-	pair, klineSize, koeff, usebalance, minwindow, err := config.Get()
+	configs, err := config.Get()
 	if err != nil {
 		logger.Fatal("failed to get configuration", zap.Error(err))
 	}
@@ -45,31 +45,37 @@ func main() {
 
 	g := new(errgroup.Group)
 
-	g.Go(func() error {
-		for {
-			ctx, cancel := context.WithTimeout(context.Background(), recreateInterval)
-			wf := windowfinder.NewBinanceWindowFinder(binanceClient, minwindow, pair, klineSize, koeff)
-			fn, err := binanceTradeServiceCreator(logger, wf, binanceClient, pair, usebalance)
-			if err != nil {
-				logger.Error(fmt.Sprintf("failed to create binance trader service, recreate instance after %ds", restartWaitSec*2), zap.Error(err))
-				time.Sleep(restartWaitSec * 2 * time.Second)
-				continue
-			}
+	for _, c := range configs {
+		conf := c // save value for goroutine
+		g.Go(func() error {
+			for {
+				ctx, cancel := context.WithTimeout(context.Background(), recreateInterval)
 
-			go timer(ctx, recreateInterval)
-			if err := fn(ctx); err != nil {
-				cancel()
-				if errors.Is(err, context.DeadlineExceeded) {
-					logger.Info("recreate instance")
+				wf := windowfinder.NewBinanceWindowFinder(binanceClient, conf.Minwindow, conf.Pair, conf.Klinesize, conf.KlineInPast, conf.Koeff)
+				fn, err := binanceTradeServiceCreator(logger, wf, binanceClient, conf.Pair, conf.Usebalance)
+				if err != nil {
+					logger.Error(fmt.Sprintf("failed to create binance trader service for pair %s, recreate instance after %ds", conf.Pair.String(),
+						restartWaitSec*2), zap.Error(err))
+					time.Sleep(restartWaitSec * 2 * time.Second)
 					continue
 				}
-				logger.Error(fmt.Sprintf("error, recreate instance after %ds", restartWaitSec), zap.Error(err))
-				time.Sleep(restartWaitSec * time.Second)
 
-				continue
+				go timer(ctx, recreateInterval)
+				if err := fn(ctx); err != nil {
+					cancel()
+					if errors.Is(err, context.DeadlineExceeded) {
+						logger.Info("recreate instance", zap.String("pair", conf.Pair.String()))
+						continue
+					}
+					logger.Error(fmt.Sprintf("error, recreate instance for pair %s after %ds", conf.Pair.String(), restartWaitSec), zap.Error(err))
+					time.Sleep(restartWaitSec * time.Second)
+
+					continue
+				}
 			}
-		}
-	})
+		})
+		logger.Info("started", zap.String("pair", conf.Pair.String()))
+	}
 
 	if err := g.Wait(); err != nil {
 		logger.Error(err.Error())
