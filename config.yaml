@@ -1,0 +1,20 @@
+- pair: BTC_USDT
+  usebalance: 38
+  minwindow: 65
+  klinesize: 4h
+  klineinpast: 36
+  koeff: 1
+
+- pair: ETH_USDT
+  usebalance: 27
+  minwindow: 7
+  klinesize: 4h
+  klineinpast: 66
+  koeff: 1
+
+- pair: BNB_USDT
+  usebalance: 20
+  minwindow: 1
+  klinesize: 4h
+  klineinpast: 46
+  koeff: 1
