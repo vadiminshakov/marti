@@ -16,6 +16,7 @@ import (
 	"time"
 )
 
+// binanceTradeServiceCreator creates trade service for binance exchange.
 func binanceTradeServiceCreator(logger *zap.Logger, wf windowfinder.WindowFinder, binanceClient *binance.Client, pair entity.Pair, usebalance decimal.Decimal) (func(context.Context) error, error) {
 	pricer := binancepricer.NewPricer(binanceClient)
 
