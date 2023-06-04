@@ -82,6 +82,7 @@ func main() {
 	}
 }
 
+// timer prints remaining time before rebalance.
 func timer(ctx context.Context, recreateInterval time.Duration) {
 	startpoint := time.Now()
 	endpoint := startpoint.Add(recreateInterval)
