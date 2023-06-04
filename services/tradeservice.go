@@ -9,7 +9,9 @@ import (
 // Detector checks need to buy, sell assets or do nothing. This service must be
 // instantiated for every trade pair separately.
 type Detector interface {
+	// NeedAction checks need to buy, sell assets or do nothing.
 	NeedAction(price decimal.Decimal) (entity.Action, error)
+	// LastAction returns last decision made by detector.
 	LastAction() entity.Action
 }
 
@@ -20,7 +22,9 @@ type Pricer interface {
 
 // Trader makes buy and sell actions for trade pair.
 type Trader interface {
+	// Buy buys amount of asset in trade pair.
 	Buy(amount decimal.Decimal) error
+	// Sell sells amount of asset in trade pair.
 	Sell(amount decimal.Decimal) error
 }
 
@@ -33,6 +37,7 @@ type TradeService struct {
 	trader   Trader
 }
 
+// NewTradeService creates new TradeService instance.
 func NewTradeService(pair entity.Pair, amount decimal.Decimal, pricer Pricer, detector Detector, trader Trader) *TradeService {
 	return &TradeService{pair, amount, pricer, detector, trader}
 }
