@@ -64,7 +64,7 @@ func NewDetector(client *binance.Client, usebalance decimal.Decimal, pair entity
 		d.lastAction = entity.ActionBuy
 	}
 
-	log.Println("last action:", d.lastAction.String())
+	log.Printf("last action for pair %s: %s\n", d.pair.String(), d.lastAction.String())
 
 	return d, nil
 }
