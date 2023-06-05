@@ -44,14 +44,12 @@ func main() {
 	//}
 
 	g := new(errgroup.Group)
-
+	ctx, cancel := context.WithTimeout(context.Background(), recreateInterval)
 	for _, c := range configs {
 		conf := c // save value for goroutine
 		g.Go(func() error {
 			for {
-				ctx, cancel := context.WithTimeout(context.Background(), recreateInterval)
-
-				wf := windowfinder.NewBinanceWindowFinder(binanceClient, conf.Minwindow, conf.Pair, conf.Klinesize, conf.KlineInPast, conf.Koeff)
+				wf := windowfinder.NewBinanceWindowFinder(binanceClient, conf.Minwindow, conf.Pair, conf.StatHours)
 				fn, err := binanceTradeServiceCreator(logger, wf, binanceClient, conf.Pair, conf.Usebalance)
 				if err != nil {
 					logger.Error(fmt.Sprintf("failed to create binance trader service for pair %s, recreate instance after %ds", conf.Pair.String(),
@@ -60,7 +58,6 @@ func main() {
 					continue
 				}
 
-				go timer(ctx, recreateInterval)
 				if err := fn(ctx); err != nil {
 					cancel()
 					if errors.Is(err, context.DeadlineExceeded) {
@@ -76,6 +73,7 @@ func main() {
 		})
 		logger.Info("started", zap.String("pair", conf.Pair.String()))
 	}
+	go timer(ctx, recreateInterval)
 
 	if err := g.Wait(); err != nil {
 		logger.Error(err.Error())
@@ -86,7 +84,7 @@ func main() {
 func timer(ctx context.Context, recreateInterval time.Duration) {
 	startpoint := time.Now()
 	endpoint := startpoint.Add(recreateInterval)
-
+	fmt.Println()
 	for {
 		select {
 		case <-ctx.Done():
