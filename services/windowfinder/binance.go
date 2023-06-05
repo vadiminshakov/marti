@@ -4,36 +4,31 @@ import (
 	"context"
 	"fmt"
 	"github.com/adshao/go-binance/v2"
-	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadimInshakov/marti/entity"
 	"time"
 )
 
+const klinesize = "4h"
+
 type BinanceWindowFinder struct {
-	client      *binance.Client
-	pair        entity.Pair
-	klineSize   string
-	koeff       decimal.Decimal
-	minwindow   decimal.Decimal
-	klineInPast uint64
+	client    *binance.Client
+	pair      entity.Pair
+	minwindow decimal.Decimal
+	statHours uint64
 }
 
-func NewBinanceWindowFinder(client *binance.Client, minwindow decimal.Decimal, pair entity.Pair, klineSize string, klineInPast uint64, koeff decimal.Decimal) *BinanceWindowFinder {
-	return &BinanceWindowFinder{client: client, pair: pair, klineSize: klineSize, koeff: koeff, minwindow: minwindow, klineInPast: klineInPast}
+func NewBinanceWindowFinder(client *binance.Client, minwindow decimal.Decimal, pair entity.Pair, statHours uint64) *BinanceWindowFinder {
+	return &BinanceWindowFinder{client: client, pair: pair, statHours: statHours, minwindow: minwindow}
 }
 
 func (b *BinanceWindowFinder) GetBuyPriceAndWindow() (decimal.Decimal, decimal.Decimal, error) {
-	ks, err := time.ParseDuration(b.klineSize)
-	if err != nil {
-		return decimal.Decimal{}, decimal.Decimal{}, errors.Wrap(err, "*BinanceWindowFinder.GetBuyPriceAndWindow: failed to parse klineSize")
-	}
-
-	startTime := time.Now().Add(-ks*time.Duration(b.klineInPast)).Unix() * 1000
+	startTime := time.Now().Add(-time.Duration(b.statHours)*time.Hour).Unix() * 1000
 	endTime := time.Now().Unix() * 1000
+
 	klines, err := b.client.NewKlinesService().Symbol(b.pair.Symbol()).StartTime(startTime).
 		EndTime(endTime).
-		Interval(b.klineSize).Do(context.Background())
+		Interval(klinesize).Do(context.Background())
 	if err != nil {
 		return decimal.Decimal{}, decimal.Decimal{}, err
 	}
@@ -51,10 +46,9 @@ func (b *BinanceWindowFinder) GetBuyPriceAndWindow() (decimal.Decimal, decimal.D
 		klinewindow := klineOpen.Sub(klineClose).Abs()
 		cumulativeWindow = cumulativeWindow.Add(klinewindow)
 	}
+
 	cumulativeBuyPrice = cumulativeBuyPrice.Div(decimal.NewFromInt(int64(len(klines))))
-	cumulativeBuyPrice = cumulativeBuyPrice.Mul(b.koeff)
 	cumulativeWindow = cumulativeWindow.Div(decimal.NewFromInt(int64(len(klines))))
-	cumulativeWindow = cumulativeWindow.Mul(b.koeff)
 
 	if cumulativeWindow.Cmp(b.minwindow) < 0 {
 		return decimal.Decimal{}, decimal.Decimal{}, fmt.Errorf("window less then min (found %s, min %s)", cumulativeWindow.String(), b.minwindow.String())
