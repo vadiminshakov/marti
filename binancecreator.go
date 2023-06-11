@@ -8,6 +8,7 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/vadimInshakov/marti/entity"
 	"github.com/vadimInshakov/marti/services"
+	"github.com/vadimInshakov/marti/services/anomalydetector"
 	"github.com/vadimInshakov/marti/services/detector"
 	binancepricer "github.com/vadimInshakov/marti/services/pricer"
 	binancetrader "github.com/vadimInshakov/marti/services/trader"
@@ -74,7 +75,8 @@ func binanceTradeServiceCreator(logger *zap.Logger, wf windowfinder.WindowFinder
 		zap.String("window", window.String()),
 		zap.String("use "+pair.From, amount.String()))
 
-	ts := services.NewTradeService(pair, amount, pricer, detect, trader)
+	anomdetector := anomalydetector.NewAnomalyDetector(pair, 30, decimal.NewFromInt(3))
+	ts := services.NewTradeService(pair, amount, pricer, detect, trader, anomdetector)
 
 	return func(ctx context.Context) error {
 		t := time.NewTicker(pollPricesInterval)
