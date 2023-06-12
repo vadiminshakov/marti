@@ -5,6 +5,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/vadimInshakov/marti/entity"
+	anomalymock "github.com/vadimInshakov/marti/services/anomalydetector/mock"
 	detectormock "github.com/vadimInshakov/marti/services/detector/mock"
 	tradermock "github.com/vadimInshakov/marti/services/trader/mock"
 	"testing"
@@ -35,8 +36,11 @@ func TestTrade(t *testing.T) {
 	detector.On("NeedAction", decimal.NewFromInt(4)).Return(entity.ActionNull, nil)
 	detector.On("NeedAction", decimal.NewFromInt(5)).Return(entity.ActionNull, nil)
 
+	anomalyDetector := anomalymock.NewAnomalyDetector(t)
+	anomalyDetector.On("IsAnomaly", mock.Anything).Return(false, nil)
+
 	amount := decimal.NewFromInt(1)
-	ts := NewTradeService(pair, amount, pricer, detector, trader)
+	ts := NewTradeService(pair, amount, pricer, detector, trader, anomalyDetector)
 	event, err := ts.Trade()
 	assert.NoError(t, err)
 	assert.Equal(t, entity.ActionBuy, event.Action)
