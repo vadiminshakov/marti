@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadimInshakov/marti/entity"
@@ -28,18 +29,25 @@ type Trader interface {
 	Sell(amount decimal.Decimal) error
 }
 
+type AnomalyDetector interface {
+	// IsAnomaly checks whether price is anomaly or not
+	IsAnomaly(price decimal.Decimal) bool
+}
+
 // TradeService makes trades for specific trade pair.
 type TradeService struct {
-	pair     entity.Pair
-	amount   decimal.Decimal
-	pricer   Pricer
-	detector Detector
-	trader   Trader
+	pair            entity.Pair
+	amount          decimal.Decimal
+	pricer          Pricer
+	detector        Detector
+	trader          Trader
+	anomalyDetector AnomalyDetector
 }
 
 // NewTradeService creates new TradeService instance.
-func NewTradeService(pair entity.Pair, amount decimal.Decimal, pricer Pricer, detector Detector, trader Trader) *TradeService {
-	return &TradeService{pair, amount, pricer, detector, trader}
+func NewTradeService(pair entity.Pair, amount decimal.Decimal, pricer Pricer, detector Detector,
+	trader Trader, anomalyDetector AnomalyDetector) *TradeService {
+	return &TradeService{pair, amount, pricer, detector, trader, anomalyDetector}
 }
 
 // Trade checks current price of asset and decides whether to buy, sell or do anything.
@@ -52,6 +60,11 @@ func (t *TradeService) Trade() (*entity.TradeEvent, error) {
 	act, err := t.detector.NeedAction(price)
 	if err != nil {
 		return nil, errors.Wrapf(err, "detector failed for pair %s", t.pair.String())
+	}
+
+	if t.anomalyDetector.IsAnomaly(price) {
+		fmt.Println("anomaly detected!")
+		return nil, nil
 	}
 
 	var tradeEvent *entity.TradeEvent
