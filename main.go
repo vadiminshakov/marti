@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/vadimInshakov/marti/config"
+	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
@@ -44,11 +45,15 @@ func main() {
 	//}
 
 	g := new(errgroup.Group)
-	ctx, cancel := context.WithTimeout(context.Background(), recreateInterval)
+	var timerStarted atomic.Bool
+	timerStarted.Store(false)
 	for _, c := range configs {
 		conf := c // save value for goroutine
 		g.Go(func() error {
 			for {
+				ctx, cancel := context.WithTimeout(context.Background(), recreateInterval)
+				go timer(ctx, recreateInterval, &timerStarted)
+
 				wf := windowfinder.NewBinanceWindowFinder(binanceClient, conf.Minwindow, conf.Pair, conf.StatHours)
 				fn, err := binanceTradeServiceCreator(logger, wf, binanceClient, conf.Pair, conf.Usebalance)
 				if err != nil {
@@ -73,7 +78,6 @@ func main() {
 		})
 		logger.Info("started", zap.String("pair", conf.Pair.String()))
 	}
-	go timer(ctx, recreateInterval)
 
 	if err := g.Wait(); err != nil {
 		logger.Error(err.Error())
@@ -81,13 +85,17 @@ func main() {
 }
 
 // timer prints remaining time before rebalance.
-func timer(ctx context.Context, recreateInterval time.Duration) {
+func timer(ctx context.Context, recreateInterval time.Duration, timerStarted *atomic.Bool) {
+	if swapped := timerStarted.CompareAndSwap(false, true); !swapped {
+		return
+	}
 	startpoint := time.Now()
 	endpoint := startpoint.Add(recreateInterval)
 	fmt.Println()
 	for {
 		select {
 		case <-ctx.Done():
+			timerStarted.CompareAndSwap(true, false)
 			return
 		default:
 			remain := endpoint.Sub(time.Now())
