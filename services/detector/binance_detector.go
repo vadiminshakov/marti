@@ -70,32 +70,15 @@ func NewDetector(client *binance.Client, usebalance decimal.Decimal, pair entity
 }
 
 func (d *Detector) NeedAction(price decimal.Decimal) (entity.Action, error) {
-	nevermindChange := d.window.Div(decimal.NewFromInt(2))
-	// check need to sell
-	{
-		if d.lastAction == entity.ActionBuy {
-			sellPoint := d.buypoint.Add(nevermindChange)
-			comparison := price.Cmp(sellPoint)
-			if comparison >= 0 {
-				d.lastAction = entity.ActionSell
-				return entity.ActionSell, nil
-			}
-		}
+	lastact, err := Detect(d.lastAction, price, d.buypoint, d.window)
+	if err != nil {
+		return entity.ActionNull, err
+	}
+	if d.lastAction != entity.ActionNull {
+		d.lastAction = lastact
 	}
 
-	// check need to buy
-	{
-		if d.lastAction == entity.ActionSell {
-			buyPoint := d.buypoint.Sub(nevermindChange)
-			comparison := price.Cmp(buyPoint)
-			if comparison <= 0 {
-				d.lastAction = entity.ActionBuy
-				return entity.ActionBuy, nil
-			}
-		}
-	}
-
-	return entity.ActionNull, nil
+	return lastact, nil
 }
 
 func (d *Detector) LastAction() entity.Action {
