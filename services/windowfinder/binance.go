@@ -2,8 +2,8 @@ package windowfinder
 
 import (
 	"context"
-	"fmt"
 	"github.com/adshao/go-binance/v2"
+	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadimInshakov/marti/entity"
 	"time"
@@ -33,25 +33,23 @@ func (b *BinanceWindowFinder) GetBuyPriceAndWindow() (decimal.Decimal, decimal.D
 		return decimal.Decimal{}, decimal.Decimal{}, err
 	}
 
-	cumulativeBuyPrice, cumulativeWindow := decimal.NewFromInt(0), decimal.NewFromInt(0)
+	klinesconv, err := convertBinanceKlines(klines)
+	if err != nil {
+		return decimal.Decimal{}, decimal.Decimal{}, errors.Wrap(err, "error converting Binance klines")
+	}
+	buyprice, window, err := CalcBuyPriceAndWindow(klinesconv, b.minwindow)
+	return buyprice, window, err
+}
 
+func convertBinanceKlines(klines []*binance.Kline) ([]*entity.Kline, error) {
+	var res []*entity.Kline
 	for _, k := range klines {
-		klineOpen, _ := decimal.NewFromString(k.Open)
-		klineClose, _ := decimal.NewFromString(k.Close)
-
-		klinesum := klineOpen.Add(klineClose)
-		buyprice := klinesum.Div(decimal.NewFromInt(2))
-		cumulativeBuyPrice = cumulativeBuyPrice.Add(buyprice)
-
-		klinewindow := klineOpen.Sub(klineClose).Abs()
-		cumulativeWindow = cumulativeWindow.Add(klinewindow)
+		openPrice, _ := decimal.NewFromString(k.Open)
+		closePrice, _ := decimal.NewFromString(k.Close)
+		res = append(res, &entity.Kline{
+			Open:  openPrice,
+			Close: closePrice,
+		})
 	}
-
-	cumulativeBuyPrice = cumulativeBuyPrice.Div(decimal.NewFromInt(int64(len(klines))))
-	cumulativeWindow = cumulativeWindow.Div(decimal.NewFromInt(int64(len(klines))))
-
-	if cumulativeWindow.Cmp(b.minwindow) < 0 {
-		return decimal.Decimal{}, decimal.Decimal{}, fmt.Errorf("window less then min (found %s, min %s)", cumulativeWindow.String(), b.minwindow.String())
-	}
-	return cumulativeBuyPrice, cumulativeWindow, nil
+	return res, nil
 }
