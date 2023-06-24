@@ -50,6 +50,7 @@ type traderCsv struct {
 	balance1 decimal.Decimal
 	balance2 decimal.Decimal
 	pricesCh chan decimal.Decimal
+	fee      decimal.Decimal
 }
 
 // Buy buys amount of asset in trade pair.
@@ -57,6 +58,7 @@ func (t *traderCsv) Buy(amount decimal.Decimal) error {
 	t.balance1 = t.balance1.Add(amount)
 	price := <-t.pricesCh
 	t.balance2 = t.balance2.Sub(price.Mul(amount))
+	t.fee = t.fee.Add(decimal.NewFromInt(33))
 
 	return nil
 }
@@ -66,6 +68,8 @@ func (t *traderCsv) Sell(amount decimal.Decimal) error {
 	t.balance1 = t.balance1.Sub(amount)
 	price := <-t.pricesCh
 	t.balance2 = t.balance2.Add(price.Mul(amount))
+	t.fee = t.fee.Add(decimal.NewFromInt(4))
+
 	return nil
 }
 
@@ -75,7 +79,17 @@ func Test1Year(t *testing.T) {
 		To:   "USDT",
 	}
 
+	collect, err := dataColletorFactory("data/data.csv", pair)
+	require.NoError(t, err)
+
+	klinesize := "4h"
+	intervalHours := 100
+	for collectFromHours := 8766; collectFromHours > 0; collectFromHours -= intervalHours {
+		require.NoError(t, collect(collectFromHours, intervalHours, klinesize))
+	}
+
 	prices, klines := makePriceChFromCsv("data/data.csv")
+
 	pricer := &pricerCsv{
 		pricesCh: prices,
 	}
@@ -121,7 +135,7 @@ func Test1Year(t *testing.T) {
 		if counter == klinesframe {
 			counter = 0
 			// recreate trade service for each day
-			buyprice, window, _ = windowfinder.CalcBuyPriceAndWindow(kl, decimal.NewFromInt(100))
+			buyprice, window, _ = windowfinder.CalcBuyPriceAndWindow(kl, decimal.NewFromInt(120))
 
 			ts = services.NewTradeService(*pair, balanceBTC, pricer, &detectorCsv{
 				lastaction: lastaction,
@@ -147,6 +161,8 @@ func Test1Year(t *testing.T) {
 
 	log.Printf("Total balance of %s is %s (was %s)", pair.From, trader.balance1.String(), balanceBTC.String())
 	log.Printf("Total balance of %s is %s (was %s)", pair.To, trader.balance2.String(), balanceUSDT.String())
+	log.Printf("Total fee is %s", trader.fee.String())
+	log.Printf("Total profit is %s", trader.balance2.Sub(balanceUSDT).Sub(trader.fee).String())
 }
 
 func makePriceChFromCsv(filePath string) (chan decimal.Decimal, chan entity.Kline) {
