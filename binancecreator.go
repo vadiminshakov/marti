@@ -76,7 +76,8 @@ func binanceTradeServiceCreator(logger *zap.Logger, wf windowfinder.WindowFinder
 		zap.String("use "+pair.From, amount.String()))
 
 	anomdetector := anomalydetector.NewAnomalyDetector(pair, 30, decimal.NewFromInt(3))
-	ts := services.NewTradeService(pair, amount, pricer, detect, trader, anomdetector)
+
+	ts := services.NewTradeService(logger, pair, amount, pricer, detect, trader, anomdetector)
 
 	return func(ctx context.Context) error {
 		t := time.NewTicker(pollPricesInterval)
