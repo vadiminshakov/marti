@@ -7,119 +7,72 @@ import (
 	"github.com/vadimInshakov/marti/entity"
 	"github.com/vadimInshakov/marti/services"
 	"github.com/vadimInshakov/marti/services/anomalydetector"
-	"github.com/vadimInshakov/marti/services/detector"
 	"github.com/vadimInshakov/marti/services/windowfinder"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"log"
 	"os"
 	"testing"
 	"time"
 )
 
-type pricerCsv struct {
-	pricesCh chan decimal.Decimal
+const (
+	file                     = "data.csv" // file with data for test
+	btcBalanceInWallet       = "0.5"      // BTC balance in wallet
+	usdtBalanceInWallet      = "0"
+	klinesize                = "4h" // klinesize for test
+	klinesframe         uint = 4    // klines*klinesframe = hours before stats recount
+	minWindowUSDT            = 83
+)
+
+var dataHoursAgo int
+
+func TestProfit(t *testing.T) {
+	t.Run("1 year", func(t *testing.T) {
+		dataHoursAgo = 8776 // 1 year
+		require.NoError(t, botrun(zap.InfoLevel))
+	})
+
+	t.Run("2 years", func(t *testing.T) {
+		dataHoursAgo = 17532 // 2 years
+		require.NoError(t, botrun(zap.InfoLevel))
+	})
 }
 
-func (p *pricerCsv) GetPrice(pair entity.Pair) (decimal.Decimal, error) {
-	return <-p.pricesCh, nil
-}
-
-type detectorCsv struct {
-	lastaction entity.Action
-	buypoint   decimal.Decimal
-	window     decimal.Decimal
-}
-
-func (d *detectorCsv) NeedAction(price decimal.Decimal) (entity.Action, error) {
-	lastact, err := detector.Detect(d.lastaction, d.buypoint, d.window, price)
+func botrun(loglvl zapcore.Level) error {
+	l, err := zap.NewProduction()
 	if err != nil {
-		return entity.ActionNull, err
+		return err
 	}
-	if d.lastaction != entity.ActionNull {
-		d.lastaction = lastact
-	}
+	log := l.Sugar()
+	lvl := zap.NewAtomicLevel()
+	lvl.SetLevel(loglvl)
 
-	return lastact, nil
-}
-
-func (d *detectorCsv) LastAction() entity.Action {
-	return d.lastaction
-}
-
-type traderCsv struct {
-	pair     *entity.Pair
-	balance1 decimal.Decimal
-	balance2 decimal.Decimal
-	pricesCh chan decimal.Decimal
-	fee      decimal.Decimal
-}
-
-// Buy buys amount of asset in trade pair.
-func (t *traderCsv) Buy(amount decimal.Decimal) error {
-	t.balance1 = t.balance1.Add(amount)
-	price := <-t.pricesCh
-	t.balance2 = t.balance2.Sub(price.Mul(amount))
-	t.fee = t.fee.Add(decimal.NewFromInt(33))
-
-	return nil
-}
-
-// Sell sells amount of asset in trade pair.
-func (t *traderCsv) Sell(amount decimal.Decimal) error {
-	t.balance1 = t.balance1.Sub(amount)
-	price := <-t.pricesCh
-	t.balance2 = t.balance2.Add(price.Mul(amount))
-	t.fee = t.fee.Add(decimal.NewFromInt(4))
-
-	return nil
-}
-
-func Test1Year(t *testing.T) {
 	pair := &entity.Pair{
 		From: "BTC",
 		To:   "USDT",
 	}
 
-	collect, err := dataColletorFactory("data/data.csv", pair)
-	require.NoError(t, err)
-
-	klinesize := "4h"
-	intervalHours := 100
-	for collectFromHours := 8766; collectFromHours > 0; collectFromHours -= intervalHours {
-		require.NoError(t, collect(collectFromHours, intervalHours, klinesize))
+	prices, klines, rmFn, err := prepareData(file, pair)
+	if err != nil {
+		return err
 	}
 
-	prices, klines := makePriceChFromCsv("data/data.csv")
-
-	pricer := &pricerCsv{
-		pricesCh: prices,
-	}
-
-	balanceBTC, _ := decimal.NewFromString("0.5")
-	balanceUSDT := decimal.NewFromInt(0)
-	trader := &traderCsv{
-		pair:     pair,
-		balance1: balanceBTC,
-		balance2: balanceUSDT,
-		pricesCh: prices,
-	}
-
-	anomdetector := anomalydetector.NewAnomalyDetector(*pair, 30, decimal.NewFromInt(10))
+	defer rmFn()
 
 	var lastaction entity.Action = entity.ActionBuy
+	balanceBTC, _ := decimal.NewFromString(btcBalanceInWallet)
+	balanceUSDT, _ := decimal.NewFromString(usdtBalanceInWallet)
 
+	trader, tsFactory := createTradeServiceFactory(l, pair, prices, balanceBTC, balanceUSDT)
 	kline := <-klines
-	buyprice, window, _ := windowfinder.CalcBuyPriceAndWindow([]*entity.Kline{&kline}, decimal.NewFromInt(100))
-
-	ts := services.NewTradeService(*pair, balanceBTC, pricer, &detectorCsv{
-		lastaction: lastaction,
-		buypoint:   buyprice,
-		window:     window,
-	},
-		trader, anomdetector)
+	ts, _ := tsFactory([]*entity.Kline{&kline}, lastaction)
+	if err != nil {
+		return err
+	}
 
 	var counter uint
 	var kl []*entity.Kline
-	var klinesframe uint = 4
 	for {
 		counter++
 		if len(prices) == 0 || len(klines) == 0 {
@@ -132,21 +85,20 @@ func Test1Year(t *testing.T) {
 		}
 		kl = append(kl, &kline)
 
-		if counter == klinesframe {
+		if counter == klinesframe || ts == nil {
 			counter = 0
-			// recreate trade service for each day
-			buyprice, window, _ = windowfinder.CalcBuyPriceAndWindow(kl, decimal.NewFromInt(120))
-
-			ts = services.NewTradeService(*pair, balanceBTC, pricer, &detectorCsv{
-				lastaction: lastaction,
-				buypoint:   buyprice,
-				window:     window,
-			},
-				trader, anomdetector)
+			// recreate trade service for 'klinesframe' day
+			ts, err = tsFactory(kl, lastaction)
+			if err != nil {
+				log.Debug("skip kline because insufficient volatility")
+				continue
+			}
 		}
 
 		te, err := ts.Trade()
-		require.NoError(t, err)
+		if err != nil {
+			return err
+		}
 
 		if te == nil {
 			<-prices // skip price that not readed by trader
@@ -156,13 +108,68 @@ func Test1Year(t *testing.T) {
 			lastaction = te.Action
 		}
 
-		log.Println(te.String())
+		log.Debug(te.String())
 	}
 
-	log.Printf("Total balance of %s is %s (was %s)", pair.From, trader.balance1.String(), balanceBTC.String())
-	log.Printf("Total balance of %s is %s (was %s)", pair.To, trader.balance2.String(), balanceUSDT.String())
-	log.Printf("Total fee is %s", trader.fee.String())
-	log.Printf("Total profit is %s", trader.balance2.Sub(balanceUSDT).Sub(trader.fee).String())
+	log.Infof("Deals: %d", trader.dealsCount)
+	log.Infof("Total balance of %s is %s (was %s)", pair.From, trader.balance1.String(), balanceBTC.String())
+	log.Infof("Total balance of %s is %s (was %s)", pair.To, trader.balance2.String(), trader.firstbalance2)
+	log.Infof("Total fee is %s", trader.fee.String())
+	log.Infof("Total profit is %s", trader.balance2.Sub(trader.firstbalance2).Sub(trader.fee).String())
+
+	return nil
+}
+
+func prepareData(file string, pair *entity.Pair) (prices chan decimal.Decimal, klines chan entity.Kline, removeFile func(), _ error) {
+	collect, err := dataColletorFactory(file, pair)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	removeFile = func() {
+		os.Remove(file)
+	}
+
+	intervalHours := 100
+	for collectFromHours := dataHoursAgo; collectFromHours > 0; collectFromHours -= intervalHours {
+		if err = collect(collectFromHours, intervalHours, klinesize); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+
+	prices, klines = makePriceChFromCsv(file)
+
+	return
+}
+
+func createTradeServiceFactory(logger *zap.Logger, pair *entity.Pair, prices chan decimal.Decimal,
+	balanceBTC, balanceUSDT decimal.Decimal) (
+	*traderCsv, func(klines []*entity.Kline, lastaction entity.Action) (*services.TradeService, error)) {
+	pricer := &pricerCsv{
+		pricesCh: prices,
+	}
+
+	trader := &traderCsv{
+		pair:     pair,
+		balance1: balanceBTC,
+		balance2: balanceUSDT,
+		pricesCh: prices,
+	}
+
+	anomdetector := anomalydetector.NewAnomalyDetector(*pair, 30, decimal.NewFromInt(10))
+
+	return trader, func(klines []*entity.Kline, lastaction entity.Action) (*services.TradeService, error) {
+		buyprice, window, err := windowfinder.CalcBuyPriceAndWindow(klines, decimal.NewFromInt(minWindowUSDT))
+		if err != nil {
+			return nil, err
+		}
+		return services.NewTradeService(logger, *pair, balanceBTC, pricer, &detectorCsv{
+			lastaction: lastaction,
+			buypoint:   buyprice,
+			window:     window,
+		},
+			trader, anomdetector), nil
+	}
 }
 
 func makePriceChFromCsv(filePath string) (chan decimal.Decimal, chan entity.Kline) {
@@ -177,7 +184,7 @@ func makePriceChFromCsv(filePath string) (chan decimal.Decimal, chan entity.Klin
 			prices <- price // for trader
 		}
 	}()
-	time.Sleep(2000 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 
 	return prices, klines
 }
