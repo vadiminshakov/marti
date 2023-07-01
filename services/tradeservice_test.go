@@ -8,6 +8,7 @@ import (
 	anomalymock "github.com/vadimInshakov/marti/services/anomalydetector/mock"
 	detectormock "github.com/vadimInshakov/marti/services/detector/mock"
 	tradermock "github.com/vadimInshakov/marti/services/trader/mock"
+	"go.uber.org/zap"
 	"testing"
 )
 
@@ -40,7 +41,10 @@ func TestTrade(t *testing.T) {
 	anomalyDetector.On("IsAnomaly", mock.Anything).Return(false, nil)
 
 	amount := decimal.NewFromInt(1)
-	ts := NewTradeService(pair, amount, pricer, detector, trader, anomalyDetector)
+
+	l, err := zap.NewProduction()
+	assert.NoError(t, err)
+	ts := NewTradeService(l, pair, amount, pricer, detector, trader, anomalyDetector)
 	event, err := ts.Trade()
 	assert.NoError(t, err)
 	assert.Equal(t, entity.ActionBuy, event.Action)
