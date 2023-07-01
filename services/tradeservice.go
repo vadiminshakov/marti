@@ -1,10 +1,10 @@
 package services
 
 import (
-	"fmt"
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadimInshakov/marti/entity"
+	"go.uber.org/zap"
 )
 
 // Detector checks need to buy, sell assets or do nothing. This service must be
@@ -42,12 +42,13 @@ type TradeService struct {
 	detector        Detector
 	trader          Trader
 	anomalyDetector AnomalyDetector
+	l               *zap.Logger
 }
 
 // NewTradeService creates new TradeService instance.
-func NewTradeService(pair entity.Pair, amount decimal.Decimal, pricer Pricer, detector Detector,
+func NewTradeService(l *zap.Logger, pair entity.Pair, amount decimal.Decimal, pricer Pricer, detector Detector,
 	trader Trader, anomalyDetector AnomalyDetector) *TradeService {
-	return &TradeService{pair, amount, pricer, detector, trader, anomalyDetector}
+	return &TradeService{pair, amount, pricer, detector, trader, anomalyDetector, l}
 }
 
 // Trade checks current price of asset and decides whether to buy, sell or do anything.
@@ -63,7 +64,7 @@ func (t *TradeService) Trade() (*entity.TradeEvent, error) {
 	}
 
 	if t.anomalyDetector.IsAnomaly(price) {
-		fmt.Println("anomaly detected!")
+		t.l.Debug("anomaly detected!")
 		return nil, nil
 	}
 
