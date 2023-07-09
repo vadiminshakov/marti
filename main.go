@@ -89,7 +89,6 @@ func timer(ctx context.Context, recreateInterval time.Duration, timerStarted *at
 	}
 	startpoint := time.Now()
 	endpoint := startpoint.Add(recreateInterval)
-	fmt.Println()
 	for {
 		select {
 		case <-ctx.Done():

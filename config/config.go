@@ -120,7 +120,6 @@ func getYaml(path string) ([]Config, error) {
 			return nil, fmt.Errorf("incorrect 'minwindow' param in yaml config (correct format is 123), error: %s", err)
 		}
 
-		fmt.Println(c.RebalanceInterval, c.PollPriceInterval)
 		configs = append(configs, Config{
 			Pair:              pair,
 			StatHours:         c.StatHours,
