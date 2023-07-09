@@ -70,7 +70,7 @@ func NewDetector(client *binance.Client, usebalance decimal.Decimal, pair entity
 }
 
 func (d *Detector) NeedAction(price decimal.Decimal) (entity.Action, error) {
-	lastact, err := Detect(d.lastAction, price, d.buypoint, d.window)
+	lastact, err := Detect(d.lastAction, d.buypoint, d.window, price)
 	if err != nil {
 		return entity.ActionNull, err
 	}
