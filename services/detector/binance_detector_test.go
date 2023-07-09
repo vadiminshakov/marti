@@ -38,7 +38,7 @@ func TestNeedAction(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionSell, act)
 
-	// после продажи ждем понижения курса
+	// after sell wait price down
 	act, err = d.NeedAction(decimal.NewFromInt(104))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionNull, act)
@@ -55,7 +55,7 @@ func TestNeedAction(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionNull, act)
 
-	// покупаем снова
+	// buy again
 	act, err = d.NeedAction(decimal.NewFromInt(97))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionBuy, act)
@@ -64,7 +64,7 @@ func TestNeedAction(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionNull, act)
 
-	// продажа
+	// sell
 	act, err = d.NeedAction(decimal.NewFromInt(103))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionSell, act)
@@ -77,12 +77,12 @@ func TestNeedAction(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionNull, act)
 
-	// покупка
+	// buy
 	act, err = d.NeedAction(decimal.NewFromInt(97))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionBuy, act)
 
-	// больше не покупаем до продажи
+	// do not buy until sell
 	act, err = d.NeedAction(decimal.NewFromInt(96))
 	require.NoError(t, err)
 	require.Equal(t, entity.ActionNull, act)
