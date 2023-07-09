@@ -5,7 +5,7 @@ import (
 	"github.com/vadimInshakov/marti/entity"
 )
 
-func Detect(lastaction entity.Action, buypoint, window decimal.Decimal, price decimal.Decimal) (entity.Action, error) {
+func Detect(lastaction entity.Action, buypoint, window, price decimal.Decimal) (entity.Action, error) {
 	nevermindChange := window.Div(decimal.NewFromInt(2))
 	// check need to sell
 	{
