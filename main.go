@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"github.com/vadimInshakov/marti/config"
+	"log"
+	"os"
 	"sync/atomic"
 	"time"
 
@@ -16,12 +18,20 @@ import (
 )
 
 const (
-	recreateInterval   = 9 * time.Hour
-	pollPricesInterval = 3 * time.Second
-	restartWaitSec     = 30
+	restartWaitSec = 30
 )
 
 func main() {
+	apikey := os.Getenv("APIKEY")
+	if len(apikey) == 0 {
+		log.Fatal("APIKEY env is not set")
+	}
+
+	secretKey := os.Getenv("SECRETKEY")
+	if len(apikey) == 0 {
+		log.Fatal("SECRETKEY env is not set")
+	}
+
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
@@ -30,19 +40,7 @@ func main() {
 		logger.Fatal("failed to get configuration", zap.Error(err))
 	}
 
-	binanceClient := binance.NewClient(apikey, secretkey)
-
-	// TODO make anomaly detector
-
-	//apikey := os.Getenv("APIKEY")
-	//if len(apikey) == 0 {
-	//	logger.Fatal("APIKEY env is not set")
-	//}
-	//require.NotEmpty(t, apikey, "APIKEY env is not set")
-	//secretkey := os.Getenv("SECRETKEY")
-	//if len(apikey) == 0 {
-	//	logger.Fatal("SECRETKEY env is not set")
-	//}
+	binanceClient := binance.NewClient(apikey, secretKey)
 
 	g := new(errgroup.Group)
 	var timerStarted atomic.Bool
@@ -51,11 +49,11 @@ func main() {
 		conf := c // save value for goroutine
 		g.Go(func() error {
 			for {
-				ctx, cancel := context.WithTimeout(context.Background(), recreateInterval)
-				go timer(ctx, recreateInterval, &timerStarted)
+				ctx, cancel := context.WithTimeout(context.Background(), conf.RebalanceInterval)
+				go timer(ctx, conf.RebalanceInterval, &timerStarted)
 
 				wf := windowfinder.NewBinanceWindowFinder(binanceClient, conf.Minwindow, conf.Pair, conf.StatHours)
-				fn, err := binanceTradeServiceCreator(logger, wf, binanceClient, conf.Pair, conf.Usebalance)
+				fn, err := binanceTradeServiceCreator(logger, wf, binanceClient, conf.Pair, conf.Usebalance, conf.PollPricesInterval)
 				if err != nil {
 					logger.Error(fmt.Sprintf("failed to create binance trader service for pair %s, recreate instance after %ds", conf.Pair.String(),
 						restartWaitSec*2), zap.Error(err))
