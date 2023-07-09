@@ -74,7 +74,7 @@ func (d *Detector) NeedAction(price decimal.Decimal) (entity.Action, error) {
 	if err != nil {
 		return entity.ActionNull, err
 	}
-	if d.lastAction != entity.ActionNull {
+	if lastact != entity.ActionNull {
 		d.lastAction = lastact
 	}
 
