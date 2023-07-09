@@ -28,6 +28,9 @@ const (
 var dataHoursAgo int
 
 func TestProfit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping historical test in short mode.")
+	}
 	t.Run("1 year", func(t *testing.T) {
 		dataHoursAgo = 8776 // 1 year
 		require.NoError(t, botrun(zap.InfoLevel))
