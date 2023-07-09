@@ -1,9 +1,20 @@
+# The trading pair. The pair should be in the format COIN1_COIN2.
 - pair: BTC_USDT
-  usebalance: 38
-  minwindow: 65
+
+  # The minimum window size for statistical analysis.
+  minwindow: 100
+
+  # The number of hours in the past to be used for statistical calculations.
   stathours: 120
-  rebalanceinterval: "30h"
-  pollPriceinterval: "5m"
+
+  # The percentage of available balance to be used for trading. The value should be in the range of 0 to 100.
+  usebalance: 38
+
+  # The time interval between rebalancing (market state reassessment).
+  rebalanceinterval: 16h
+
+  # The time interval between polling market prices to make trading decision (buy/sell/do nothing).
+  pollpriceinterval: 5m
 
 - pair: ETH_USDT
   usebalance: 27
