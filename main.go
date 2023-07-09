@@ -53,7 +53,7 @@ func main() {
 				go timer(ctx, conf.RebalanceInterval, &timerStarted)
 
 				wf := windowfinder.NewBinanceWindowFinder(binanceClient, conf.Minwindow, conf.Pair, conf.StatHours)
-				fn, err := binanceTradeServiceCreator(logger, wf, binanceClient, conf.Pair, conf.Usebalance, conf.PollPricesInterval)
+				fn, err := binanceTradeServiceCreator(logger, wf, binanceClient, conf.Pair, conf.Usebalance, conf.PollPriceInterval)
 				if err != nil {
 					logger.Error(fmt.Sprintf("failed to create binance trader service for pair %s, recreate instance after %ds", conf.Pair.String(),
 						restartWaitSec*2), zap.Error(err))
