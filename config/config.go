@@ -60,7 +60,7 @@ func getFromCLI() (pair entity.Pair, hours uint64, usebalance, minwindow decimal
 	statH := flag.Uint64("stathours", 5, "hours in past that will be used for stats count, example: 10")
 	useb := flag.String("usebalance", "100", "percent of balance usage, for example 90 means 90%")
 	ri := flag.Duration("rebalanceinterval", 30*time.Hour, "rebalance interval")
-	pi := flag.Duration("pollPriceInterval", 5*time.Minute, "poll market price interval")
+	pi := flag.Duration("pollpriceinterval", 5*time.Minute, "poll market price interval")
 
 	flag.Parse()
 
@@ -119,6 +119,7 @@ func getYaml(path string) ([]Config, error) {
 			return nil, fmt.Errorf("incorrect 'minwindow' param in yaml config (correct format is 123), error: %s", err)
 		}
 
+		fmt.Println(c.RebalanceInterval, c.PollPriceInterval)
 		configs = append(configs, Config{
 			Pair:              pair,
 			StatHours:         c.StatHours,

@@ -2,19 +2,19 @@
   usebalance: 38
   minwindow: 65
   stathours: 120
-  rebalanceInterval: "30h"
-  pollPriceInterval: "5m"
+  rebalanceinterval: "30h"
+  pollPriceinterval: "5m"
 
 - pair: ETH_USDT
   usebalance: 27
   minwindow: 7
   stathours: 240
-  rebalanceInterval: "30h"
-  pollPriceInterval: "5m"
+  rebalanceinterval: "30h"
+  pollPriceinterval: "5m"
 
 - pair: BNB_USDT
   usebalance: 20
   minwindow: 0.9
   stathours: 260
-  rebalanceInterval: "30h"
-  pollPriceInterval: "5m"
+  rebalanceinterval: "30h"
+  pollPriceinterval: "5m"
