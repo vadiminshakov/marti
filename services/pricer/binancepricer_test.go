@@ -10,6 +10,9 @@ import (
 )
 
 func Test(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping pricer test in short mode.")
+	}
 	apikey := os.Getenv("APIKEY")
 	require.NotEmpty(t, apikey, "APIKEY env is not set")
 	secretkey := os.Getenv("SECRETKEY")
