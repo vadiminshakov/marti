@@ -85,7 +85,8 @@ func getFromCLI() (pair entity.Pair, hours uint64, usebalance, minwindow decimal
 	ub := usebalance.BigInt().Int64()
 
 	if ub < 0 || ub > 100 {
-		return entity.Pair{}, 0, decimal.Decimal{}, decimal.Decimal{}, 0, 0, fmt.Errorf("invalid --usebalance provided, --usebalance=%f", usebalance)
+		return entity.Pair{}, 0, decimal.Decimal{}, decimal.Decimal{}, 0, 0,
+			fmt.Errorf("invalid --usebalance provided, --usebalance=%s", usebalance.String())
 	}
 
 	return pair, hours, usebalance, minwindow, rebalanceInterval, pollPriceInterval, nil
