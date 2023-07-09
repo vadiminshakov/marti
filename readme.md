@@ -16,7 +16,7 @@ go build
 
 This application has a configuration that can be customized using YAML file:
 
-_/path/to/file.yaml_
+_config.yaml_
 ```
 # The trading pair. The pair should be in the format COIN1_COIN2.
 - pair: BTC_USDT
