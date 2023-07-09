@@ -3,7 +3,7 @@ module github.com/vadimInshakov/marti
 go 1.20
 
 require (
-	github.com/adshao/go-binance/v2 v2.4.2
+	github.com/adshao/go-binance/v2 v2.4.3-0.20230604133303-62587d095d80
 	github.com/martinlindhe/notify v0.0.0-20181008203735-20632c9a275a
 	github.com/pkg/errors v0.9.1
 	github.com/shopspring/decimal v1.3.1
