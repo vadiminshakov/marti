@@ -17,6 +17,7 @@ type Config struct {
 	Usebalance        decimal.Decimal
 	Minwindow         decimal.Decimal
 	RebalanceInterval time.Duration
+	PollPriceInterval time.Duration
 }
 
 type ConfigTmp struct {
@@ -25,6 +26,7 @@ type ConfigTmp struct {
 	Usebalance        string
 	Minwindow         string
 	RebalanceInterval time.Duration
+	PollPriceInterval time.Duration
 }
 
 func Get() ([]Config, error) {
@@ -34,7 +36,7 @@ func Get() ([]Config, error) {
 		return getYaml(*config)
 	}
 
-	pair, statHours, usebalance, minwindow, rebalanceInterval, err := getFromCLI()
+	pair, statHours, usebalance, minwindow, rebalanceInterval, pollPriceInterval, err := getFromCLI()
 	if err != nil {
 		return nil, err
 	}
@@ -46,42 +48,47 @@ func Get() ([]Config, error) {
 			Usebalance:        usebalance,
 			Minwindow:         minwindow,
 			RebalanceInterval: rebalanceInterval,
+			PollPriceInterval: pollPriceInterval,
 		},
 	}, nil
 }
 
-func getFromCLI() (pair entity.Pair, hours uint64, usebalance, minwindow decimal.Decimal, rebalanceInterval time.Duration, _ error) {
+func getFromCLI() (pair entity.Pair, hours uint64, usebalance, minwindow decimal.Decimal,
+	rebalanceInterval, pollPriceInterval time.Duration, _ error) {
 	pairFlag := flag.String("pair", "BTC_USDT", "trade pair, example: BTC_USDT")
 	minw := flag.String("minwindow", "100", "min window size")
 	statH := flag.Uint64("stathours", 5, "hours in past that will be used for stats count, example: 10")
 	useb := flag.String("usebalance", "100", "percent of balance usage, for example 90 means 90%")
-	ri := flag.Duration("rebalanceinterval", 30*time.Hour, "rebalance interval in minutes")
+	ri := flag.Duration("rebalanceinterval", 30*time.Hour, "rebalance interval")
+	pi := flag.Duration("pollPriceInterval", 5*time.Minute, "poll market price interval")
+
 	flag.Parse()
 
 	var err error
 	pair, err = getPairFromString(*pairFlag)
 	if err != nil {
-		return entity.Pair{}, 0, decimal.Decimal{}, decimal.Decimal{}, 0, fmt.Errorf("invalid --par provided, --pair=%s", *pairFlag)
+		return entity.Pair{}, 0, decimal.Decimal{}, decimal.Decimal{}, 0, 0, fmt.Errorf("invalid --par provided, --pair=%s", *pairFlag)
 	}
 	usebalance, err = decimal.NewFromString(*useb)
 	if err != nil {
-		return entity.Pair{}, 0, decimal.Decimal{}, decimal.Decimal{}, 0, err
+		return entity.Pair{}, 0, decimal.Decimal{}, decimal.Decimal{}, 0, 0, err
 	}
 	minwindow, err = decimal.NewFromString(*minw)
 	if err != nil {
-		return entity.Pair{}, 0, decimal.Decimal{}, decimal.Decimal{}, 0, err
+		return entity.Pair{}, 0, decimal.Decimal{}, decimal.Decimal{}, 0, 0, err
 	}
 
 	hours = *statH
 	rebalanceInterval = *ri
+	pollPriceInterval = *pi
 
 	ub := usebalance.BigInt().Int64()
 
 	if ub < 0 || ub > 100 {
-		return entity.Pair{}, 0, decimal.Decimal{}, decimal.Decimal{}, 0, fmt.Errorf("invalid --usebalance provided, --usebalance=%f", usebalance)
+		return entity.Pair{}, 0, decimal.Decimal{}, decimal.Decimal{}, 0, 0, fmt.Errorf("invalid --usebalance provided, --usebalance=%f", usebalance)
 	}
 
-	return pair, hours, usebalance, minwindow, rebalanceInterval, nil
+	return pair, hours, usebalance, minwindow, rebalanceInterval, pollPriceInterval, nil
 }
 
 func getYaml(path string) ([]Config, error) {
@@ -118,6 +125,7 @@ func getYaml(path string) ([]Config, error) {
 			Usebalance:        usebalance,
 			Minwindow:         minwindow,
 			RebalanceInterval: c.RebalanceInterval,
+			PollPriceInterval: c.PollPriceInterval,
 		})
 	}
 	return configs, nil
