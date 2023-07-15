@@ -18,11 +18,12 @@ import (
 
 const (
 	file                     = "data.csv" // file with data for test
-	btcBalanceInWallet       = "0.5"      // BTC balance in wallet
+	btcBalanceInWallet       = "1"        // BTC balance in wallet
 	usdtBalanceInWallet      = "0"
-	klinesize                = "4h" // klinesize for test
-	klinesframe         uint = 4    // klines*klinesframe = hours before stats recount
-	minWindowUSDT            = 83
+	klinesize                = "1h" // klinesize for test
+	rebalanceHours           = 3
+	klinesframe         uint = 110 // klines*klinesframe = hours before stats recount
+	minWindowUSDT            = 128 // ok window due to binance commissions
 )
 
 var dataHoursAgo int
@@ -32,12 +33,12 @@ func TestProfit(t *testing.T) {
 		t.Skip("skipping historical test in short mode.")
 	}
 	t.Run("1 year", func(t *testing.T) {
-		dataHoursAgo = 8776 // 1 year
+		dataHoursAgo = 8760 // 1 year
 		require.NoError(t, botrun(zap.InfoLevel))
 	})
 
 	t.Run("2 years", func(t *testing.T) {
-		dataHoursAgo = 17532 // 2 years
+		dataHoursAgo = 17520 // 2 years
 		require.NoError(t, botrun(zap.InfoLevel))
 	})
 }
@@ -88,7 +89,7 @@ func botrun(loglvl zapcore.Level) error {
 		}
 		kl = append(kl, &kline)
 
-		if counter == klinesframe || ts == nil {
+		if decimal.NewFromInt(int64(counter)).Equal(decimal.NewFromInt(rebalanceHours)) || ts == nil {
 			counter = 0
 			// recreate trade service for 'klinesframe' day
 			ts, err = tsFactory(kl, lastaction)
@@ -118,7 +119,14 @@ func botrun(loglvl zapcore.Level) error {
 	log.Infof("Total balance of %s is %s (was %s)", pair.From, trader.balance1.String(), balanceBTC.String())
 	log.Infof("Total balance of %s is %s (was %s)", pair.To, trader.balance2.String(), trader.firstbalance2)
 	log.Infof("Total fee is %s", trader.fee.String())
-	log.Infof("Total profit is %s", trader.balance2.Sub(trader.firstbalance2).Sub(trader.fee).String())
+
+	var total decimal.Decimal
+	if trader.balance1.GreaterThan(decimal.NewFromInt(0)) {
+		total = trader.balance2.Sub(trader.fee)
+	} else {
+		total = trader.balance2.Sub(trader.firstbalance2).Sub(trader.fee)
+	}
+	log.Infof("Total profit is %s %s", total.String(), pair.To)
 
 	return nil
 }
