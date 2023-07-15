@@ -49,10 +49,6 @@ type traderCsv struct {
 
 // Buy buys amount of asset in trade pair.
 func (t *traderCsv) Buy(amount decimal.Decimal) error {
-	if t.balance2.LessThanOrEqual(decimal.Zero) {
-		return nil
-	}
-
 	price := <-t.pricesCh
 	result := t.balance2.Sub(price.Mul(amount))
 
@@ -73,11 +69,6 @@ func (t *traderCsv) Buy(amount decimal.Decimal) error {
 // Sell sells amount of asset in trade pair.
 func (t *traderCsv) Sell(amount decimal.Decimal) error {
 	if t.balance1.LessThanOrEqual(decimal.Zero) {
-		return nil
-	}
-
-	result := t.balance1.Sub(amount)
-	if result.LessThan(decimal.Zero) {
 		return nil
 	}
 
