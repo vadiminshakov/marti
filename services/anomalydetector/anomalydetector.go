@@ -12,11 +12,14 @@ type AnomalyDetector struct {
 	percentThreshold decimal.Decimal   // percent threshold for anomaly detection
 }
 
+// NewAnomalyDetector is a detector of price anomalies.
 func NewAnomalyDetector(pair entity.Pair, buffercap uint, percentThreshold decimal.Decimal) *AnomalyDetector {
 	buffer := make([]decimal.Decimal, 0, buffercap)
 	return &AnomalyDetector{pair: pair, buffer: buffer, cap: buffercap, percentThreshold: percentThreshold}
 }
 
+// IsAnomaly calculates average price for last N prices and check if current price differs from average price for more than X percents.
+// Returns true if price is anomaly.
 func (d *AnomalyDetector) IsAnomaly(price decimal.Decimal) bool {
 	if len(d.buffer) < int(d.cap) {
 		d.buffer = append(d.buffer, price)
