@@ -3,7 +3,7 @@ package services
 import (
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
-	"github.com/vadimInshakov/marti/entity"
+	"github.com/vadiminshakov/marti/entity"
 	"go.uber.org/zap"
 )
 

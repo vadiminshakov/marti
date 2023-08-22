@@ -2,7 +2,7 @@ package detector
 
 import (
 	"github.com/shopspring/decimal"
-	"github.com/vadimInshakov/marti/entity"
+	"github.com/vadiminshakov/marti/entity"
 )
 
 func Detect(lastaction entity.Action, buypoint, window, price decimal.Decimal) (entity.Action, error) {

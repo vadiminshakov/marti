@@ -3,7 +3,7 @@ package detector
 import (
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
-	"github.com/vadimInshakov/marti/entity"
+	"github.com/vadiminshakov/marti/entity"
 	"testing"
 )
 

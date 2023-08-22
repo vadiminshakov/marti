@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"github.com/adshao/go-binance/v2"
 	"github.com/shopspring/decimal"
-	"github.com/vadimInshakov/marti/entity"
+	"github.com/vadiminshakov/marti/entity"
 )
 
 type Pricer struct {

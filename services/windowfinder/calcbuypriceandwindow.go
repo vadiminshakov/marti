@@ -3,7 +3,7 @@ package windowfinder
 import (
 	"fmt"
 	"github.com/shopspring/decimal"
-	"github.com/vadimInshakov/marti/entity"
+	"github.com/vadiminshakov/marti/entity"
 )
 
 func CalcBuyPriceAndWindow[T entity.Kliner](klines []T, minwindow decimal.Decimal) (decimal.Decimal, decimal.Decimal, error) {

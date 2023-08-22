@@ -3,14 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/vadimInshakov/marti/config"
+	"github.com/vadiminshakov/marti/config"
 	"log"
 	"os"
 	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/vadimInshakov/marti/services/windowfinder"
+	"github.com/vadiminshakov/marti/services/windowfinder"
 
 	"github.com/adshao/go-binance/v2"
 	"go.uber.org/zap"

@@ -4,7 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/shopspring/decimal"
-	"github.com/vadimInshakov/marti/entity"
+	"github.com/vadiminshakov/marti/entity"
 	"gopkg.in/yaml.v3"
 	"os"
 	"strings"

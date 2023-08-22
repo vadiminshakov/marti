@@ -8,7 +8,7 @@ import (
 	"math/big"
 
 	"github.com/adshao/go-binance/v2"
-	"github.com/vadimInshakov/marti/entity"
+	"github.com/vadiminshakov/marti/entity"
 )
 
 type Repository interface {

@@ -2,8 +2,8 @@ package main
 
 import (
 	"github.com/shopspring/decimal"
-	"github.com/vadimInshakov/marti/entity"
-	"github.com/vadimInshakov/marti/services/detector"
+	"github.com/vadiminshakov/marti/entity"
+	"github.com/vadiminshakov/marti/services/detector"
 )
 
 type pricerCsv struct {

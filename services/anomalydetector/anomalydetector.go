@@ -2,7 +2,7 @@ package anomalydetector
 
 import (
 	"github.com/shopspring/decimal"
-	"github.com/vadimInshakov/marti/entity"
+	"github.com/vadiminshakov/marti/entity"
 )
 
 type AnomalyDetector struct {

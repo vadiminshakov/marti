@@ -5,7 +5,7 @@ import (
 	"github.com/adshao/go-binance/v2"
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
-	"github.com/vadimInshakov/marti/entity"
+	"github.com/vadiminshakov/marti/entity"
 	"time"
 )
 
