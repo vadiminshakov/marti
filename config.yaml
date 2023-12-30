@@ -20,12 +20,12 @@
   usebalance: 27
   minwindow: 7
   stathours: 240
-  rebalanceinterval: "30h"
-  pollPriceinterval: "5m"
+  rebalanceinterval: 30h
+  pollpriceinterval: 5m
 
 - pair: BNB_USDT
   usebalance: 20
   minwindow: 0.9
   stathours: 260
-  rebalanceinterval: "30h"
-  pollPriceinterval: "5m"
+  rebalanceinterval: 30h
+  pollpriceinterval: 5m
