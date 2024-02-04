@@ -36,3 +36,5 @@ _config.yaml_
 # The time interval between polling market prices to make trading decision (buy/sell/do nothing).
   pollpriceinterval: 5m
 ```
+
+The project is on hold due to the restriction of access to Binance for Russian citizens.
