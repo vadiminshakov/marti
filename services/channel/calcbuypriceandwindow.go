@@ -1,4 +1,4 @@
-package windowfinder
+package channel
 
 import (
 	"fmt"
