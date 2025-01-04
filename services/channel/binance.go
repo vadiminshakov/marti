@@ -1,4 +1,4 @@
-package windowfinder
+package channel
 
 import (
 	"context"
@@ -18,11 +18,11 @@ type BinanceWindowFinder struct {
 	statHours uint64
 }
 
-func NewBinanceWindowFinder(client *binance.Client, minwindow decimal.Decimal, pair entity.Pair, statHours uint64) *BinanceWindowFinder {
+func NewBinanceChannelFinder(client *binance.Client, minwindow decimal.Decimal, pair entity.Pair, statHours uint64) *BinanceWindowFinder {
 	return &BinanceWindowFinder{client: client, pair: pair, statHours: statHours, minwindow: minwindow}
 }
 
-func (b *BinanceWindowFinder) GetBuyPriceAndWindow() (decimal.Decimal, decimal.Decimal, error) {
+func (b *BinanceWindowFinder) GetTradingChannel() (decimal.Decimal, decimal.Decimal, error) {
 	startTime := time.Now().Add(-time.Duration(b.statHours)*time.Hour).Unix() * 1000
 	endTime := time.Now().Unix() * 1000
 
