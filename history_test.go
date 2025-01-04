@@ -7,7 +7,7 @@ import (
 	"github.com/vadiminshakov/marti/entity"
 	"github.com/vadiminshakov/marti/services"
 	"github.com/vadiminshakov/marti/services/anomalydetector"
-	"github.com/vadiminshakov/marti/services/windowfinder"
+	"github.com/vadiminshakov/marti/services/channel"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"log"
@@ -170,7 +170,7 @@ func createTradeServiceFactory(logger *zap.Logger, pair *entity.Pair, prices cha
 	anomdetector := anomalydetector.NewAnomalyDetector(*pair, 30, decimal.NewFromInt(10))
 
 	return trader, func(klines []*entity.Kline, lastaction entity.Action) (*services.TradeService, error) {
-		buyprice, window, err := windowfinder.CalcBuyPriceAndWindow(klines, decimal.NewFromInt(minWindowUSDT))
+		buyprice, window, err := channel.CalcBuyPriceAndWindow(klines, decimal.NewFromInt(minWindowUSDT))
 		if err != nil {
 			return nil, err
 		}
