@@ -9,26 +9,26 @@ import (
 	"github.com/vadiminshakov/marti/entity"
 	"github.com/vadiminshakov/marti/services"
 	"github.com/vadiminshakov/marti/services/anomalydetector"
+	"github.com/vadiminshakov/marti/services/channel"
 	"github.com/vadiminshakov/marti/services/detector"
 	binancepricer "github.com/vadiminshakov/marti/services/pricer"
 	binancetrader "github.com/vadiminshakov/marti/services/trader"
-	"github.com/vadiminshakov/marti/services/windowfinder"
 	"go.uber.org/zap"
 	"time"
 )
 
 // binanceTradeServiceCreator creates trade service for binance exchange.
-func binanceTradeServiceCreator(logger *zap.Logger, wf windowfinder.WindowFinder,
+func binanceTradeServiceCreator(logger *zap.Logger, wf channel.ChannelFinder,
 	binanceClient *binance.Client, pair entity.Pair, usebalance decimal.Decimal,
 	pollPricesInterval time.Duration) (func(context.Context) error, error) {
 	pricer := binancepricer.NewPricer(binanceClient)
 
-	buyprice, window, err := wf.GetBuyPriceAndWindow()
+	buyprice, channel, err := wf.GetTradingChannel()
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to find window for %s", pair.String())
 	}
 
-	detect, err := detector.NewDetector(binanceClient, usebalance, pair, buyprice, window)
+	detect, err := detector.NewDetector(binanceClient, usebalance, pair, buyprice, channel)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func binanceTradeServiceCreator(logger *zap.Logger, wf windowfinder.WindowFinder
 
 	logger.Info("start",
 		zap.String("buyprice", buyprice.String()),
-		zap.String("window", window.String()),
+		zap.String("channel", channel.String()),
 		zap.String("use "+pair.From, amount.String()))
 
 	anomdetector := anomalydetector.NewAnomalyDetector(pair, 30, decimal.NewFromInt(3))
