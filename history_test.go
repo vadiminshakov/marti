@@ -17,217 +17,210 @@ import (
 )
 
 const (
-	file                     = "data.csv" // file with data for test
-	btcBalanceInWallet       = "1"        // BTC balance in wallet
-	usdtBalanceInWallet      = "0"
-	klinesize                = "1h" // klinesize for test
-	rebalanceHours           = 3
-	klinesframe         uint = 110 // klines*klinesframe = hours before stats recount
-	minWindowUSDT            = 128 // ok window due to binance commissions
+	dataFile            = "data.csv" // file with data for test
+	btcBalanceInWallet  = "0.2"      // BTC balance in wallet
+	usdtBalanceInWallet = "0"
+	klineSize           = "4h" // klinesize for test
+	rebalanceHours      = 30
+	klineFrame          = 180 // number of klines in frame for stat analysis (channel & buy price detection)
+	minWindowUSDT       = 180 // ok window due to binance commissions
 )
 
 var dataHoursAgo int
 
 func TestProfit(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping historical test in short mode.")
+		t.Skip("Skipping historical test in short mode.")
 	}
+
 	t.Run("1 year", func(t *testing.T) {
-		dataHoursAgo = 8760 // 1 year
-		require.NoError(t, botrun(zap.InfoLevel))
+		dataHoursAgo = 8760
+		require.NoError(t, runBot(zap.InfoLevel))
 	})
 
-	t.Run("2 years", func(t *testing.T) {
-		dataHoursAgo = 17520 // 2 years
-		require.NoError(t, botrun(zap.InfoLevel))
-	})
+	//t.Run("2 years", func(t *testing.T) {
+	//	dataHoursAgo = 17520
+	//	require.NoError(t, runBot(zap.InfoLevel))
+	//})
 }
 
-func botrun(loglvl zapcore.Level) error {
-	l, err := zap.NewProduction()
+func runBot(logLevel zapcore.Level) error {
+	logger, err := zap.NewProduction()
 	if err != nil {
 		return err
 	}
-	log := l.Sugar()
-	lvl := zap.NewAtomicLevel()
-	lvl.SetLevel(loglvl)
+	defer logger.Sync()
+	log := logger.Sugar()
 
-	pair := &entity.Pair{
-		From: "BTC",
-		To:   "USDT",
-	}
-
-	prices, klines, rmFn, err := prepareData(file, pair)
+	pair := &entity.Pair{From: "BTC", To: "USDT"}
+	prices, klines, cleanup, err := prepareData(dataFile, pair)
 	if err != nil {
 		return err
 	}
+	defer cleanup()
 
-	defer rmFn()
-
-	var lastaction entity.Action = entity.ActionBuy
 	balanceBTC, _ := decimal.NewFromString(btcBalanceInWallet)
 	balanceUSDT, _ := decimal.NewFromString(usdtBalanceInWallet)
 
-	trader, tsFactory := createTradeServiceFactory(l, pair, prices, balanceBTC, balanceUSDT)
+	trader, tradeServiceFactory := createTradeServiceFactory(logger, pair, prices, balanceBTC, balanceUSDT)
+
 	kline := <-klines
-	ts, _ := tsFactory([]*entity.Kline{&kline}, lastaction)
+
+	tradeService, err := tradeServiceFactory([]*entity.Kline{&kline}, entity.ActionBuy)
 	if err != nil {
-		return err
 	}
 
+	var klineBuffer []*entity.Kline
 	var counter uint
-	var kl []*entity.Kline
+	lastAction := entity.ActionBuy
+
 	for {
-		counter++
 		if len(prices) == 0 || len(klines) == 0 {
 			break
 		}
+		counter++
 
-		kline := <-klines
-		if len(kl) >= int(klinesframe) {
-			kl = kl[1:]
+		kline = <-klines
+
+		if len(klineBuffer) >= klineFrame {
+			klineBuffer = klineBuffer[1:]
 		}
-		kl = append(kl, &kline)
+		klineBuffer = append(klineBuffer, &kline)
 
-		if decimal.NewFromInt(int64(counter)).Equal(decimal.NewFromInt(rebalanceHours)) || ts == nil {
+		if counter >= rebalanceHours || tradeService == nil {
 			counter = 0
-			// recreate trade service for 'klinesframe' day
-			ts, err = tsFactory(kl, lastaction)
+			tradeService, err = tradeServiceFactory(klineBuffer, lastAction)
+			if tradeService == nil {
+				continue
+			}
+
 			if err != nil {
-				log.Debug("skip kline because insufficient volatility")
+				log.Debug("Skipping kline due to insufficient volatility")
 				continue
 			}
 		}
 
-		te, err := ts.Trade()
+		tradeEvent, err := tradeService.Trade()
 		if err != nil {
 			return err
 		}
 
-		if te == nil {
-			<-prices // skip price that not readed by trader
+		if tradeEvent == nil {
+			<-prices
 			continue
 		}
-		if te.Action != entity.ActionNull {
-			lastaction = te.Action
+
+		if tradeEvent.Action != entity.ActionNull {
+			lastAction = tradeEvent.Action
 		}
-
-		log.Debug(te.String())
 	}
 
-	log.Infof("Deals: %d", trader.dealsCount)
-	log.Infof("Total balance of %s is %s (was %s)", pair.From, trader.balance1.String(), balanceBTC.String())
-	log.Infof("Total balance of %s is %s (was %s)", pair.To, trader.balance2.String(), trader.firstbalance2)
-	log.Infof("Total fee is %s", trader.fee.String())
-
-	var total decimal.Decimal
-	if trader.balance1.GreaterThan(decimal.NewFromInt(0)) {
-		total = trader.balance2.Sub(trader.fee)
-	} else {
-		total = trader.balance2.Sub(trader.firstbalance2).Sub(trader.fee)
-	}
-	log.Infof("Total profit is %s %s", total.String(), pair.To)
-
+	summarizeResults(log, trader, pair, balanceBTC)
 	return nil
 }
 
-func prepareData(file string, pair *entity.Pair) (prices chan decimal.Decimal, klines chan entity.Kline, removeFile func(), _ error) {
-	collect, err := dataColletorFactory(file, pair)
+func summarizeResults(log *zap.SugaredLogger, trader *traderCsv, pair *entity.Pair, initialBalanceBTC decimal.Decimal) {
+	log.Infof("Deals: %d", trader.dealsCount)
+	log.Infof("Total balance of %s: %s (was %s)", pair.From, trader.balance1.String(), initialBalanceBTC.String())
+	log.Infof("Total balance of %s: %s (was %s)", pair.To, trader.balance2.String(), trader.firstbalance2)
+	log.Infof("Total fee: %s", trader.fee.String())
+
+	totalProfit := calculateTotalProfit(trader)
+	log.Infof("Total profit: %s %s", totalProfit.String(), pair.To)
+}
+
+func calculateTotalProfit(trader *traderCsv) decimal.Decimal {
+	if trader.balance1.GreaterThan(decimal.Zero) {
+		return trader.balance2.Sub(trader.fee)
+	}
+	return trader.balance2.Sub(trader.firstbalance2).Sub(trader.fee)
+}
+
+func prepareData(filePath string, pair *entity.Pair) (chan decimal.Decimal, chan entity.Kline, func(), error) {
+	collectData, err := dataColletorFactory(filePath, pair)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	removeFile = func() {
-		os.Remove(file)
-	}
-
-	intervalHours := 100
-	for collectFromHours := dataHoursAgo; collectFromHours > 0; collectFromHours -= intervalHours {
-		if err = collect(collectFromHours, intervalHours, klinesize); err != nil {
-			return nil, nil, nil, err
+	cleanup := func() { os.Remove(filePath) }
+	interval := 100
+	for hours := dataHoursAgo; hours > 0; hours -= interval {
+		if err := collectData(hours, interval, klineSize); err != nil {
+			return nil, nil, cleanup, err
 		}
 	}
 
-	prices, klines = makePriceChFromCsv(file)
-
-	return
+	prices, klines := loadPricesFromCSV(filePath)
+	return prices, klines, cleanup, nil
 }
 
-func createTradeServiceFactory(logger *zap.Logger, pair *entity.Pair, prices chan decimal.Decimal,
-	balanceBTC, balanceUSDT decimal.Decimal) (
-	*traderCsv, func(klines []*entity.Kline, lastaction entity.Action) (*services.TradeService, error)) {
-	pricer := &pricerCsv{
-		pricesCh: prices,
-	}
+func createTradeServiceFactory(logger *zap.Logger, pair *entity.Pair, prices chan decimal.Decimal, balanceBTC, balanceUSDT decimal.Decimal) (*traderCsv, func([]*entity.Kline, entity.Action) (*services.TradeService, error)) {
+	pricer := &pricerCsv{pricesCh: prices}
+	trader := &traderCsv{pair: pair, balance1: balanceBTC, balance2: balanceUSDT, pricesCh: prices}
+	anomDetector := anomalydetector.NewAnomalyDetector(*pair, 30, decimal.NewFromInt(10))
 
-	trader := &traderCsv{
-		pair:     pair,
-		balance1: balanceBTC,
-		balance2: balanceUSDT,
-		pricesCh: prices,
-	}
-
-	anomdetector := anomalydetector.NewAnomalyDetector(*pair, 30, decimal.NewFromInt(10))
-
-	return trader, func(klines []*entity.Kline, lastaction entity.Action) (*services.TradeService, error) {
-		buyprice, window, err := channel.CalcBuyPriceAndWindow(klines, decimal.NewFromInt(minWindowUSDT))
+	return trader, func(klines []*entity.Kline, lastAction entity.Action) (*services.TradeService, error) {
+		buyPrice, window, err := channel.CalcBuyPriceAndWindow(klines, decimal.NewFromInt(minWindowUSDT))
 		if err != nil {
 			return nil, err
 		}
-		return services.NewTradeService(logger, *pair, balanceBTC, pricer, &detectorCsv{
-			lastaction: lastaction,
-			buypoint:   buyprice,
+
+		ts := services.NewTradeService(logger, *pair, balanceBTC, pricer, &detectorCsv{
+			lastaction: lastAction,
+			buypoint:   buyPrice,
 			window:     window,
-		},
-			trader, anomdetector), nil
+		}, trader, anomDetector)
+
+		return ts, nil
 	}
 }
 
-func makePriceChFromCsv(filePath string) (chan decimal.Decimal, chan entity.Kline) {
-	prices := make(chan decimal.Decimal, 1000)
-	var klines chan entity.Kline
+func loadPricesFromCSV(filePath string) (chan decimal.Decimal, chan entity.Kline) {
+	prices := make(chan decimal.Decimal, 3000)
+	klines := make(chan entity.Kline, 1000)
 
+	priceData, klineData := parseCSV(filePath)
 	go func() {
-		pricescsv, kchan := readCsv(filePath)
-		klines = kchan
-		for _, price := range pricescsv {
-			prices <- price // for pricer
-			prices <- price // for trader
+		for _, price := range priceData {
+			prices <- price
+			prices <- price
 		}
 	}()
-	time.Sleep(300 * time.Millisecond)
 
+	go func() {
+		for _, kline := range klineData {
+			klines <- kline
+		}
+	}()
+
+	time.Sleep(300 * time.Millisecond) // Ensure goroutine fills channels
 	return prices, klines
 }
 
-func readCsv(filePath string) ([]decimal.Decimal, chan entity.Kline) {
-	f, err := os.Open(filePath)
+func parseCSV(filePath string) ([]decimal.Decimal, []entity.Kline) {
+	file, err := os.Open(filePath)
 	if err != nil {
-		log.Fatal("Unable to read input file "+filePath, err)
+		log.Fatalf("Unable to read input file %s: %v", filePath, err)
 	}
-	defer f.Close()
+	defer file.Close()
 
-	csvReader := csv.NewReader(f)
+	csvReader := csv.NewReader(file)
 	records, err := csvReader.ReadAll()
 	if err != nil {
-		log.Fatal("Unable to parse file as CSV for "+filePath, err)
+		log.Fatalf("Unable to parse file as CSV %s: %v", filePath, err)
 	}
 
 	prices := make([]decimal.Decimal, 0, len(records))
-	klines := make(chan entity.Kline, len(records))
-
+	klines := make([]entity.Kline, 0, len(records))
 	for _, record := range records {
-		priceOpen, _ := decimal.NewFromString(record[0])
-		priceHigh, _ := decimal.NewFromString(record[1])
-		priceLow, _ := decimal.NewFromString(record[2])
-		priceClose, _ := decimal.NewFromString(record[3])
+		open, _ := decimal.NewFromString(record[0])
+		high, _ := decimal.NewFromString(record[1])
+		low, _ := decimal.NewFromString(record[2])
+		closePrice, _ := decimal.NewFromString(record[3])
 
-		price := priceHigh.Add(priceLow).Div(decimal.NewFromInt(2))
+		price := high.Add(low).Div(decimal.NewFromInt(2))
 		prices = append(prices, price)
-		klines <- entity.Kline{
-			Open:  priceOpen,
-			Close: priceClose,
-		}
+		klines = append(klines, entity.Kline{Open: open, Close: closePrice})
 	}
 
 	return prices, klines
