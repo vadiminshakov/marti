@@ -39,7 +39,7 @@ func (b *BybitWindowFinder) GetTradingChannel() (decimal.Decimal, decimal.Decima
 	if err != nil {
 		return decimal.Decimal{}, decimal.Decimal{}, errors.Wrap(err, "error converting Binance klines")
 	}
-	buyprice, window, err := CalcBuyPriceAndWindow(klinesconv, b.minwindow)
+	buyprice, window, err := CalcBuyPriceAndChannel(klinesconv, b.minwindow)
 	return buyprice, window, err
 }
 
