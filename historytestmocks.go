@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/entity"
 	"github.com/vadiminshakov/marti/services/detector"
@@ -25,9 +26,8 @@ func (d *detectorCsv) NeedAction(price decimal.Decimal) (entity.Action, error) {
 	if err != nil {
 		return entity.ActionNull, err
 	}
-	if d.lastaction != entity.ActionNull {
-		d.lastaction = lastact
-	}
+
+	d.lastaction = lastact
 
 	return lastact, nil
 }
@@ -49,7 +49,11 @@ type traderCsv struct {
 
 // Buy buys amount of asset in trade pair.
 func (t *traderCsv) Buy(amount decimal.Decimal) error {
-	price := <-t.pricesCh
+	price, ok := <-t.pricesCh
+	if !ok && price.IsZero() {
+		return errors.New("prices channel is closed")
+	}
+
 	result := t.balance2.Sub(price.Mul(amount))
 
 	if result.LessThan(decimal.Zero) {
@@ -73,8 +77,15 @@ func (t *traderCsv) Sell(amount decimal.Decimal) error {
 	}
 
 	t.balance1 = t.balance1.Sub(amount)
-	price := <-t.pricesCh
-	t.balance2 = t.balance2.Add(price.Mul(amount))
+	price, ok := <-t.pricesCh
+	if !ok && price.IsZero() {
+		return errors.New("prices channel is closed")
+	}
+
+	profit := price.Mul(amount)
+
+	t.balance2 = profit
+
 	t.fee = t.fee.Add(decimal.NewFromInt(4))
 
 	t.oldbalance2 = t.balance2
