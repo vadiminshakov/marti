@@ -14,12 +14,11 @@ const klinesize = "4h"
 type BinanceWindowFinder struct {
 	client    *binance.Client
 	pair      entity.Pair
-	minwindow decimal.Decimal
 	statHours uint64
 }
 
-func NewBinanceChannelFinder(client *binance.Client, minwindow decimal.Decimal, pair entity.Pair, statHours uint64) *BinanceWindowFinder {
-	return &BinanceWindowFinder{client: client, pair: pair, statHours: statHours, minwindow: minwindow}
+func NewBinanceChannelFinder(client *binance.Client, pair entity.Pair, statHours uint64) *BinanceWindowFinder {
+	return &BinanceWindowFinder{client: client, pair: pair, statHours: statHours}
 }
 
 func (b *BinanceWindowFinder) GetTradingChannel() (decimal.Decimal, decimal.Decimal, error) {
@@ -37,7 +36,7 @@ func (b *BinanceWindowFinder) GetTradingChannel() (decimal.Decimal, decimal.Deci
 	if err != nil {
 		return decimal.Decimal{}, decimal.Decimal{}, errors.Wrap(err, "error converting Binance klines")
 	}
-	buyprice, window, err := CalcBuyPriceAndChannel(klinesconv, b.minwindow)
+	buyprice, window, err := CalcBuyPriceAndChannel(klinesconv)
 	return buyprice, window, err
 }
 
