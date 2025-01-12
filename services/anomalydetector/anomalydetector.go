@@ -35,9 +35,14 @@ func (d *AnomalyDetector) IsAnomaly(price decimal.Decimal) bool {
 	}
 
 	currentPriceDifferForPercent := func(currentPrice, avgPrice decimal.Decimal) decimal.Decimal {
+		if avgPrice.IsZero() || currentPrice.IsZero() {
+			return decimal.Zero
+		}
+
 		if currentPrice.GreaterThan(avgPrice) {
 			return currentPrice.Sub(avgPrice).Div(avgPrice).Mul(decimal.NewFromInt(100))
 		}
+
 		return avgPrice.Sub(currentPrice).Div(avgPrice).Mul(decimal.NewFromInt(100))
 	}
 
