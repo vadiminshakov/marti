@@ -18,11 +18,11 @@ type Repository interface {
 type Detector struct {
 	pair       entity.Pair
 	buypoint   decimal.Decimal
-	window     decimal.Decimal
+	channel    decimal.Decimal
 	lastAction entity.Action
 }
 
-func NewDetector(client *binance.Client, usebalance decimal.Decimal, pair entity.Pair, buypoint, window decimal.Decimal) (*Detector, error) {
+func NewDetector(client *binance.Client, usebalance decimal.Decimal, pair entity.Pair, buypoint, channel decimal.Decimal) (*Detector, error) {
 	res, err := client.NewGetAccountService().Do(context.Background())
 	if err != nil {
 		return nil, err
@@ -39,7 +39,7 @@ func NewDetector(client *binance.Client, usebalance decimal.Decimal, pair entity
 		}
 	}
 
-	d := &Detector{pair: pair, buypoint: buypoint, window: window}
+	d := &Detector{pair: pair, buypoint: buypoint, channel: channel}
 
 	// определим курс
 	p, err := client.NewListPricesService().Symbol(pair.Symbol()).Do(context.Background())
@@ -70,7 +70,7 @@ func NewDetector(client *binance.Client, usebalance decimal.Decimal, pair entity
 }
 
 func (d *Detector) NeedAction(price decimal.Decimal) (entity.Action, error) {
-	lastact, err := Detect(d.lastAction, d.buypoint, d.window, price)
+	lastact, err := Detect(d.lastAction, d.buypoint, d.channel, price)
 	if err != nil {
 		return entity.ActionNull, err
 	}
