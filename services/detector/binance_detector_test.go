@@ -18,7 +18,7 @@ func TestNeedAction(t *testing.T) {
 	d := Detector{
 		pair:       pair,
 		buypoint:   buypoint,
-		window:     window,
+		channel:    window,
 		lastAction: entity.ActionBuy,
 	}
 
