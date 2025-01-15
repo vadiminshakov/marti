@@ -11,12 +11,11 @@ import (
 type BybitWindowFinder struct {
 	client    *bybit.Client
 	pair      entity.Pair
-	minwindow decimal.Decimal
 	statHours uint64
 }
 
-func NewBybitChannelFinder(client *bybit.Client, minwindow decimal.Decimal, pair entity.Pair, statHours uint64) *BybitWindowFinder {
-	return &BybitWindowFinder{client: client, pair: pair, statHours: statHours, minwindow: minwindow}
+func NewBybitChannelFinder(client *bybit.Client, pair entity.Pair, statHours uint64) *BybitWindowFinder {
+	return &BybitWindowFinder{client: client, pair: pair, statHours: statHours}
 }
 
 func (b *BybitWindowFinder) GetTradingChannel() (decimal.Decimal, decimal.Decimal, error) {
@@ -39,7 +38,7 @@ func (b *BybitWindowFinder) GetTradingChannel() (decimal.Decimal, decimal.Decima
 	if err != nil {
 		return decimal.Decimal{}, decimal.Decimal{}, errors.Wrap(err, "error converting Binance klines")
 	}
-	buyprice, window, err := CalcBuyPriceAndChannel(klinesconv, b.minwindow)
+	buyprice, window, err := CalcBuyPriceAndChannel(klinesconv)
 	return buyprice, window, err
 }
 
