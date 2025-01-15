@@ -6,23 +6,42 @@ import (
 	"github.com/vadiminshakov/marti/entity"
 )
 
-func CalcBuyPriceAndChannel[T entity.Kliner](klines []T, minwindow decimal.Decimal) (decimal.Decimal, decimal.Decimal, error) {
-	cumulativeBuyPrice, cumulativeChannel := decimal.NewFromInt(0), decimal.NewFromInt(0)
+// The minTradeChannelPercent constant represents the minimum percentage of the trade channel relative
+// to the average prices of each kline.
+// It ensures that the calculated trade channel is not too narrow. If the calculated trade channel is less than this minimum percentage,
+// an error is returned, indicating that the channel is too small for trading.
+const minTradeChannelPercent = 0.0015 // 0.15% of the average price
+
+func CalcBuyPriceAndChannel[T entity.Kliner](klines []T) (decimal.Decimal, decimal.Decimal, error) {
+	if len(klines) == 0 {
+		return decimal.Decimal{}, decimal.Decimal{}, fmt.Errorf("klines array is empty")
+	}
+
+	averageBuyPrice, averageChannelWidth := decimal.NewFromInt(0), decimal.NewFromInt(0)
 
 	for _, k := range klines {
-		klinesum := k.OpenPrice().Add(k.ClosePrice())
-		buyprice := klinesum.Div(decimal.NewFromInt(2))
-		cumulativeBuyPrice = cumulativeBuyPrice.Add(buyprice)
-		klinewindow := k.OpenPrice().Sub(k.ClosePrice()).Abs()
-		cumulativeChannel = cumulativeChannel.Add(klinewindow)
+		klineSum := k.OpenPrice().Add(k.ClosePrice())
+		buyPrice := klineSum.Div(decimal.NewFromInt(2))
+		averageBuyPrice = averageBuyPrice.Add(buyPrice)
+
+		// Calculate channel width (use HighPrice - LowPrice if more precise channel is needed)
+		channelWidth := k.OpenPrice().Sub(k.ClosePrice()).Abs()
+		averageChannelWidth = averageChannelWidth.Add(channelWidth)
 	}
 
-	cumulativeBuyPrice = cumulativeBuyPrice.Div(decimal.NewFromInt(int64(len(klines))))
-	cumulativeChannel = cumulativeChannel.Div(decimal.NewFromInt(int64(len(klines))))
+	// Calculate averages
+	averageBuyPrice = averageBuyPrice.Div(decimal.NewFromInt(int64(len(klines))))
+	averageChannelWidth = averageChannelWidth.Div(decimal.NewFromInt(int64(len(klines))))
 
-	if cumulativeChannel.Cmp(minwindow) < 0 {
-		return decimal.Decimal{}, decimal.Decimal{}, fmt.Errorf("channel less then min (found %s, min %s)", cumulativeChannel.String(), minwindow.String())
+	// Minimum channel width check
+	minTradeChannel := averageBuyPrice.Mul(decimal.NewFromFloat(minTradeChannelPercent))
+	if averageChannelWidth.Cmp(minTradeChannel) < 0 {
+		return decimal.Decimal{}, decimal.Decimal{}, fmt.Errorf(
+			"channel less than min (found %s, min %s)",
+			averageChannelWidth.String(),
+			minTradeChannel.String(),
+		)
 	}
 
-	return cumulativeBuyPrice, cumulativeChannel, nil
+	return averageBuyPrice, averageChannelWidth, nil
 }
