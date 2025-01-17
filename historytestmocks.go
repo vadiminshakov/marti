@@ -1,10 +1,16 @@
 package main
 
 import (
+	"fmt"
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/entity"
 	"github.com/vadiminshakov/marti/services/detector"
+)
+
+const (
+	feeBuy  = 8
+	feeSell = 8
 )
 
 type pricerCsv struct {
@@ -26,8 +32,9 @@ func (d *detectorCsv) NeedAction(price decimal.Decimal) (entity.Action, error) {
 	if err != nil {
 		return entity.ActionNull, err
 	}
-
-	d.lastaction = lastact
+	if lastact != entity.ActionNull {
+		d.lastaction = lastact
+	}
 
 	return lastact, nil
 }
@@ -55,15 +62,16 @@ func (t *traderCsv) Buy(amount decimal.Decimal) error {
 	}
 
 	result := t.balance2.Sub(price.Mul(amount))
-
 	if result.LessThan(decimal.Zero) {
-		return nil
+		return fmt.Errorf("failed to buy, insufficient balance %s USDT, trying to buy BTC for %s USDT",
+			t.balance2.StringFixed(3),
+			result.StringFixed(3))
 	}
 
 	t.balance1 = t.balance1.Add(amount)
 
-	t.balance2 = t.balance2.Sub(price.Mul(amount))
-	t.fee = t.fee.Add(decimal.NewFromInt(33))
+	t.balance2 = result
+	t.fee = t.fee.Add(decimal.NewFromInt(feeBuy))
 
 	t.dealsCount++
 
@@ -84,9 +92,9 @@ func (t *traderCsv) Sell(amount decimal.Decimal) error {
 
 	profit := price.Mul(amount)
 
-	t.balance2 = profit
+	t.balance2 = t.balance2.Add(profit)
 
-	t.fee = t.fee.Add(decimal.NewFromInt(4))
+	t.fee = t.fee.Add(decimal.NewFromInt(feeSell))
 
 	t.oldbalance2 = t.balance2
 	if t.firstbalance2.IsZero() {
