@@ -44,7 +44,9 @@ func TestTrade(t *testing.T) {
 
 	l, err := zap.NewProduction()
 	assert.NoError(t, err)
-	ts := NewTradeService(l, pair, amount, pricer, detector, trader, anomalyDetector)
+	ts, err := NewTradeService(l, pair, amount, pricer, detector, trader, anomalyDetector)
+	assert.NoError(t, err)
+
 	event, err := ts.Trade()
 	assert.NoError(t, err)
 	assert.Equal(t, entity.ActionBuy, event.Action)
