@@ -57,7 +57,7 @@ func main() {
 				executor := func(context.Context) error { return nil }
 
 				if platform == "binance" {
-					cf := channel.NewBinanceChannelFinder(binanceClient, conf.Minwindow, conf.Pair, conf.StatHours)
+					cf := channel.NewBinanceChannelFinder(binanceClient, conf.Pair, conf.StatHours)
 					executor, err = binanceTradeServiceCreator(logger, cf, binanceClient, conf.Pair, conf.Usebalance, conf.PollPriceInterval)
 					if err != nil {
 						logger.Error(fmt.Sprintf("failed to create binance trader service for pair %s, recreate instance after %ds", conf.Pair.String(),
@@ -70,7 +70,7 @@ func main() {
 				if platform == "bybit" {
 					bybitClient := bybit.NewClient().WithAuth(apikey, secretKey)
 
-					cf := channel.NewBybitChannelFinder(bybitClient, conf.Minwindow, conf.Pair, conf.StatHours)
+					cf := channel.NewBybitChannelFinder(bybitClient, conf.Pair, conf.StatHours)
 
 					executor = func(context.Context) error {
 						buyprice, channel, err := cf.GetTradingChannel()
