@@ -7,6 +7,7 @@ import (
 	"github.com/adshao/go-binance/v2"
 	"github.com/vadiminshakov/marti/entity"
 	"os"
+	"sort"
 	"time"
 )
 
@@ -42,6 +43,10 @@ func collectMarketData(client *binance.Client, pair *entity.Pair, fromHoursAgo, 
 	if err != nil {
 		return nil, err
 	}
+
+	sort.Slice(klines, func(i, j int) bool {
+		return klines[i].OpenTime < klines[j].OpenTime
+	})
 
 	data := make([][]string, 0, len(klines))
 	for _, kline := range klines {
