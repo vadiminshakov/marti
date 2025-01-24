@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestWrappedWal_WriteAndReadDecimal(t *testing.T) {
+func TestWrappedWal_WriteAndRead(t *testing.T) {
 	// Создаем новый WAL
 	w, err := NewWrappedWal()
 	require.NoError(t, err, "Failed to create WrappedWal")
@@ -17,21 +17,17 @@ func TestWrappedWal_WriteAndReadDecimal(t *testing.T) {
 		assert.NoError(t, w.Close(), "Failed to close WAL")
 	}()
 
-	// Тестовые данные
 	price := decimal.NewFromFloat(123.45)
 	amount := decimal.NewFromFloat(678.90)
 
-	// Записываем данные
 	err = w.Write("lastbuy", price)
 	require.NoError(t, err, "Failed to write lastbuy")
 	err = w.Write("lastamount", amount)
 	require.NoError(t, err, "Failed to write lastamount")
 
-	// Считываем данные
 	meta, err := w.GetLastBuyMeta()
 	require.NoError(t, err, "Failed to get last buy meta")
 
-	// Проверяем значения
 	assert.True(t, price.Equal(meta.price), "Last buy price mismatch")
 	assert.True(t, amount.Equal(meta.amount), "Last buy amount mismatch")
 
@@ -51,25 +47,6 @@ func TestWrappedWal_EmptyLog(t *testing.T) {
 	os.RemoveAll("waldata")
 }
 
-func TestWrappedWal_Serialization(t *testing.T) {
-	// Исходное значение
-	original := decimal.NewFromFloat(456.789)
-
-	// Сериализация
-	b, err := original.MarshalBinary()
-	require.NoError(t, err, "Failed to marshal decimal")
-
-	// Десериализация
-	var restored decimal.Decimal
-	err = restored.UnmarshalBinary(b)
-	require.NoError(t, err, "Failed to unmarshal decimal")
-
-	// Проверка эквивалентности
-	assert.True(t, original.Equal(restored), "Deserialized decimal does not match original")
-
-	os.RemoveAll("waldata")
-}
-
 func TestWrappedWal_Iterator(t *testing.T) {
 	w, err := NewWrappedWal()
 	require.NoError(t, err, "Failed to create WrappedWal")
@@ -77,7 +54,6 @@ func TestWrappedWal_Iterator(t *testing.T) {
 		assert.NoError(t, w.Close(), "Failed to close WAL")
 	}()
 
-	// Записываем несколько данных
 	err = w.Write("key1", decimal.NewFromFloat(111.11))
 	require.NoError(t, err, "Failed to write key1")
 	err = w.Write("key2", decimal.NewFromFloat(222.22))
@@ -85,7 +61,6 @@ func TestWrappedWal_Iterator(t *testing.T) {
 	err = w.Write("key3", decimal.NewFromFloat(333.33))
 	require.NoError(t, err, "Failed to write key3")
 
-	// Проверяем итерацию
 	keys := make(map[string]decimal.Decimal)
 	for m := range w.wal.Iterator() {
 		var value decimal.Decimal
@@ -94,7 +69,6 @@ func TestWrappedWal_Iterator(t *testing.T) {
 		keys[m.Key] = value
 	}
 
-	// Сравниваем результаты
 	assert.Equal(t, 3, len(keys), "Unexpected number of keys in WAL")
 	assert.True(t, decimal.NewFromFloat(111.11).Equal(keys["key1"]), "Key1 value mismatch")
 	assert.True(t, decimal.NewFromFloat(222.22).Equal(keys["key2"]), "Key2 value mismatch")
