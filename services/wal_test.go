@@ -101,7 +101,6 @@ func TestWrappedWal_CorruptedData(t *testing.T) {
 }
 
 func TestWalReload(t *testing.T) {
-	// check that after WAL reload data is saved
 	w, err := NewWrappedWal()
 	require.NoError(t, err, "Не удалось создать WAL")
 
