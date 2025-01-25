@@ -139,11 +139,6 @@ func (t *TradeService) Close() error {
 }
 
 func (t *TradeService) actBuy(price decimal.Decimal) (*entity.TradeEvent, error) {
-	//if price.GreaterThan(t.lastBuyPrice) && !t.noTrades {
-	//	fmt.Println("skip buy, price is greater than last buy price")
-	//	return nil, nil
-	//}
-
 	if !isPercentDifferenceSignificant(price, t.lastBuyPrice, dcaPercentThresholdBuy) {
 		return nil, nil
 	}
