@@ -55,10 +55,14 @@ func (w *WrappedWal) GetLastBuyMeta() (BuyMetaData, error) {
 		noData = false
 
 		if m.Key == "lastbuy" {
-			lastBuyPrice.UnmarshalBinary(m.Value)
+			if err := lastBuyPrice.UnmarshalBinary(m.Value); err != nil {
+				return BuyMetaData{}, errors.Wrap(err, "error unmarshal last buy price")
+			}
 		}
 		if m.Key == "lastamount" {
-			lastAmount.UnmarshalBinary(m.Value)
+			if err := lastAmount.UnmarshalBinary(m.Value); err != nil {
+				return BuyMetaData{}, errors.Wrap(err, "error unmarshal last amount")
+			}
 		}
 	}
 
