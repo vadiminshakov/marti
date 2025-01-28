@@ -41,7 +41,6 @@ func NewDetector(client *binance.Client, usebalance decimal.Decimal, pair entity
 
 	d := &Detector{pair: pair, buypoint: buypoint, channel: channel}
 
-	// определим курс
 	p, err := client.NewListPricesService().Symbol(pair.Symbol()).Do(context.Background())
 	if err != nil {
 		return nil, err
@@ -52,11 +51,9 @@ func NewDetector(client *binance.Client, usebalance decimal.Decimal, pair entity
 
 	price, _ := decimal.NewFromString(p[0].Price)
 
-	// определяем процент доступной для операций второй валюты
 	percent := usebalance.Div(decimal.NewFromInt(100))
 	toBalance = toBalance.Mul(percent)
 
-	// если больше первой валюты, то продаем, если больше второй, то покупаем
 	fromBalanceInSecondCoinsForm := fromBalance.Mul(price)
 	if fromBalanceInSecondCoinsForm.Cmp(toBalance) < 0 {
 		d.lastAction = entity.ActionSell
