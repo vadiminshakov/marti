@@ -21,7 +21,7 @@ import (
 func binanceTradeServiceCreator(logger *zap.Logger, wf channel.ChannelFinder,
 	binanceClient *binance.Client, pair entity.Pair, usebalance decimal.Decimal,
 	pollPricesInterval time.Duration) (func(context.Context) error, error) {
-	pricer := binancepricer.NewPricer(binanceClient)
+	pricer := binancepricer.NewBinancePricer(binanceClient)
 
 	buyprice, channel, err := wf.GetTradingChannel()
 	if err != nil {
