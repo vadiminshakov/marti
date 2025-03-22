@@ -8,15 +8,15 @@ import (
 	"github.com/vadiminshakov/marti/entity"
 )
 
-type Pricer struct {
+type BinancePricer struct {
 	client *binance.Client
 }
 
-func NewPricer(client *binance.Client) *Pricer {
-	return &Pricer{client: client}
+func NewBinancePricer(client *binance.Client) *BinancePricer {
+	return &BinancePricer{client: client}
 }
 
-func (p *Pricer) GetPrice(pair entity.Pair) (decimal.Decimal, error) {
+func (p *BinancePricer) GetPrice(pair entity.Pair) (decimal.Decimal, error) {
 	prices, err := p.client.NewListPricesService().Symbol(pair.Symbol()).Do(context.Background())
 	if err != nil {
 		return decimal.Decimal{}, err
