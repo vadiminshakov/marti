@@ -18,7 +18,7 @@ func Test(t *testing.T) {
 	secretkey := os.Getenv("SECRETKEY")
 	require.NotEmpty(t, apikey, "SECRETKEY env is not set")
 
-	pricer := NewPricer(binance.NewClient(apikey, secretkey))
+	pricer := NewBinancePricer(binance.NewClient(apikey, secretkey))
 	price, err := pricer.GetPrice(entity.Pair{From: "BTC", To: "RUB"})
 	assert.NoError(t, err)
 	f, _ := price.Float64()
