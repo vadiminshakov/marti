@@ -43,8 +43,6 @@ func main() {
 		logger.Fatal("failed to get configuration", zap.Error(err))
 	}
 
-	binanceClient := binance.NewClient(apikey, secretKey)
-
 	g := new(errgroup.Group)
 	var timerStarted atomic.Bool
 	timerStarted.Store(false)
@@ -57,6 +55,7 @@ func main() {
 				executor := func(context.Context) error { return nil }
 
 				if platform == "binance" {
+					binanceClient := binance.NewClient(apikey, secretKey)
 					cf := channel.NewBinanceChannelFinder(binanceClient, conf.Pair, conf.StatHours)
 					executor, err = binanceTradeServiceCreator(logger, cf, binanceClient, conf.Pair, conf.Usebalance, conf.PollPriceInterval)
 					if err != nil {
