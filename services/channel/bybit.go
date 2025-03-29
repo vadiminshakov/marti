@@ -1,7 +1,7 @@
 package channel
 
 import (
-	bybit "github.com/hirokisan/bybit/v2"
+	"github.com/hirokisan/bybit/v2"
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/entity"
@@ -18,6 +18,11 @@ func NewBybitChannelFinder(client *bybit.Client, pair entity.Pair, statHours uin
 	return &BybitWindowFinder{client: client, pair: pair, statHours: statHours}
 }
 
+// GetTradingChannel calculates the trading channel (price range) for a given trading pair using historical kline (candlestick) data.
+// It performs the following steps:
+// 1. Determines the time range for fetching historical data based on the configured statHours (number of hours to look back).
+// 2. Fetches kline data from the Bybit API for the specified trading pair and time range.
+// 3. Calculates the optimal buy price and trading channel (price range) using the converted kline data.
 func (b *BybitWindowFinder) GetTradingChannel() (decimal.Decimal, decimal.Decimal, error) {
 	startTime := time.Now().Add(-time.Duration(b.statHours)*time.Hour).Unix() * 1000
 	endTime := time.Now().Unix() * 1000
