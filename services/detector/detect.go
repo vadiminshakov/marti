@@ -6,7 +6,6 @@ import (
 )
 
 // Detect returns the trade action needed to be done, buy point, trade channel.
-// Sell or buy point are calculated as a half of the channel multiplied by priceShift.
 func Detect(lastaction entity.Action, buypoint, window, price decimal.Decimal) (entity.Action, error) {
 	nevermindChange := window.Div(decimal.NewFromInt(2))
 	// check need to sell
