@@ -20,9 +20,6 @@ _config.yaml_
 ```
 # The trading pair. The pair should be in the format COIN1_COIN2.
 - pair: BTC_USDT
-
-# The minimum window size for statistical analysis.
-  minwindow: 100
   
 # The number of hours in the past to be used for statistical calculations.
   stathours: 120
@@ -36,5 +33,3 @@ _config.yaml_
 # The time interval between polling market prices to make trading decision (buy/sell/do nothing).
   pollpriceinterval: 5m
 ```
-
-The project is on hold due to the restriction of access to Binance for Russian citizens.
