@@ -7,16 +7,16 @@ import (
 	"github.com/vadiminshakov/marti/entity"
 )
 
-type Trader struct {
+type BinanceTrader struct {
 	client *binance.Client
 	pair   entity.Pair
 }
 
-func NewTrader(client *binance.Client, pair entity.Pair) (*Trader, error) {
-	return &Trader{pair: pair, client: client}, nil
+func NewBinanceTrader(client *binance.Client, pair entity.Pair) (*BinanceTrader, error) {
+	return &BinanceTrader{pair: pair, client: client}, nil
 }
 
-func (t *Trader) Buy(amount decimal.Decimal) error {
+func (t *BinanceTrader) Buy(amount decimal.Decimal) error {
 	amount = amount.RoundFloor(4)
 	_, err := t.client.NewCreateOrderService().Symbol(t.pair.Symbol()).
 		Side(binance.SideTypeBuy).Type(binance.OrderTypeMarket).
@@ -26,7 +26,7 @@ func (t *Trader) Buy(amount decimal.Decimal) error {
 	return err
 }
 
-func (t *Trader) Sell(amount decimal.Decimal) error {
+func (t *BinanceTrader) Sell(amount decimal.Decimal) error {
 	amount = amount.RoundFloor(4)
 	_, err := t.client.NewCreateOrderService().Symbol(t.pair.Symbol()).
 		Side(binance.SideTypeSell).Type(binance.OrderTypeMarket).

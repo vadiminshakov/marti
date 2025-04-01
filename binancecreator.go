@@ -33,7 +33,7 @@ func binanceTradeServiceCreator(logger *zap.Logger, wf channel.ChannelFinder,
 		return nil, err
 	}
 
-	trader, err := binancetrader.NewTrader(binanceClient, pair)
+	trader, err := binancetrader.NewBinanceTrader(binanceClient, pair)
 	if err != nil {
 		return nil, err
 	}
