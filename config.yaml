@@ -1,6 +1,9 @@
 # The trading pair. The pair should be in the format COIN1_COIN2.
 - pair: BTC_USDT
 
+  # The platform to trade on.
+  platform: binance
+
   # The minimum channel size for statistical analysis.
   minchannel: 100
 
@@ -17,6 +20,7 @@
   pollpriceinterval: 5m
 
 - pair: ETH_USDT
+  platform: bybit
   usebalance: 27
   minchannel: 7
   stathours: 240
@@ -24,6 +28,7 @@
   pollpriceinterval: 5m
 
 - pair: BNB_USDT
+  platform: binance
   usebalance: 20
   minchannel: 0.9
   stathours: 260
