@@ -12,6 +12,7 @@ import (
 )
 
 type Config struct {
+	Platform          string
 	Pair              entity.Pair
 	StatHours         uint64
 	Usebalance        decimal.Decimal
@@ -86,26 +87,24 @@ func getFromCLI() (pair entity.Pair, hours uint64, usebalance decimal.Decimal,
 
 func getYaml(path string) ([]Config, error) {
 	var configsTmp []ConfigTmp
+	var configs []Config
 
 	f, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	err = yaml.Unmarshal(f, &configsTmp)
-	if err != nil {
+	if err := yaml.Unmarshal(f, &configsTmp); err != nil {
 		return nil, err
 	}
-
-	configs := make([]Config, 0, len(configsTmp))
 
 	for _, c := range configsTmp {
 		pair, err := getPairFromString(c.Pair)
 		if err != nil {
-			return nil, fmt.Errorf("incorrect 'pair' param in yaml config (correct format is COIN1_COIN2), error: %s", err)
+			return nil, fmt.Errorf("incorrect 'pair' param in yaml config: %s, error: %w", c.Pair, err)
 		}
 		usebalance, err := decimal.NewFromString(c.Usebalance)
 		if err != nil {
-			return nil, fmt.Errorf("incorrect 'usebalance' param in yaml config (correct format is 12), error: %s", err)
+			return nil, fmt.Errorf("incorrect 'usebalance' param in yaml config (correct format is 12), error: %w", err)
 		}
 
 		configs = append(configs, Config{
@@ -118,7 +117,6 @@ func getYaml(path string) ([]Config, error) {
 	}
 	return configs, nil
 }
-
 func getPairFromString(pairStr string) (entity.Pair, error) {
 	pairElements := strings.Split(pairStr, "_")
 	if len(pairElements) != 2 {
