@@ -5,7 +5,7 @@ import (
 	"encoding/csv"
 	"errors"
 	"github.com/adshao/go-binance/v2"
-	"github.com/vadiminshakov/marti/entity"
+	"github.com/vadiminshakov/marti/internal/app/entity"
 	"os"
 	"sort"
 	"time"
