@@ -4,7 +4,7 @@ package mock
 
 import (
 	decimal "github.com/shopspring/decimal"
-	entity "github.com/vadiminshakov/marti/entity"
+	entity "github.com/vadiminshakov/marti/internal/app/entity"
 
 	mock "github.com/stretchr/testify/mock"
 )

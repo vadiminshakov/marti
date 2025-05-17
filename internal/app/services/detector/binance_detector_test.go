@@ -15,7 +15,7 @@ func TestNeedAction(t *testing.T) {
 	buypoint := decimal.NewFromInt(100)
 	window := decimal.NewFromInt(6)
 
-	d := Detector{
+	d := BinanceDetector{
 		pair:       pair,
 		buypoint:   buypoint,
 		channel:    window,

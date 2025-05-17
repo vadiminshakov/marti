@@ -1,0 +1,30 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# IDE files
+.idea/
+.vscode/
+
+# Dependency directories (remove these if you want to commit your vendor directory)
+/vendor/
+
+# Build artifacts
+/bin/
+/dist/
+
+# Config files that might contain sensitive information
+*.env
+*.local.yaml
+
+# Log files
+*.log
