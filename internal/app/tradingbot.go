@@ -7,7 +7,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/config"
-	"github.com/vadiminshakov/marti/entity"
+	"github.com/vadiminshakov/marti/internal/app/entity"
 	"github.com/vadiminshakov/marti/internal/app/services/channel"
 	"github.com/vadiminshakov/marti/internal/app/services/detector"
 	"github.com/vadiminshakov/marti/internal/app/services/pricer"
