@@ -2,7 +2,7 @@ package pricer
 
 import (
 	"github.com/shopspring/decimal"
-	"github.com/vadiminshakov/marti/entity"
+	"github.com/vadiminshakov/marti/internal/app/entity"
 )
 
 type Pricer interface {

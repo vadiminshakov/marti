@@ -2,9 +2,10 @@ package pricer
 
 import (
 	"fmt"
+
 	"github.com/hirokisan/bybit/v2"
 	"github.com/shopspring/decimal"
-	"github.com/vadiminshakov/marti/entity"
+	"github.com/vadiminshakov/marti/internal/app/entity"
 )
 
 type BybitPricer struct {
