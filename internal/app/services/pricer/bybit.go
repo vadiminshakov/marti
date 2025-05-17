@@ -26,10 +26,10 @@ func (p *BybitPricer) GetPrice(pair entity.Pair) (decimal.Decimal, error) {
 	if err != nil {
 		return decimal.Decimal{}, err
 	}
-
-	if len(result.Result.LinearInverse.List) == 0 {
+	
+	if len(result.Result.Spot.List) == 0 {
 		return decimal.Decimal{}, fmt.Errorf("bybit API returned empty prices for %s", pair.String())
 	}
 
-	return decimal.NewFromString(result.Result.LinearInverse.List[0].Bid1Price)
+	return decimal.NewFromString(result.Result.Spot.List[0].LastPrice)
 }
