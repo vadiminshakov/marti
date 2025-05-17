@@ -82,9 +82,38 @@ linters-settings:
   # Configuration for the goimports linter
   goimports:
     # Put imports beginning with prefix after 3rd-party packages.
-    # It's a comma-separated list of prefixes.
     local-prefixes: github.com/vadiminshakov/marti
-  
+    
+  # Configuration for gci (Go Control Import)
+  gci:
+    # Require specific import order
+    sections:
+      - standard       # Standard library
+      - default         # External packages
+      - prefix(github.com/vadiminshakov/marti)  # Local packages
+      - blank           # Blank line between sections
+      - dot             # Dot imports (should be avoided)
+    
+  # Enable additional checks for import paths
+  staticcheck:
+    checks:
+      - all
+      - -ST1000  # Check for malformed package comments
+      - -ST1003  # Check for malformed variable names
+      - -ST1005  # Check for malformed error messages
+      - -ST1006  # Check for malformed receiver names
+      - -ST1008  # Check for malformed error returns
+      - -ST1012  # Check for malformed error variables
+      - -ST1016  # Check for malformed receiver names
+      - -ST1017  # Check for malformed receiver names
+      - -ST1018  # Check for malformed receiver names
+      - -ST1019  # Check for malformed receiver names
+      - -ST1020  # Check for malformed receiver names
+      - -ST1021  # Check for malformed receiver names
+      - -ST1022  # Check for malformed receiver names
+      - -ST1023  # Check for malformed receiver names
+      - -ST1024  # Check for malformed receiver names
+    
   # Configuration for the revive linter (replacement for golint and nosnakecase)
   revive:
     # The default configuration comes from https://github.com/mgechev/revive/blob/master/config/defaults.toml
