@@ -4,6 +4,7 @@
 package pricer
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
