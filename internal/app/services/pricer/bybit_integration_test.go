@@ -1,10 +1,8 @@
 //go:build integration
-// +build integration
 
 package pricer
 
 import (
-	"fmt"
 	"os"
 	"testing"
 
