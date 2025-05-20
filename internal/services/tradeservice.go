@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
-	"github.com/vadiminshakov/marti/internal/app/entity"
-	"github.com/vadiminshakov/marti/internal/app/services/detector"
-	"github.com/vadiminshakov/marti/internal/app/services/trader"
+	"github.com/vadiminshakov/marti/internal/entity"
+	"github.com/vadiminshakov/marti/internal/services/detector"
+	"github.com/vadiminshakov/marti/internal/services/trader"
 	"go.uber.org/zap"
 )
 

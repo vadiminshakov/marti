@@ -2,7 +2,7 @@ package detector
 
 import (
 	"github.com/shopspring/decimal"
-	"github.com/vadiminshakov/marti/internal/app/entity"
+	"github.com/vadiminshakov/marti/internal/entity"
 )
 
 // Detect returns the trade action needed to be done, buy point, trade channel.

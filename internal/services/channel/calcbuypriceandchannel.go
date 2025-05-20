@@ -3,7 +3,7 @@ package channel
 import (
 	"fmt"
 	"github.com/shopspring/decimal"
-	"github.com/vadiminshakov/marti/internal/app/entity"
+	"github.com/vadiminshakov/marti/internal/entity"
 )
 
 // The minTradeChannelPercent constant represents the minimum percentage of the trade channel relative

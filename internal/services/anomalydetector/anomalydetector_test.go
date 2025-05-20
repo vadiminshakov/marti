@@ -3,7 +3,7 @@ package anomalydetector
 import (
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
-	"github.com/vadiminshakov/marti/internal/app/entity"
+	"github.com/vadiminshakov/marti/internal/entity"
 	"testing"
 )
 

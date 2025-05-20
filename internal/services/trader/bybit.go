@@ -4,7 +4,7 @@ import (
 	"github.com/hirokisan/bybit/v2"
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
-	"github.com/vadiminshakov/marti/internal/app/entity"
+	"github.com/vadiminshakov/marti/internal/entity"
 )
 
 type BybitTrader struct {

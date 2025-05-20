@@ -6,7 +6,7 @@ import (
 
 	"github.com/hirokisan/bybit/v2"
 	"github.com/shopspring/decimal"
-	"github.com/vadiminshakov/marti/internal/app/entity"
+	"github.com/vadiminshakov/marti/internal/entity"
 )
 
 type BybitDetector struct {

@@ -1,20 +1,20 @@
-package app
+package internal
 
 import (
 	"context"
 	"fmt"
-	"time"
+	"github.com/adshao/go-binance/v2"
+	"github.com/hirokisan/bybit/v2"
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/config"
-	"github.com/vadiminshakov/marti/internal/app/entity"
 	"github.com/vadiminshakov/marti/internal/app/services/channel"
 	"github.com/vadiminshakov/marti/internal/app/services/detector"
 	"github.com/vadiminshakov/marti/internal/app/services/pricer"
 	"github.com/vadiminshakov/marti/internal/app/services/trader"
+	"github.com/vadiminshakov/marti/internal/entity"
 	"go.uber.org/zap"
-	"github.com/adshao/go-binance/v2"
-	"github.com/hirokisan/bybit/v2"
+	"time"
 )
 
 // TradingBot represents a single trading instance
@@ -52,8 +52,8 @@ func NewTradingBot(conf config.Config, client interface{}) (*TradingBot, error) 
 				}
 				return d
 			}(),
-			Pricer:        pricer.NewBinancePricer(binanceClient),
-			Config:        conf,
+			Pricer: pricer.NewBinancePricer(binanceClient),
+			Config: conf,
 		}, nil
 	case "bybit":
 		bybitClient := client.(*bybit.Client)
@@ -78,8 +78,8 @@ func NewTradingBot(conf config.Config, client interface{}) (*TradingBot, error) 
 				}
 				return d
 			}(),
-			Pricer:        pricer.NewBybitPricer(bybitClient),
-			Config:        conf,
+			Pricer: pricer.NewBybitPricer(bybitClient),
+			Config: conf,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported platform: %s", conf.Platform)

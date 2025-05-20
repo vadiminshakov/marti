@@ -5,7 +5,7 @@ import (
 
 	"github.com/hirokisan/bybit/v2"
 	"github.com/shopspring/decimal"
-	"github.com/vadiminshakov/marti/internal/app/entity"
+	"github.com/vadiminshakov/marti/internal/entity"
 )
 
 type BybitPricer struct {
@@ -26,7 +26,7 @@ func (p *BybitPricer) GetPrice(pair entity.Pair) (decimal.Decimal, error) {
 	if err != nil {
 		return decimal.Decimal{}, err
 	}
-	
+
 	if len(result.Result.Spot.List) == 0 {
 		return decimal.Decimal{}, fmt.Errorf("bybit API returned empty prices for %s", pair.String())
 	}
