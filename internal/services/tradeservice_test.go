@@ -1,15 +1,16 @@
 package services
 
 import (
+	"testing"
+
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	anomalymock "github.com/vadiminshakov/marti/internal/app/services/anomalydetector/mock"
-	detectormock "github.com/vadiminshakov/marti/internal/app/services/detector/mock"
-	tradermock "github.com/vadiminshakov/marti/internal/app/services/trader/mock"
 	"github.com/vadiminshakov/marti/internal/entity"
+	anomalymock "github.com/vadiminshakov/marti/internal/services/anomalydetector/mock"
+	detectormock "github.com/vadiminshakov/marti/internal/services/detector/mock"
+	tradermock "github.com/vadiminshakov/marti/internal/services/trader/mock"
 	"go.uber.org/zap"
-	"testing"
 )
 
 type pricemock struct {
