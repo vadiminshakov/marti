@@ -3,19 +3,21 @@ package main
 import (
 	"encoding/csv"
 	"fmt"
+
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 	"github.com/vadiminshakov/marti/internal/entity"
 
-	"github.com/vadiminshakov/marti/internal/services"
-	"github.com/vadiminshakov/marti/internal/services/anomalydetector"
-	"github.com/vadiminshakov/marti/internal/services/channel"
-	"go.uber.org/zap"
 	"log"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vadiminshakov/marti/internal/services"
+	"github.com/vadiminshakov/marti/internal/services/anomalydetector"
+	"github.com/vadiminshakov/marti/internal/services/channel"
+	"go.uber.org/zap"
 )
 
 const (
@@ -166,7 +168,7 @@ func prepareData(filePath string, pair *entity.Pair) (chan decimal.Decimal, chan
 
 	cleanup := func() {
 		os.Remove(filePath)
-		os.RemoveAll("waldata")
+		os.RemoveAll("./wal")
 	}
 
 	interval := 1300

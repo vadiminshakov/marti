@@ -3,18 +3,19 @@ package internal
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/adshao/go-binance/v2"
 	"github.com/hirokisan/bybit/v2"
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/config"
-	"github.com/vadiminshakov/marti/internal/app/services/channel"
-	"github.com/vadiminshakov/marti/internal/app/services/detector"
-	"github.com/vadiminshakov/marti/internal/app/services/pricer"
-	"github.com/vadiminshakov/marti/internal/app/services/trader"
+	"github.com/vadiminshakov/marti/internal/services/channel"
+	"github.com/vadiminshakov/marti/internal/services/detector"
+	"github.com/vadiminshakov/marti/internal/services/pricer"
+	"github.com/vadiminshakov/marti/internal/services/trader"
 	"github.com/vadiminshakov/marti/internal/entity"
 	"go.uber.org/zap"
-	"time"
 )
 
 // TradingBot represents a single trading instance
