@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/vadiminshakov/marti/config"
-	"github.com/vadiminshakov/marti/internal/app"
-	"github.com/vadiminshakov/marti/internal/app/clients"
+	"github.com/vadiminshakov/marti/internal"
+	"github.com/vadiminshakov/marti/internal/clients"
 	"go.uber.org/zap"
 )
 
@@ -38,7 +38,7 @@ func main() {
 			log.Fatal("unsupported platform")
 		}
 
-		bot, err := app.NewTradingBot(config, client)
+		bot, err := internal.NewTradingBot(config, client)
 		if err != nil {
 			log.Fatal(err)
 		}

@@ -9,7 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/vadiminshakov/marti/internal/app/clients"
+	"github.com/vadiminshakov/marti/internal/clients"
 	"github.com/vadiminshakov/marti/internal/entity"
 )
 

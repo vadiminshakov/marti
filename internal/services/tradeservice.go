@@ -1,9 +1,12 @@
 package services
 
 import (
-	"fmt"
+	"encoding/json"
+	"time"
+
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
+	"github.com/vadiminshakov/gowal"
 	"github.com/vadiminshakov/marti/internal/entity"
 	"github.com/vadiminshakov/marti/internal/services/detector"
 	"github.com/vadiminshakov/marti/internal/services/trader"
@@ -11,10 +14,30 @@ import (
 )
 
 const (
-	maxDcaTrades            = 5
-	dcaPercentThresholdBuy  = 0.1
-	dcaPercentThresholdSell = 1
+	maxDcaTrades            = 15
+	dcaPercentThresholdBuy  = 1
+	dcaPercentThresholdSell = 7
 )
+
+var (
+	ErrNoData = errors.New("no data found")
+)
+
+// DCAPurchase represents a single DCA purchase
+type DCAPurchase struct {
+	Price     decimal.Decimal `json:"price"`
+	Amount    decimal.Decimal `json:"amount"`
+	Time      time.Time       `json:"time"`
+	TradePart int             `json:"trade_part"`
+}
+
+// DCASeries represents a complete DCA series
+type DCASeries struct {
+	Purchases     []DCAPurchase   `json:"purchases"`
+	AvgEntryPrice decimal.Decimal `json:"avg_entry_price"`
+	FirstBuyTime  time.Time       `json:"first_buy_time"`
+	TotalAmount   decimal.Decimal `json:"total_amount"`
+}
 
 // Pricer provides current price of asset in trade pair.
 type Pricer interface {
@@ -26,65 +49,102 @@ type AnomalyDetector interface {
 	IsAnomaly(price decimal.Decimal) bool
 }
 
-type wal interface {
-	GetLastBuyMeta() (BuyMetaData, error)
-	Write(key string, value decimal.Decimal) error
-	Close() error
-}
-
 // TradeService makes trades for specific trade pair.
 type TradeService struct {
 	pair            entity.Pair
 	amount          decimal.Decimal
-	lastBuyPrice    decimal.Decimal
 	tradePart       decimal.Decimal
 	pricer          Pricer
 	detector        detector.Detector
 	trader          trader.Trader
 	anomalyDetector AnomalyDetector
 	l               *zap.Logger
-	wal             wal
-
-	noTrades bool
+	wal             *gowal.Wal
+	dcaSeries       *DCASeries
+	noTrades        bool
 }
 
 // NewTradeService creates new TradeService instance.
 func NewTradeService(l *zap.Logger, pair entity.Pair, amount decimal.Decimal, pricer Pricer, detector detector.Detector,
 	trader trader.Trader, anomalyDetector AnomalyDetector) (*TradeService, error) {
-	w, err := NewWrappedWal()
-	if err != nil {
-		return nil, err
+	// Initialize WAL
+	walCfg := gowal.Config{
+		Dir:              "./wal",
+		Prefix:           "log_",
+		SegmentThreshold: 1000,
+		MaxSegments:      100,
+		IsInSyncDiskMode: true,
 	}
 
-	lastBuy, err := w.GetLastBuyMeta()
-	if err != nil && !errors.Is(err, ErrNoData) {
-		w.Close()
-		return nil, err
+	wal, err := gowal.NewWAL(walCfg)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create WAL")
+	}
+
+	// Try to recover DCA series from WAL
+	dcaSeries := &DCASeries{
+		Purchases: make([]DCAPurchase, 0),
+	}
+
+	for msg := range wal.Iterator() {
+		if msg.Key == "dca_series" {
+			if err := json.Unmarshal(msg.Value, dcaSeries); err != nil {
+				l.Error("failed to unmarshal DCA series", zap.Error(err))
+				continue
+			}
+		}
 	}
 
 	return &TradeService{
-		pair,
-		amount,
-		lastBuy.price,
-		decimal.Zero,
-		pricer,
-		detector,
-		trader,
-		anomalyDetector,
-		l, w,
-		errors.Is(err, ErrNoData),
+		pair:            pair,
+		amount:          amount,
+		tradePart:       decimal.Zero,
+		pricer:          pricer,
+		detector:        detector,
+		trader:          trader,
+		anomalyDetector: anomalyDetector,
+		l:               l,
+		wal:             wal,
+		dcaSeries:       dcaSeries,
+		noTrades:        len(dcaSeries.Purchases) == 0,
 	}, nil
 }
 
+// saveDCASeries saves the current DCA series to WAL
+func (t *TradeService) saveDCASeries() error {
+	data, err := json.Marshal(t.dcaSeries)
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal DCA series")
+	}
+
+	return t.wal.Write(uint64(time.Now().UnixNano()), "dca_series", data)
+}
+
+// addDCAPurchase adds a new DCA purchase to the series and saves it to WAL
+func (t *TradeService) addDCAPurchase(price, amount decimal.Decimal) error {
+	purchase := DCAPurchase{
+		Price:     price,
+		Amount:    amount,
+		Time:      time.Now(),
+		TradePart: int(t.tradePart.IntPart()),
+	}
+
+	t.dcaSeries.Purchases = append(t.dcaSeries.Purchases, purchase)
+	t.dcaSeries.TotalAmount = t.dcaSeries.TotalAmount.Add(amount)
+
+	// Update average entry price
+	if len(t.dcaSeries.Purchases) == 1 {
+		t.dcaSeries.AvgEntryPrice = price
+		t.dcaSeries.FirstBuyTime = purchase.Time
+	} else {
+		t.dcaSeries.AvgEntryPrice = t.dcaSeries.AvgEntryPrice.Mul(t.dcaSeries.TotalAmount.Sub(amount)).
+			Add(price.Mul(amount)).Div(t.dcaSeries.TotalAmount)
+	}
+
+	return t.saveDCASeries()
+}
+
 // Trade is the main method responsible for executing trading logic based on the current price of the asset.
-// It performs the following steps:
-// 1. Fetches the current price of the trading pair using the pricer service.
-// 2. Determines the required action (buy, sell, or no action) using the detector service.
-// 3. Checks for price anomalies using the anomaly detector. If an anomaly is detected, no action is taken.
-// 4. Executes the appropriate action (buy or sell) based on the detected action.
-// 5. Handles a special case for ActionNull (no action):
-//   - If the current price is less than or equal to the last buy price and the price difference is significant,
-//     it triggers a buy action if the maximum number of DCA trades has not been reached.
 func (t *TradeService) Trade() (*entity.TradeEvent, error) {
 	price, err := t.pricer.GetPrice(t.pair)
 	if err != nil {
@@ -106,19 +166,21 @@ func (t *TradeService) Trade() (*entity.TradeEvent, error) {
 	case entity.ActionBuy:
 		tradeEvent, err = t.actBuy(price)
 		if err != nil {
+			return nil, err
 		}
-
 		t.noTrades = false
 	case entity.ActionSell:
 		tradeEvent, err = t.actSell(price)
 		if err != nil {
+			return nil, err
 		}
-
 	case entity.ActionNull:
-		if price.LessThanOrEqual(t.lastBuyPrice) {
-			if isPercentDifferenceSignificant(price, t.lastBuyPrice, dcaPercentThresholdBuy) {
-				if t.tradePart.LessThan(decimal.NewFromInt(maxDcaTrades)) {
-					return t.actBuy(price)
+		if len(t.dcaSeries.Purchases) > 0 {
+			if price.LessThanOrEqual(t.dcaSeries.AvgEntryPrice) {
+				if isPercentDifferenceSignificant(price, t.dcaSeries.AvgEntryPrice, dcaPercentThresholdBuy) {
+					if t.tradePart.LessThan(decimal.NewFromInt(maxDcaTrades)) {
+						return t.actBuy(price)
+					}
 				}
 			}
 		}
@@ -132,40 +194,36 @@ func (t *TradeService) Close() error {
 }
 
 func (t *TradeService) actBuy(price decimal.Decimal) (*entity.TradeEvent, error) {
-	// Check if the price difference between the current price and the last buy price
-	// is significant enough to proceed with the buy action.
-	// If not, return nil (no action is taken).
-	if !isPercentDifferenceSignificant(price, t.lastBuyPrice, dcaPercentThresholdBuy) {
+	// Check if the price difference is significant enough
+	if len(t.dcaSeries.Purchases) > 0 {
+		if !isPercentDifferenceSignificant(price, t.dcaSeries.AvgEntryPrice, dcaPercentThresholdBuy) {
+			return nil, nil
+		}
+	}
+
+	// Check if the number of trades has reached the maximum allowed DCA trades
+	if t.tradePart.GreaterThanOrEqual(decimal.NewFromInt(maxDcaTrades)) {
+		t.l.Info("skip buy, maximum DCA trades reached",
+			zap.String("pair", t.pair.String()),
+			zap.Int("max_trades", maxDcaTrades))
 		return nil, nil
 	}
 
-	// Check if the number of trades (trade parts) has reached the maximum allowed DCA trades.
-	// If so, skip the buy action and log a message.
-	if t.tradePart.GreaterThanOrEqual(decimal.NewFromInt(maxDcaTrades)) {
-		fmt.Println("skip buy, insufficient balance")
-	}
+	// Calculate the amount to buy using progressive DCA
+	baseAmount := t.amount.Div(decimal.NewFromInt(maxDcaTrades))
+	multiplier := t.tradePart.Add(decimal.NewFromInt(1))
+	amount := baseAmount.Mul(multiplier)
 
-	// Calculate the amount to buy by dividing the total amount by the maximum number of DCA trades.
-	// This ensures that the total amount is evenly distributed across multiple trades.
-	amount := t.amount.Div(decimal.NewFromInt(maxDcaTrades))
-
-	// Execute the buy action using the trader's Buy method.
+	// Execute the buy action
 	if err := t.trader.Buy(amount); err != nil {
 		return nil, errors.Wrapf(err, "trader buy failed for pair %s", t.pair.String())
 	}
 
-	// Write the last buy amount to the WAL (Write-Ahead Log) for persistence.
-	if err := t.wal.Write("lastamount", amount); err != nil {
-		return nil, errors.Wrapf(err, "failed to write last buy amount for pair %s", t.pair.String())
-	}
-
-	// Save the last buy price only if this is the first trade part (DCA).
-	// This prevents overwriting the last buy price for subsequent trade parts.
-	if t.tradePart.LessThan(decimal.NewFromInt(1)) {
-		if err := t.wal.Write("lastbuy", price); err != nil {
-			return nil, errors.Wrapf(err, "failed to write last buy price for pair %s", t.pair.String())
-		}
-		t.lastBuyPrice = price
+	// Add purchase to DCA series and save to WAL
+	if err := t.addDCAPurchase(price, amount); err != nil {
+		t.l.Error("failed to save DCA purchase",
+			zap.Error(err),
+			zap.String("pair", t.pair.String()))
 	}
 
 	tradeEvent := &entity.TradeEvent{
@@ -175,12 +233,12 @@ func (t *TradeService) actBuy(price decimal.Decimal) (*entity.TradeEvent, error)
 		Price:  price,
 	}
 
-	if t.tradePart.GreaterThan(decimal.NewFromInt(0)) {
-		fmt.Println("DCA buy trade part", t.tradePart.Add(decimal.NewFromInt(1)),
-			"price", price,
-			"first DCA buy price", t.lastBuyPrice,
-		)
-	}
+	t.l.Info("DCA buy executed",
+		zap.String("pair", t.pair.String()),
+		zap.Int("trade_part", int(t.tradePart.IntPart())+1),
+		zap.String("price", price.String()),
+		zap.String("amount", amount.String()),
+		zap.String("avg_entry_price", t.dcaSeries.AvgEntryPrice.String()))
 
 	t.tradePart = t.tradePart.Add(decimal.NewFromInt(1))
 
@@ -188,45 +246,55 @@ func (t *TradeService) actBuy(price decimal.Decimal) (*entity.TradeEvent, error)
 }
 
 func (t *TradeService) actSell(price decimal.Decimal) (*entity.TradeEvent, error) {
-	// If there is no recorded last buy price, return nil (no action is taken).
-	if t.lastBuyPrice.IsZero() {
+	if len(t.dcaSeries.Purchases) == 0 {
 		return nil, nil
 	}
 
-	// Check if the price difference between the current price and the last buy price
-	// is significant enough to proceed with the sell action.
-	// If not, return nil (no action is taken).
-	if !isPercentDifferenceSignificant(price, t.lastBuyPrice, dcaPercentThresholdSell) {
+	// Check if the price difference is significant enough
+	if !isPercentDifferenceSignificant(price, t.dcaSeries.AvgEntryPrice, dcaPercentThresholdSell) {
 		return nil, nil
 	}
 
-	// If the current price is less than or equal to the last buy price,
-	// and the number of trade parts is less than the maximum allowed DCA trades,
-	// execute a buy action instead of a sell action (to average down the cost).
-	if price.LessThanOrEqual(t.lastBuyPrice) {
+	// If price is below average entry price and we haven't reached max DCA trades,
+	// execute another buy instead of sell
+	if price.LessThanOrEqual(t.dcaSeries.AvgEntryPrice) {
 		if t.tradePart.LessThan(decimal.NewFromInt(maxDcaTrades)) {
 			return t.actBuy(price)
 		}
 	}
 
-	// Calculate the total amount to sell by multiplying the amount per trade part
-	// by the number of trade parts executed so far.
-	amount := t.amount.Div(decimal.NewFromInt(maxDcaTrades)).Mul(t.tradePart)
+	// Calculate profit percentage
+	profit := price.Sub(t.dcaSeries.AvgEntryPrice).Div(t.dcaSeries.AvgEntryPrice).Mul(decimal.NewFromInt(100))
 
-	// Execute the sell action using the trader's Sell method.
+	// Determine sell amount based on profit
+	var amount decimal.Decimal
+	if profit.GreaterThan(decimal.NewFromInt(5)) && profit.LessThan(decimal.NewFromInt(10)) {
+		// Partial sell at 5-10% profit
+		amount = t.dcaSeries.TotalAmount.Div(decimal.NewFromInt(2))
+	} else if profit.GreaterThanOrEqual(decimal.NewFromInt(10)) {
+		// Full sell at >=10% profit
+		amount = t.dcaSeries.TotalAmount
+	} else {
+		return nil, nil
+	}
+
+	// Execute the sell action
 	if err := t.trader.Sell(amount); err != nil {
-		return nil, errors.Wrapf(err, "trader sell failed for pair %s", t.pair)
+		return nil, errors.Wrapf(err, "trader sell failed for pair %s", t.pair.String())
 	}
 
-	// Reset the trade part counter to zero after a successful sell action.
+	// Reset DCA series
+	t.dcaSeries = &DCASeries{
+		Purchases: make([]DCAPurchase, 0),
+	}
+	if err := t.saveDCASeries(); err != nil {
+		t.l.Error("failed to reset DCA series",
+			zap.Error(err),
+			zap.String("pair", t.pair.String()))
+	}
+
+	// Reset trade part counter
 	t.tradePart = decimal.Zero
-
-	// Update the last buy price in the WAL (Write-Ahead Log) to reflect the current price.
-	// This ensures that the system has an up-to-date record of the last buy price.
-	if err := t.wal.Write("lastbuy", price); err != nil {
-		return nil, errors.Wrapf(err, "failed to write last buy price for pair %s", t.pair.String())
-	}
-	t.lastBuyPrice = price
 
 	tradeEvent := &entity.TradeEvent{
 		Action: entity.ActionSell,
@@ -234,6 +302,12 @@ func (t *TradeService) actSell(price decimal.Decimal) (*entity.TradeEvent, error
 		Pair:   t.pair,
 		Price:  price,
 	}
+
+	t.l.Info("sell executed",
+		zap.String("pair", t.pair.String()),
+		zap.String("price", price.String()),
+		zap.String("amount", amount.String()),
+		zap.String("profit_percent", profit.String()))
 
 	return tradeEvent, nil
 }
