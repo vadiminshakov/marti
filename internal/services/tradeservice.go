@@ -8,15 +8,9 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/gowal"
 	"github.com/vadiminshakov/marti/internal/entity"
-	"github.com/vadiminshakov/marti/internal/services/detector"
+	// "github.com/vadiminshakov/marti/internal/services/detector" // Removed
 	"github.com/vadiminshakov/marti/internal/services/trader"
 	"go.uber.org/zap"
-)
-
-const (
-	maxDcaTrades            = 15
-	dcaPercentThresholdBuy  = 1
-	dcaPercentThresholdSell = 7
 )
 
 var (
@@ -55,18 +49,22 @@ type TradeService struct {
 	amount          decimal.Decimal
 	tradePart       decimal.Decimal
 	pricer          Pricer
-	detector        detector.Detector
+	// detector        detector.Detector, // Removed
 	trader          trader.Trader
-	anomalyDetector AnomalyDetector
-	l               *zap.Logger
-	wal             *gowal.Wal
-	dcaSeries       *DCASeries
-	noTrades        bool
+	// anomalyDetector AnomalyDetector, // Removed
+	l                       *zap.Logger
+	wal                     *gowal.Wal
+	dcaSeries               *DCASeries
+	noTrades                bool
+	maxDcaTrades            int
+	dcaPercentThresholdBuy  decimal.Decimal
+	dcaPercentThresholdSell decimal.Decimal
 }
 
 // NewTradeService creates new TradeService instance.
-func NewTradeService(l *zap.Logger, pair entity.Pair, amount decimal.Decimal, pricer Pricer, detector detector.Detector,
-	trader trader.Trader, anomalyDetector AnomalyDetector) (*TradeService, error) {
+func NewTradeService(l *zap.Logger, pair entity.Pair, amount decimal.Decimal, pricer Pricer, // detector detector.Detector, // Removed
+	trader trader.Trader,
+	maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell decimal.Decimal) (*TradeService, error) {
 	// Initialize WAL
 	walCfg := gowal.Config{
 		Dir:              "./wal",
@@ -100,13 +98,16 @@ func NewTradeService(l *zap.Logger, pair entity.Pair, amount decimal.Decimal, pr
 		amount:          amount,
 		tradePart:       decimal.Zero,
 		pricer:          pricer,
-		detector:        detector,
+		// detector:        detector, // Removed
 		trader:          trader,
-		anomalyDetector: anomalyDetector,
-		l:               l,
-		wal:             wal,
-		dcaSeries:       dcaSeries,
-		noTrades:        len(dcaSeries.Purchases) == 0,
+		// anomalyDetector:         anomalyDetector, // Removed
+		l:                       l,
+		wal:                     wal,
+		dcaSeries:               dcaSeries,
+		noTrades:                len(dcaSeries.Purchases) == 0,
+		maxDcaTrades:            maxDcaTrades,
+		dcaPercentThresholdBuy:  dcaPercentThresholdBuy,
+		dcaPercentThresholdSell: dcaPercentThresholdSell,
 	}, nil
 }
 
@@ -121,12 +122,12 @@ func (t *TradeService) saveDCASeries() error {
 }
 
 // addDCAPurchase adds a new DCA purchase to the series and saves it to WAL
-func (t *TradeService) addDCAPurchase(price, amount decimal.Decimal) error {
+func (t *TradeService) addDCAPurchase(price, amount decimal.Decimal, purchaseTime time.Time, tradePartValue int) error {
 	purchase := DCAPurchase{
 		Price:     price,
 		Amount:    amount,
-		Time:      time.Now(),
-		TradePart: int(t.tradePart.IntPart()),
+		Time:      purchaseTime,     // Use passed purchaseTime
+		TradePart: tradePartValue, // Use passed tradePartValue
 	}
 
 	t.dcaSeries.Purchases = append(t.dcaSeries.Purchases, purchase)
@@ -151,42 +152,44 @@ func (t *TradeService) Trade() (*entity.TradeEvent, error) {
 		return nil, errors.Wrapf(err, "pricer failed for pair %s", t.pair.String())
 	}
 
-	act, err := t.detector.NeedAction(price)
-	if err != nil {
-		return nil, errors.Wrapf(err, "detector failed for pair %s", t.pair.String())
-	}
-
-	if t.anomalyDetector.IsAnomaly(price) {
-		t.l.Debug("anomaly detected!")
+	// If no purchases yet, TradeService doesn't act on its own until an initial position is established.
+	if len(t.dcaSeries.Purchases) == 0 {
+		t.l.Debug("No DCA purchases yet, no action taken by TradeService.Trade")
 		return nil, nil
 	}
 
-	var tradeEvent *entity.TradeEvent
-	switch act {
-	case entity.ActionBuy:
-		tradeEvent, err = t.actBuy(price)
-		if err != nil {
-			return nil, err
-		}
-		t.noTrades = false
-	case entity.ActionSell:
-		tradeEvent, err = t.actSell(price)
-		if err != nil {
-			return nil, err
-		}
-	case entity.ActionNull:
-		if len(t.dcaSeries.Purchases) > 0 {
-			if price.LessThanOrEqual(t.dcaSeries.AvgEntryPrice) {
-				if isPercentDifferenceSignificant(price, t.dcaSeries.AvgEntryPrice, dcaPercentThresholdBuy) {
-					if t.tradePart.LessThan(decimal.NewFromInt(maxDcaTrades)) {
-						return t.actBuy(price)
-					}
-				}
+	// Check for DCA buy opportunity
+	if price.LessThan(t.dcaSeries.AvgEntryPrice) &&
+		isPercentDifferenceSignificant(price, t.dcaSeries.AvgEntryPrice, t.dcaPercentThresholdBuy) {
+		if t.tradePart.LessThan(decimal.NewFromInt(int64(t.maxDcaTrades))) {
+			t.l.Info("Price significantly lower than average, attempting DCA buy.",
+				zap.String("price", price.String()),
+				zap.String("avgEntryPrice", t.dcaSeries.AvgEntryPrice.String()))
+			tradeEvent, err := t.actBuy(price)
+			if err == nil && tradeEvent != nil {
+				t.noTrades = false
 			}
+			return tradeEvent, err
 		}
+		t.l.Info("Price significantly lower, but max DCA trades reached or tradePart issue.",
+			zap.String("price", price.String()),
+			zap.String("avgEntryPrice", t.dcaSeries.AvgEntryPrice.String()),
+			zap.Int32("tradePart", t.tradePart.IntPart()),
+			zap.Int("maxDcaTrades", t.maxDcaTrades))
+	} else if price.GreaterThan(t.dcaSeries.AvgEntryPrice) &&
+		isPercentDifferenceSignificant(price, t.dcaSeries.AvgEntryPrice, t.dcaPercentThresholdSell) {
+		// Check for sell opportunity
+		t.l.Info("Price significantly higher than average, attempting sell.",
+			zap.String("price", price.String()),
+			zap.String("avgEntryPrice", t.dcaSeries.AvgEntryPrice.String()))
+		return t.actSell(price)
 	}
 
-	return tradeEvent, nil
+	// No significant price movement for buy or sell
+	t.l.Debug("No significant price movement for action",
+		zap.String("price", price.String()),
+		zap.String("avgEntryPrice", t.dcaSeries.AvgEntryPrice.String()))
+	return nil, nil
 }
 
 func (t *TradeService) Close() error {
@@ -194,74 +197,66 @@ func (t *TradeService) Close() error {
 }
 
 func (t *TradeService) actBuy(price decimal.Decimal) (*entity.TradeEvent, error) {
-	// Check if the price difference is significant enough
-	if len(t.dcaSeries.Purchases) > 0 {
-		if !isPercentDifferenceSignificant(price, t.dcaSeries.AvgEntryPrice, dcaPercentThresholdBuy) {
-			return nil, nil
-		}
-	}
+	// All pre-conditions (price < avgEntry, significant difference, tradePart < maxDcaTrades)
+	// are now expected to be checked by the calling Trade() method.
+	// This method focuses on executing the buy.
 
-	// Check if the number of trades has reached the maximum allowed DCA trades
-	if t.tradePart.GreaterThanOrEqual(decimal.NewFromInt(maxDcaTrades)) {
-		t.l.Info("skip buy, maximum DCA trades reached",
-			zap.String("pair", t.pair.String()),
-			zap.Int("max_trades", maxDcaTrades))
-		return nil, nil
-	}
+	// The check for len(t.dcaSeries.Purchases) > 0 is implicitly handled by Trade()
+	// because AvgEntryPrice would not be meaningful otherwise for the checks in Trade().
+	// If it's the very first buy (initial purchase), Trade() would not call actBuy;
+	// it would be handled by TradingBot.Run's initial purchase logic which calls RecordInitialPurchase.
+	// Subsequent DCA buys assume at least one purchase exists.
 
-	// Calculate the amount to buy using progressive DCA
-	baseAmount := t.amount.Div(decimal.NewFromInt(maxDcaTrades))
-	multiplier := t.tradePart.Add(decimal.NewFromInt(1))
-	amount := baseAmount.Mul(multiplier)
+	// The check for t.tradePart < maxDcaTrades is handled in Trade() before calling actBuy.
+	// if t.tradePart.GreaterThanOrEqual(decimal.NewFromInt(int64(t.maxDcaTrades))) {
+	// 	t.l.Info("skip buy, maximum DCA trades reached",
+	// 		zap.String("pair", t.pair.String()),
+	// 		zap.Int("max_trades", t.maxDcaTrades))
+	// 	return nil, nil
+	// }
+
+	// Use fixed amount t.amount for each DCA purchase.
+	calculatedAmount := t.amount 
 
 	// Execute the buy action
-	if err := t.trader.Buy(amount); err != nil {
-		return nil, errors.Wrapf(err, "trader buy failed for pair %s", t.pair.String())
+	if err := t.trader.Buy(calculatedAmount); err != nil {
+		return nil, errors.Wrapf(err, "trader buy failed for pair %s with amount %s", t.pair.String(), calculatedAmount.String())
 	}
 
 	// Add purchase to DCA series and save to WAL
-	if err := t.addDCAPurchase(price, amount); err != nil {
+	// t.tradePart was incremented by RecordInitialPurchase or a previous actBuy call.
+	// It represents the current trade part number (e.g., 1 for the first DCA buy after initial, 2 for the second, etc.).
+	if err := t.addDCAPurchase(price, calculatedAmount, time.Now(), int(t.tradePart.IntPart())); err != nil {
 		t.l.Error("failed to save DCA purchase",
 			zap.Error(err),
 			zap.String("pair", t.pair.String()))
+		// Note: If saving fails, the buy already executed. This could lead to inconsistency.
 	}
 
 	tradeEvent := &entity.TradeEvent{
 		Action: entity.ActionBuy,
-		Amount: amount,
+		Amount: calculatedAmount, // Use the calculatedAmount that was actually bought
 		Pair:   t.pair,
 		Price:  price,
 	}
 
 	t.l.Info("DCA buy executed",
 		zap.String("pair", t.pair.String()),
-		zap.Int("trade_part", int(t.tradePart.IntPart())+1),
+		zap.Int("trade_part", int(t.tradePart.IntPart())), // Log current trade_part number
 		zap.String("price", price.String()),
-		zap.String("amount", amount.String()),
+		zap.String("amount", calculatedAmount.String()), // Log actual amount bought
 		zap.String("avg_entry_price", t.dcaSeries.AvgEntryPrice.String()))
 
-	t.tradePart = t.tradePart.Add(decimal.NewFromInt(1))
+	t.tradePart = t.tradePart.Add(decimal.NewFromInt(1)) // Increment for the *next* potential DCA buy
 
 	return tradeEvent, nil
 }
 
 func (t *TradeService) actSell(price decimal.Decimal) (*entity.TradeEvent, error) {
-	if len(t.dcaSeries.Purchases) == 0 {
-		return nil, nil
-	}
-
-	// Check if the price difference is significant enough
-	if !isPercentDifferenceSignificant(price, t.dcaSeries.AvgEntryPrice, dcaPercentThresholdSell) {
-		return nil, nil
-	}
-
-	// If price is below average entry price and we haven't reached max DCA trades,
-	// execute another buy instead of sell
-	if price.LessThanOrEqual(t.dcaSeries.AvgEntryPrice) {
-		if t.tradePart.LessThan(decimal.NewFromInt(maxDcaTrades)) {
-			return t.actBuy(price)
-		}
-	}
+	// All pre-conditions for calling actSell (e.g., len(purchases) > 0,
+	// price > avgEntryPrice, and price difference is significant)
+	// are now expected to be checked by the calling Trade() method.
+	// This method focuses on executing the sell.
 
 	// Calculate profit percentage
 	profit := price.Sub(t.dcaSeries.AvgEntryPrice).Div(t.dcaSeries.AvgEntryPrice).Mul(decimal.NewFromInt(100))
@@ -312,26 +307,62 @@ func (t *TradeService) actSell(price decimal.Decimal) (*entity.TradeEvent, error
 	return tradeEvent, nil
 }
 
-func isPercentDifferenceSignificant(a, b decimal.Decimal, dcaPercentThreshold float64) bool {
-	if a.Equal(b) {
-		return false
+func isPercentDifferenceSignificant(currentPrice, referencePrice, thresholdPercent decimal.Decimal) bool {
+	if referencePrice.IsZero() {
+		// If reference is zero, any non-zero current price is an infinite percent difference.
+		// If current price is also zero, then there's no difference.
+		return !currentPrice.IsZero()
 	}
 
-	if a.IsZero() || b.IsZero() {
-		return true
-	}
+	// Calculate abs((currentPrice - referencePrice) / referencePrice) * 100
+	// diff = currentPrice - referencePrice
+	diff := currentPrice.Sub(referencePrice)
+	// percentageDiff = diff / referencePrice
+	percentageDiff := diff.Div(referencePrice)
+	// absPercentageDiff = abs(percentageDiff)
+	absPercentageDiff := percentageDiff.Abs()
+	// absPercentageDiffHundred = absPercentageDiff * 100
+	absPercentageDiffHundred := absPercentageDiff.Mul(decimal.NewFromInt(100))
 
-	var (
-		diff    decimal.Decimal
-		percent decimal.Decimal
-	)
-	if a.GreaterThan(b) {
-		diff = a.Sub(b)
-		percent = diff.Div(b).Mul(decimal.NewFromInt(100))
-	} else {
-		diff = b.Sub(a)
-		percent = diff.Div(a).Mul(decimal.NewFromInt(100))
-	}
-
-	return percent.LessThan(decimal.NewFromFloat(-dcaPercentThreshold)) || percent.GreaterThan(decimal.NewFromFloat(dcaPercentThreshold))
+	return absPercentageDiffHundred.GreaterThan(thresholdPercent)
 }
+
+// RecordInitialPurchase records the very first purchase made by TradingBot.Run()
+func (t *TradeService) RecordInitialPurchase(price, amount decimal.Decimal, purchaseTime time.Time) error {
+	if len(t.dcaSeries.Purchases) != 0 {
+		return errors.New("initial purchase already recorded or DCA series is not empty")
+	}
+
+	}
+
+	// Call addDCAPurchase with the correct tradePart for the initial purchase (0)
+	// and the provided purchaseTime.
+	if err := t.addDCAPurchase(price, amount, purchaseTime, 0); err != nil {
+		t.l.Error("Failed to add initial purchase to DCA series", zap.Error(err))
+		return errors.Wrap(err, "failed to add initial purchase to series")
+	}
+	
+	t.noTrades = false // A trade has now occurred
+
+	// Increment tradePart to 1, as the first part (0) is now used.
+	// Subsequent DCA buys will be part 1, 2, etc.
+	t.tradePart = decimal.NewFromInt(1)
+
+	// saveDCASeries is called within addDCAPurchase, so no need to call it again here
+	// if we assume addDCAPurchase handles its own saving.
+	// However, addDCAPurchase calls saveDCASeries, which uses time.Now() for WAL key.
+	// This is fine. The important part is that the DCAPurchase struct has the correct purchaseTime.
+	
+	// The WAL saving is handled by addDCAPurchase.
+	// If addDCAPurchase failed, it would have returned an error.
+
+	t.l.Info("Initial purchase recorded successfully",
+		zap.String("pair", t.pair.String()),
+		zap.String("price", price.String()),
+		zap.String("amount", amount.String()),
+		zap.Time("time", purchaseTime),
+		zap.Int32("trade_part_set_to", t.tradePart.IntPart()))
+
+	return nil
+}
+

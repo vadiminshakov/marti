@@ -4,70 +4,130 @@ import (
 	"testing"
 
 	"github.com/shopspring/decimal"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/vadiminshakov/marti/internal/entity"
-	anomalymock "github.com/vadiminshakov/marti/internal/services/anomalydetector/mock"
-	detectormock "github.com/vadiminshakov/marti/internal/services/detector/mock"
-	tradermock "github.com/vadiminshakov/marti/internal/services/trader/mock"
-	"go.uber.org/zap"
 )
 
-type pricemock struct {
-	n int64
-}
+func TestIsPercentDifferenceSignificant(t *testing.T) {
+	tests := []struct {
+		name             string
+		currentPrice     decimal.Decimal
+		referencePrice   decimal.Decimal
+		thresholdPercent decimal.Decimal
+		expected         bool
+	}{
+		{
+			name:             "ref zero, current zero, threshold positive",
+			currentPrice:     decimal.Zero,
+			referencePrice:   decimal.Zero,
+			thresholdPercent: decimal.NewFromInt(1),
+			expected:         false, // No difference (0 is not > threshold)
+		},
+		{
+			name:             "ref zero, current non-zero, threshold positive",
+			currentPrice:     decimal.NewFromInt(10),
+			referencePrice:   decimal.Zero,
+			thresholdPercent: decimal.NewFromInt(1),
+			expected:         true, // Infinite difference, considered significant if threshold > 0
+		},
+		{
+			name:             "ref zero, current non-zero, threshold zero",
+			currentPrice:     decimal.NewFromInt(10),
+			referencePrice:   decimal.Zero,
+			thresholdPercent: decimal.Zero, // Threshold is 0
+			expected:         true, // Infinite difference is > 0
+		},
+		{
+			name:             "ref zero, current zero, threshold zero",
+			currentPrice:     decimal.Zero,
+			referencePrice:   decimal.Zero,
+			thresholdPercent: decimal.Zero,
+			expected:         false, // 0 is not > 0
+		},
+		{
+			name:             "current zero, ref non-zero, threshold allows -100% (abs 100%)",
+			currentPrice:     decimal.Zero,
+			referencePrice:   decimal.NewFromInt(10),
+			thresholdPercent: decimal.NewFromInt(99), // abs diff is 100%, 100 > 99 is true
+			expected:         true,
+		},
+		{
+			name:             "current zero, ref non-zero, threshold exactly 100%",
+			currentPrice:     decimal.Zero,
+			referencePrice:   decimal.NewFromInt(10),
+			thresholdPercent: decimal.NewFromInt(100), // abs diff is 100%, 100 > 100 is false
+			expected:         false,
+		},
+		{
+			name:             "no change",
+			currentPrice:     decimal.NewFromInt(100),
+			referencePrice:   decimal.NewFromInt(100),
+			thresholdPercent: decimal.NewFromInt(1),
+			expected:         false, // 0% diff is not > 1%
+		},
+		{
+			name:             "increase, below threshold",
+			currentPrice:     decimal.NewFromFloat(100.5),
+			referencePrice:   decimal.NewFromInt(100),
+			thresholdPercent: decimal.NewFromInt(1), // 0.5% change, 0.5 > 1 is false
+			expected:         false,
+		},
+		{
+			name:             "increase, at threshold (using > logic, so false)",
+			currentPrice:     decimal.NewFromInt(101),
+			referencePrice:   decimal.NewFromInt(100),
+			thresholdPercent: decimal.NewFromInt(1), // 1% change, 1 > 1 is false
+			expected:         false,
+		},
+		{
+			name:             "increase, above threshold",
+			currentPrice:     decimal.NewFromFloat(101.1),
+			referencePrice:   decimal.NewFromInt(100),
+			thresholdPercent: decimal.NewFromInt(1), // 1.1% change, 1.1 > 1 is true
+			expected:         true,
+		},
+		{
+			name:             "decrease, below threshold",
+			currentPrice:     decimal.NewFromFloat(99.5),
+			referencePrice:   decimal.NewFromInt(100),
+			thresholdPercent: decimal.NewFromInt(1), // abs 0.5% change, 0.5 > 1 is false
+			expected:         false,
+		},
+		{
+			name:             "decrease, at threshold (using > logic, so false)",
+			currentPrice:     decimal.NewFromInt(99),
+			referencePrice:   decimal.NewFromInt(100),
+			thresholdPercent: decimal.NewFromInt(1), // abs 1% change, 1 > 1 is false
+			expected:         false,
+		},
+		{
+			name:             "decrease, above threshold",
+			currentPrice:     decimal.NewFromFloat(98.9),
+			referencePrice:   decimal.NewFromInt(100),
+			thresholdPercent: decimal.NewFromInt(1), // abs 1.1% change, 1.1 > 1 is true
+			expected:         true,
+		},
+		{
+			name:             "larger threshold, significant change",
+			currentPrice:     decimal.NewFromInt(115),
+			referencePrice:   decimal.NewFromInt(100),
+			thresholdPercent: decimal.NewFromInt(10), // 15% change, 15 > 10 is true
+			expected:         true,
+		},
+		{
+			name:             "larger threshold, insignificant change",
+			currentPrice:     decimal.NewFromInt(105),
+			referencePrice:   decimal.NewFromInt(100),
+			thresholdPercent: decimal.NewFromInt(10), // 5% change, 5 > 10 is false
+			expected:         false,
+		},
+	}
 
-func (p *pricemock) GetPrice(_ entity.Pair) (decimal.Decimal, error) {
-	p.n += 1
-	return decimal.NewFromInt(p.n), nil
-}
-
-func TestTrade(t *testing.T) {
-	pair := entity.Pair{From: "BTC", To: "USD"}
-
-	pricer := &pricemock{}
-
-	trader := tradermock.NewTrader(t)
-	trader.On("Buy", mock.Anything).Return(nil)
-	trader.On("Sell", mock.Anything).Return(nil)
-
-	detector := detectormock.NewDetector(t)
-	detector.On("NeedAction", decimal.NewFromInt(1)).Return(entity.ActionBuy, nil)
-	detector.On("NeedAction", decimal.NewFromInt(3)).Return(entity.ActionSell, nil)
-	detector.On("NeedAction", decimal.NewFromInt(2)).Return(entity.ActionNull, nil)
-	detector.On("NeedAction", decimal.NewFromInt(4)).Return(entity.ActionNull, nil)
-	detector.On("NeedAction", decimal.NewFromInt(5)).Return(entity.ActionNull, nil)
-
-	anomalyDetector := anomalymock.NewAnomalyDetector(t)
-	anomalyDetector.On("IsAnomaly", mock.Anything).Return(false, nil)
-
-	amount := decimal.NewFromInt(1)
-
-	l, err := zap.NewProduction()
-	assert.NoError(t, err)
-	ts, err := NewTradeService(l, pair, amount, pricer, detector, trader, anomalyDetector)
-	assert.NoError(t, err)
-
-	event, err := ts.Trade()
-	assert.NoError(t, err)
-	assert.Equal(t, entity.ActionBuy, event.Action)
-
-	event, err = ts.Trade()
-	assert.NoError(t, err)
-	assert.Nil(t, event)
-
-	event, err = ts.Trade()
-	assert.NoError(t, err)
-	assert.Equal(t, entity.ActionSell, event.Action)
-
-	event, err = ts.Trade()
-	assert.NoError(t, err)
-	assert.Nil(t, event)
-
-	event, err = ts.Trade()
-	assert.NoError(t, err)
-	assert.Nil(t, event)
-
-	trader.AssertNumberOfCalls(t, "Buy", 1)
-	trader.AssertNumberOfCalls(t, "Sell", 1)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// The function is not exported, so we call it directly as it's in the same package.
+			// If it were in a different package and not exported, testing would be harder.
+			if got := isPercentDifferenceSignificant(tt.currentPrice, tt.referencePrice, tt.thresholdPercent); got != tt.expected {
+				t.Errorf("isPercentDifferenceSignificant(%s, %s, %s) = %v, want %v", tt.currentPrice.String(), tt.referencePrice.String(), tt.thresholdPercent.String(), got, tt.expected)
+			}
+		})
+	}
 }

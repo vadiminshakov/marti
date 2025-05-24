@@ -10,9 +10,10 @@ import (
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/config"
-	"github.com/vadiminshakov/marti/internal/services/channel"
-	"github.com/vadiminshakov/marti/internal/services/detector"
+	// "github.com/vadiminshakov/marti/internal/services/channel"  // Removed
+	// "github.com/vadiminshakov/marti/internal/services/detector" // Removed
 	"github.com/vadiminshakov/marti/internal/services/pricer"
+	"github.com/vadiminshakov/marti/internal/services"
 	"github.com/vadiminshakov/marti/internal/services/trader"
 	"github.com/vadiminshakov/marti/internal/entity"
 	"go.uber.org/zap"
@@ -20,120 +21,139 @@ import (
 
 // TradingBot represents a single trading instance
 type TradingBot struct {
-	ChannelFinder channel.ChannelFinder
-	Trader        trader.Trader
-	Detector      detector.Detector
-	Pricer        pricer.Pricer
-	Config        config.Config
+	Trader       trader.Trader
+	Pricer       pricer.Pricer
+	Config       config.Config
+	tradeService *services.TradeService
 }
 
 // NewTradingBot creates a new trading bot instance
 func NewTradingBot(conf config.Config, client interface{}) (*TradingBot, error) {
+	var currentTrader trader.Trader
+	var currentPricer pricer.Pricer
+	var err error
+
 	switch conf.Platform {
 	case "binance":
 		binanceClient := client.(*binance.Client)
-		return &TradingBot{
-			ChannelFinder: channel.NewBinanceChannelFinder(binanceClient, conf.Pair, uint64(conf.StatHours)),
-			// Handle error from NewBinanceTrader
-			Trader: func() trader.Trader {
-				t, err := trader.NewBinanceTrader(binanceClient, conf.Pair)
-				if err != nil {
-					// Log and return nil or handle error as appropriate for your application
-					zap.L().Error("Failed to create BinanceTrader", zap.Error(err))
-					return nil
-				}
-				return t
-			}(),
-			// Handle error from NewBinanceDetector
-			Detector: func() detector.Detector {
-				d, err := detector.NewBinanceDetector(binanceClient, conf.Usebalance, conf.Pair, decimal.Zero, decimal.Zero)
-				if err != nil {
-					zap.L().Error("Failed to create BinanceDetector", zap.Error(err))
-					return nil
-				}
-				return d
-			}(),
-			Pricer: pricer.NewBinancePricer(binanceClient),
-			Config: conf,
-		}, nil
+		currentTrader, err = trader.NewBinanceTrader(binanceClient, conf.Pair)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create BinanceTrader")
+		}
+		currentPricer = pricer.NewBinancePricer(binanceClient)
 	case "bybit":
 		bybitClient := client.(*bybit.Client)
-		return &TradingBot{
-			ChannelFinder: channel.NewBybitChannelFinder(bybitClient, conf.Pair, uint64(conf.StatHours)),
-			// Handle error from NewBybitTrader
-			Trader: func() trader.Trader {
-				t, err := trader.NewBybitTrader(bybitClient, conf.Pair)
-				if err != nil {
-					// Log and return nil or handle error as appropriate for your application
-					zap.L().Error("Failed to create BybitTrader", zap.Error(err))
-					return nil
-				}
-				return t
-			}(),
-			// Handle error from NewBybitDetector
-			Detector: func() detector.Detector {
-				d, err := detector.NewBybitDetector(bybitClient, conf.Usebalance, conf.Pair, decimal.Zero, decimal.Zero)
-				if err != nil {
-					zap.L().Error("Failed to create BybitDetector", zap.Error(err))
-					return nil
-				}
-				return d
-			}(),
-			Pricer: pricer.NewBybitPricer(bybitClient),
-			Config: conf,
-		}, nil
+		currentTrader, err = trader.NewBybitTrader(bybitClient, conf.Pair)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create BybitTrader")
+		}
+		currentPricer = pricer.NewBybitPricer(bybitClient)
 	default:
 		return nil, fmt.Errorf("unsupported platform: %s", conf.Platform)
 	}
+
+	tsLogger := zap.L().With(zap.String("pair", conf.Pair.String()))
+	tradeService, err := services.NewTradeService(
+		tsLogger,
+		conf.Pair,
+		conf.Usebalance, // This is the base amount for each DCA operation.
+		currentPricer,
+		currentTrader,
+		conf.MaxDcaTrades,
+		conf.DcaPercentThresholdBuy,
+		conf.DcaPercentThresholdSell,
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create TradeService")
+	}
+
+	return &TradingBot{
+		Trader:       currentTrader,
+		Pricer:       currentPricer,
+		Config:       conf,
+		tradeService: tradeService,
+	}, nil
 }
 
 // Run executes the trading bot
 func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
-	buyprice, channel, err := b.ChannelFinder.GetTradingChannel()
+	defer b.tradeService.Close()
+
+	// Initial Buy Logic:
+	// 1. Get current price.
+	// 2. Try to record this as an initial purchase with TradeService.
+	//    RecordInitialPurchase checks if purchases already exist.
+	//    If it returns "already recorded" error, we log and continue (series exists).
+	//    If it returns any other error, it's critical (e.g., WAL save failed for a new series).
+	//    If it returns nil, the series was new and placeholder recorded. We then execute the actual buy.
+
+	currentPrice, err := b.Pricer.GetPrice(b.Config.Pair)
 	if err != nil {
-		return errors.Wrapf(err, "failed to find window for %s", b.Config.Pair.String())
+		logger.Error("Failed to get current price for initial buy check", zap.Error(err), zap.String("pair", b.Config.Pair.String()))
+		return errors.Wrapf(err, "failed to get current price for initial buy check for %s", b.Config.Pair.String())
 	}
 
-	logger.Info("trading channel found",
-		zap.String("pair", b.Config.Pair.String()),
-		zap.String("buyprice", buyprice.String()),
-		zap.Any("channel", channel))
+	initialBuyAmount := b.Config.Usebalance // Amount for the first DCA part.
+	purchaseTime := time.Now()
 
+	// Attempt to record the potential first purchase.
+	err = b.tradeService.RecordInitialPurchase(currentPrice, initialBuyAmount, purchaseTime)
+
+	if err == nil { // Successfully recorded a new series (placeholder for initial buy)
+		logger.Info("New DCA series initiated in TradeService. Executing initial buy with Trader.",
+			zap.String("pair", b.Config.Pair.String()),
+			zap.String("price", currentPrice.String()),
+			zap.String("amount", initialBuyAmount.String()))
+
+		if buyErr := b.Trader.Buy(initialBuyAmount); buyErr != nil {
+			logger.Error("Initial buy execution failed after series was marked for init in TradeService",
+				zap.Error(buyErr),
+				zap.String("pair", b.Config.Pair.String()))
+			// CRITICAL: State recorded in WAL, but buy failed. Manual intervention might be needed.
+			// Or, implement logic to revert/remove the last WAL entry in TradeService.
+			return errors.Wrapf(buyErr, "initial buy execution failed for %s after series marked for init", b.Config.Pair.String())
+		}
+		logger.Info("Initial buy executed successfully.",
+			zap.String("pair", b.Config.Pair.String()),
+			zap.String("amount", initialBuyAmount.String()))
+
+	} else if err.Error() == "initial purchase already recorded or DCA series is not empty" {
+		logger.Info("DCA series already has purchases (likely loaded from WAL). Skipping explicit initial buy.",
+			zap.String("pair", b.Config.Pair.String()))
+	} else { // Any other error from RecordInitialPurchase (e.g., WAL write failure)
+		logger.Error("Failed to record initial purchase state in TradeService for a new series",
+			zap.Error(err),
+			zap.String("pair", b.Config.Pair.String()))
+		return errors.Wrapf(err, "failed to record initial purchase state for new series for %s", b.Config.Pair.String())
+	}
+
+	// --- Main Trading Loop ---
 	ticker := time.NewTicker(b.Config.PollPriceInterval)
 	defer ticker.Stop()
+
+	logger.Info("Starting trading loop", zap.String("pair", b.Config.Pair.String()), zap.Duration("poll_interval", b.Config.PollPriceInterval))
 
 	for {
 		select {
 		case <-ctx.Done():
+			logger.Info("Context done, stopping trading bot run loop.", zap.String("pair", b.Config.Pair.String()))
 			return ctx.Err()
 		case <-ticker.C:
-			price, err := b.Pricer.GetPrice(b.Config.Pair)
+			logger.Debug("Trade service tick", zap.String("pair", b.Config.Pair.String()))
+			tradeEvent, err := b.tradeService.Trade()
 			if err != nil {
-				logger.Error("failed to get price", zap.Error(err))
-				continue
+				// services.ErrNoData is a common, non-critical error if WAL is empty or no initial data.
+				if errors.Is(err, services.ErrNoData) {
+					logger.Info("TradeService returned no data, continuing", zap.String("pair", b.Config.Pair.String()), zap.Error(err))
+				} else {
+					// For other errors, log as error and continue, or decide if some are fatal.
+					logger.Error("TradeService.Trade failed", zap.String("pair", b.Config.Pair.String()), zap.Error(err))
+				}
+				continue // Continue to next tick
 			}
 
-			action, err := b.Detector.NeedAction(price)
-			if err != nil {
-				logger.Error("failed to detect action", zap.Error(err))
-				continue
-			}
-
-			switch action {
-			case entity.ActionBuy:
-				if err := b.Trader.Buy(b.Config.Usebalance); err != nil {
-					logger.Error("failed to execute buy order", zap.Error(err))
-				} else {
-					logger.Info("buy order executed",
-						zap.String("pair", b.Config.Pair.String()))
-				}
-			case entity.ActionSell:
-				if err := b.Trader.Sell(b.Config.Usebalance); err != nil {
-					logger.Error("failed to execute sell order", zap.Error(err))
-				} else {
-					logger.Info("sell order executed",
-						zap.String("pair", b.Config.Pair.String()))
-				}
+			if tradeEvent != nil {
+				logger.Info("Trade event occurred", zap.String("pair", b.Config.Pair.String()), zap.Any("event", tradeEvent))
 			}
 		}
 	}
