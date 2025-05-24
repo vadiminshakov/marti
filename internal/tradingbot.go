@@ -5,17 +5,17 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/adshao/go-binance/v2"
-	"github.com/hirokisan/bybit/v2"
+	binance "github.com/adshao/go-binance/v2"
+	bybit "github.com/hirokisan/bybit/v2"
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/config"
+
 	// "github.com/vadiminshakov/marti/internal/services/channel"  // Removed
 	// "github.com/vadiminshakov/marti/internal/services/detector" // Removed
-	"github.com/vadiminshakov/marti/internal/services/pricer"
 	"github.com/vadiminshakov/marti/internal/services"
+	"github.com/vadiminshakov/marti/internal/services/pricer"
 	"github.com/vadiminshakov/marti/internal/services/trader"
-	"github.com/vadiminshakov/marti/internal/entity"
 	"go.uber.org/zap"
 )
 

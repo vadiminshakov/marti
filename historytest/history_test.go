@@ -15,8 +15,6 @@ import (
 	"time"
 
 	"github.com/vadiminshakov/marti/internal/services"
-	"github.com/vadiminshakov/marti/internal/services/anomalydetector"
-	"github.com/vadiminshakov/marti/internal/services/channel"
 	"go.uber.org/zap"
 )
 
@@ -185,19 +183,26 @@ func prepareData(filePath string, pair *entity.Pair) (chan decimal.Decimal, chan
 func createTradeServiceFactory(logger *zap.Logger, pair *entity.Pair, prices chan decimal.Decimal, balanceBTC, balanceUSDT decimal.Decimal) (*traderCsv, func([]*entity.Kline, entity.Action) (*services.TradeService, error)) {
 	pricer := &pricerCsv{pricesCh: prices}
 	trader := &traderCsv{pair: pair, balance1: balanceBTC, balance2: balanceUSDT, pricesCh: prices}
-	anomDetector := anomalydetector.NewAnomalyDetector(*pair, 30, decimal.NewFromInt(10))
 
 	return trader, func(klines []*entity.Kline, lastAction entity.Action) (*services.TradeService, error) {
-		buyPrice, window, err := channel.CalcBuyPriceAndChannel(klines)
-		if err != nil {
-			return nil, err
+		// Simplified without channel calculation since channel package was removed
+		// Using simple price-based logic instead
+		if len(klines) == 0 {
+			return nil, fmt.Errorf("no klines provided")
 		}
 
-		ts, err := services.NewTradeService(logger, *pair, balanceBTC, pricer, &detectorCsv{
-			lastaction: lastAction,
-			buypoint:   buyPrice,
-			window:     window,
-		}, trader, anomDetector)
+		// Updated signature to match NewTradeService requirements:
+		// NewTradeService(l *zap.Logger, pair entity.Pair, amount decimal.Decimal, pricer Pricer, trader trader.Trader, maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell decimal.Decimal)
+		ts, err := services.NewTradeService(
+			logger,
+			*pair,
+			balanceBTC,                // amount
+			pricer,                    // pricer
+			trader,                    // trader
+			5,                         // maxDcaTrades
+			decimal.NewFromFloat(2.0), // dcaPercentThresholdBuy
+			decimal.NewFromFloat(5.0), // dcaPercentThresholdSell
+		)
 		if err != nil {
 			return nil, err
 		}

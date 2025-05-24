@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
+
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/internal/entity"
-	"github.com/vadiminshakov/marti/internal/services/detector"
 )
 
 const (
@@ -28,15 +28,25 @@ type detectorCsv struct {
 }
 
 func (d *detectorCsv) NeedAction(price decimal.Decimal) (entity.Action, error) {
-	lastact, err := detector.Detect(d.lastaction, d.buypoint, d.window, price)
-	if err != nil {
-		return entity.ActionNull, err
-	}
-	if lastact != entity.ActionNull {
-		d.lastaction = lastact
+	// Since detector package was removed, implementing simple logic directly
+	// This is a simplified replacement for the removed detector.Detect function
+
+	if d.lastaction == entity.ActionNull || d.lastaction == entity.ActionSell {
+		// If no previous action or last action was sell, consider buying
+		if price.LessThan(d.buypoint.Sub(d.window)) {
+			d.lastaction = entity.ActionBuy
+			d.buypoint = price
+			return entity.ActionBuy, nil
+		}
+	} else if d.lastaction == entity.ActionBuy {
+		// If last action was buy, consider selling
+		if price.GreaterThan(d.buypoint.Add(d.window)) {
+			d.lastaction = entity.ActionSell
+			return entity.ActionSell, nil
+		}
 	}
 
-	return lastact, nil
+	return entity.ActionNull, nil
 }
 
 func (d *detectorCsv) LastAction() entity.Action {
