@@ -59,12 +59,29 @@ type TradeService struct {
 	maxDcaTrades            int
 	dcaPercentThresholdBuy  decimal.Decimal
 	dcaPercentThresholdSell decimal.Decimal
+	individualBuyAmount     decimal.Decimal // Added for fixed individual buy amount
 }
 
 // NewTradeService creates new TradeService instance.
 func NewTradeService(l *zap.Logger, pair entity.Pair, amount decimal.Decimal, pricer Pricer, // detector detector.Detector, // Removed
 	trader trader.Trader,
 	maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell decimal.Decimal) (*TradeService, error) {
+
+	if maxDcaTrades < 1 {
+		return nil, fmt.Errorf("MaxDcaTrades must be at least 1, got %d", maxDcaTrades)
+	}
+
+	maxDcaTradesDecimal := decimal.NewFromInt(int64(maxDcaTrades))
+	// amount is total capital
+	individualBuyAmount := amount.Div(maxDcaTradesDecimal)
+
+	if individualBuyAmount.IsZero() {
+		// This can happen if total capital (amount) is very small or maxDcaTrades is very large.
+		// It's a configuration issue that would lead to zero-amount buys.
+		return nil, errors.New("calculated individual buy amount is zero, check total capital (Usebalance) and MaxDcaTrades")
+	}
+
+
 	// Initialize WAL
 	walCfg := gowal.Config{
 		Dir:              "./wal",
@@ -108,6 +125,7 @@ func NewTradeService(l *zap.Logger, pair entity.Pair, amount decimal.Decimal, pr
 		maxDcaTrades:            maxDcaTrades,
 		dcaPercentThresholdBuy:  dcaPercentThresholdBuy,
 		dcaPercentThresholdSell: dcaPercentThresholdSell,
+		individualBuyAmount:     individualBuyAmount, // Store calculated individual buy amount
 	}, nil
 }
 
@@ -215,8 +233,8 @@ func (t *TradeService) actBuy(price decimal.Decimal) (*entity.TradeEvent, error)
 	// 	return nil, nil
 	// }
 
-	// Use fixed amount t.amount for each DCA purchase.
-	calculatedAmount := t.amount 
+	// Use fixed individual buy amount calculated at initialization.
+	calculatedAmount := t.individualBuyAmount
 
 	// Execute the buy action
 	if err := t.trader.Buy(calculatedAmount); err != nil {
@@ -261,39 +279,91 @@ func (t *TradeService) actSell(price decimal.Decimal) (*entity.TradeEvent, error
 	// Calculate profit percentage
 	profit := price.Sub(t.dcaSeries.AvgEntryPrice).Div(t.dcaSeries.AvgEntryPrice).Mul(decimal.NewFromInt(100))
 
-	// Determine sell amount based on profit
-	var amount decimal.Decimal
-	if profit.GreaterThan(decimal.NewFromInt(5)) && profit.LessThan(decimal.NewFromInt(10)) {
-		// Partial sell at 5-10% profit
-		amount = t.dcaSeries.TotalAmount.Div(decimal.NewFromInt(2))
-	} else if profit.GreaterThanOrEqual(decimal.NewFromInt(10)) {
+	// Determine sell amount based on new logic
+	amountToSell := decimal.Zero
+	fivePercent := decimal.NewFromInt(5)
+	tenPercent := decimal.NewFromInt(10)
+
+	if profit.GreaterThan(fivePercent) && profit.LessThan(tenPercent) {
+		// Partial sell at 5-10% profit: sell one individualBuyAmount
+		amountToSell = t.individualBuyAmount
+		t.l.Info("Profit between 5-10%, attempting to sell one individual part.",
+			zap.String("individualBuyAmount", t.individualBuyAmount.String()),
+			zap.String("profit", profit.String()))
+	} else if profit.GreaterThanOrEqual(tenPercent) {
 		// Full sell at >=10% profit
-		amount = t.dcaSeries.TotalAmount
-	} else {
+		amountToSell = t.dcaSeries.TotalAmount
+		t.l.Info("Profit >=10%, attempting to sell total amount.",
+			zap.String("totalAmount", t.dcaSeries.TotalAmount.String()),
+			zap.String("profit", profit.String()))
+	}
+
+	if amountToSell.IsZero() {
+		t.l.Debug("Sell condition met, but profit tier resulted in zero amount to sell.", zap.String("profit", profit.String()))
+		return nil, nil // No trade event
+	}
+
+	if amountToSell.GreaterThan(t.dcaSeries.TotalAmount) {
+		t.l.Warn("Calculated sell amount exceeds total held amount. Selling total amount instead.",
+			zap.String("calculatedAmount", amountToSell.String()),
+			zap.String("totalAmount", t.dcaSeries.TotalAmount.String()))
+		amountToSell = t.dcaSeries.TotalAmount
+	}
+	
+	if amountToSell.LessThanOrEqual(decimal.Zero) { // Ensure we are selling a positive amount
+		t.l.Info("Amount to sell is zero or less after calculations, no sell action taken.", zap.String("amountToSell", amountToSell.String()))
 		return nil, nil
 	}
 
+
 	// Execute the sell action
-	if err := t.trader.Sell(amount); err != nil {
-		return nil, errors.Wrapf(err, "trader sell failed for pair %s", t.pair.String())
+	if err := t.trader.Sell(amountToSell); err != nil {
+		return nil, errors.Wrapf(err, "trader sell failed for pair %s, amount %s", t.pair.String(), amountToSell.String())
 	}
 
-	// Reset DCA series
-	t.dcaSeries = &DCASeries{
-		Purchases: make([]DCAPurchase, 0),
+	isFullSell := amountToSell.Equal(t.dcaSeries.TotalAmount)
+
+	if isFullSell {
+		t.l.Info("Full sell executed. Resetting DCA series.", zap.String("amountSold", amountToSell.String()))
+		// Reset DCA series
+		t.dcaSeries = &DCASeries{
+			Purchases: make([]DCAPurchase, 0),
+		}
+		// Reset trade part counter
+		t.tradePart = decimal.Zero
+	} else {
+		t.l.Info("Partial sell executed.", zap.String("amountSold", amountToSell.String()))
+		// Update total amount. AvgEntryPrice and tradePart remain.
+		// Purchases slice modification for partial sell is complex (e.g. FIFO/LIFO accounting for specific parts sold).
+		// For this simplification, we only adjust TotalAmount. AvgEntryPrice remains.
+		// This means avg entry price might become less accurate over many partial sells if not all parts had same entry.
+		// However, our DCA buys are at different prices, so AvgEntryPrice is an average.
+		// Selling a part at profit doesn't change the avg entry of remaining parts.
+		t.dcaSeries.TotalAmount = t.dcaSeries.TotalAmount.Sub(amountToSell)
+		// Note: If t.dcaSeries.TotalAmount becomes zero or negative due to this partial sell (e.g. if individualBuyAmount was larger than remaining total),
+		// it should ideally be treated as a full sell. The safeguard `amountToSell.GreaterThan(t.dcaSeries.TotalAmount)` handles over-selling.
+		// If `t.dcaSeries.TotalAmount` becomes zero exactly after a partial sell, the next `Trade()` call will see `len(purchases) > 0` but `TotalAmount == 0`.
+		// This state might need further handling or consideration if it's possible and problematic.
+		// For now, we assume individualBuyAmount is less than TotalAmount for a partial sell to be meaningful.
+		if t.dcaSeries.TotalAmount.LessThanOrEqual(decimal.Zero) {
+			t.l.Info("Total amount became zero or less after partial sell. Treating as full sell for reset purposes.",
+				zap.String("remainingTotalAmount", t.dcaSeries.TotalAmount.String()))
+			t.dcaSeries = &DCASeries{Purchases: make([]DCAPurchase, 0)} // Reset purchases
+			t.tradePart = decimal.Zero                                 // Reset tradePart
+		}
 	}
+
 	if err := t.saveDCASeries(); err != nil {
-		t.l.Error("failed to reset DCA series",
+		t.l.Error("failed to save DCA series after sell",
 			zap.Error(err),
 			zap.String("pair", t.pair.String()))
+		// This is also a state where trade executed but saving state failed.
 	}
 
-	// Reset trade part counter
-	t.tradePart = decimal.Zero
 
 	tradeEvent := &entity.TradeEvent{
 		Action: entity.ActionSell,
-		Amount: amount,
+		Amount: amountToSell,
 		Pair:   t.pair,
 		Price:  price,
 	}

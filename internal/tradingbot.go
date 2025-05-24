@@ -93,19 +93,34 @@ func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
 		return errors.Wrapf(err, "failed to get current price for initial buy check for %s", b.Config.Pair.String())
 	}
 
-	initialBuyAmount := b.Config.Usebalance // Amount for the first DCA part.
+	// Calculate individual buy amount for the initial purchase
+	if b.Config.MaxDcaTrades < 1 {
+		logger.Error("Initial buy error: MaxDcaTrades must be at least 1.", zap.Int("maxDcaTrades", b.Config.MaxDcaTrades))
+		return fmt.Errorf("MaxDcaTrades must be at least 1, configured value: %d", b.Config.MaxDcaTrades)
+	}
+	maxDcaTradesDecimal := decimal.NewFromInt(int64(b.Config.MaxDcaTrades))
+	// b.Config.Usebalance is total capital
+	calculatedInitialBuyAmount := b.Config.Usebalance.Div(maxDcaTradesDecimal)
+
+	if calculatedInitialBuyAmount.IsZero() {
+		logger.Error("Initial buy error: calculatedInitialBuyAmount is zero. Check Usebalance and MaxDcaTrades config.",
+			zap.String("usebalance", b.Config.Usebalance.String()),
+			zap.Int("maxDcaTrades", b.Config.MaxDcaTrades))
+		return fmt.Errorf("calculatedInitialBuyAmount is zero, check Usebalance (%s) and MaxDcaTrades (%d)", b.Config.Usebalance.String(), b.Config.MaxDcaTrades)
+	}
+
 	purchaseTime := time.Now()
 
 	// Attempt to record the potential first purchase.
-	err = b.tradeService.RecordInitialPurchase(currentPrice, initialBuyAmount, purchaseTime)
+	err = b.tradeService.RecordInitialPurchase(currentPrice, calculatedInitialBuyAmount, purchaseTime)
 
 	if err == nil { // Successfully recorded a new series (placeholder for initial buy)
 		logger.Info("New DCA series initiated in TradeService. Executing initial buy with Trader.",
 			zap.String("pair", b.Config.Pair.String()),
 			zap.String("price", currentPrice.String()),
-			zap.String("amount", initialBuyAmount.String()))
+			zap.String("amount", calculatedInitialBuyAmount.String()))
 
-		if buyErr := b.Trader.Buy(initialBuyAmount); buyErr != nil {
+		if buyErr := b.Trader.Buy(calculatedInitialBuyAmount); buyErr != nil {
 			logger.Error("Initial buy execution failed after series was marked for init in TradeService",
 				zap.Error(buyErr),
 				zap.String("pair", b.Config.Pair.String()))
@@ -115,7 +130,7 @@ func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
 		}
 		logger.Info("Initial buy executed successfully.",
 			zap.String("pair", b.Config.Pair.String()),
-			zap.String("amount", initialBuyAmount.String()))
+			zap.String("amount", calculatedInitialBuyAmount.String()))
 
 	} else if err.Error() == "initial purchase already recorded or DCA series is not empty" {
 		logger.Info("DCA series already has purchases (likely loaded from WAL). Skipping explicit initial buy.",
