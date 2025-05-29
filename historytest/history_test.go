@@ -49,7 +49,7 @@ func TestProfit(t *testing.T) {
 			name:                    "2 years - Conservative buy",
 			duration:                17520,
 			maxDcaTrades:            3,
-			dcaPercentThresholdBuy:  9.5,
+			dcaPercentThresholdBuy:  3.5,
 			dcaPercentThresholdSell: 66,
 		},
 		{
@@ -118,21 +118,6 @@ func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell fl
 		if err != nil {
 			log.Fatalf("Failed to create trade service for initial buy: %s", err)
 		}
-
-		// Calculate initial buy amount (USDT divided by maxDcaTrades)
-		initialBuyAmount := balanceUSDT.Div(decimal.NewFromInt(int64(maxDcaTrades)))
-
-		// Execute the buy
-		if err := trader.Buy(initialBuyAmount); err != nil {
-			log.Fatalf("Failed to execute initial buy: %s", err)
-		}
-
-		log.Infof("Executed initial buy: %s BTC at price %s",
-			initialBuyAmount.Div(price).StringFixed(8),
-			price.StringFixed(2))
-
-		// Update lastAction
-		lastAction = entity.ActionBuy
 	}
 
 	// Создаем TradeService один раз перед циклом
