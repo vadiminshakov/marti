@@ -1,30 +1,26 @@
-package main
+package historytest
 
 import (
 	"encoding/csv"
 	"fmt"
-
-	"github.com/shopspring/decimal"
-	"github.com/stretchr/testify/require"
-	"github.com/vadiminshakov/marti/internal/entity"
-
 	"log"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/shopspring/decimal"
+	"github.com/stretchr/testify/require"
+	"github.com/vadiminshakov/marti/internal/entity"
 	"github.com/vadiminshakov/marti/internal/services"
 	"go.uber.org/zap"
 )
 
 const (
 	dataFile            = "data.csv" // file with data for test
-	btcBalanceInWallet  = "0.5"      // BTC balance in wallet
-	usdtBalanceInWallet = "0"
-	klineSize           = "1h" // klinesize for test
-	rebalanceHours      = 56
-	klineFrame          = 280 // number of klines in frame for stat analysis (channel & buy price detection)
+	btcBalanceInWallet  = "0"
+	usdtBalanceInWallet = "10000"
+	klineSize           = "4h"
 )
 
 var dataHoursAgo int
@@ -34,26 +30,57 @@ func TestProfit(t *testing.T) {
 		t.Skip("Skipping historical test in short mode.")
 	}
 
-	t.Run("1 year", func(t *testing.T) {
-		dataHoursAgo = 8760
-		require.NoError(t, runBot())
-	})
-
-	t.Run("2 years", func(t *testing.T) {
-		dataHoursAgo = 17520
-		require.NoError(t, runBot())
-	})
-}
-
-func runBot() error {
-	dur, err := time.ParseDuration(klineSize)
-	if err != nil {
-		return fmt.Errorf("unable to parse kline size: %w", err)
+	// Тестирование с разными параметрами DCA
+	testCases := []struct {
+		name                    string
+		duration                int
+		maxDcaTrades            int
+		dcaPercentThresholdBuy  float64
+		dcaPercentThresholdSell float64
+	}{
+		{
+			name:                    "1 year - Conservative buy",
+			duration:                8760,
+			maxDcaTrades:            3,
+			dcaPercentThresholdBuy:  7,
+			dcaPercentThresholdSell: 45,
+		},
+		{
+			name:                    "2 years - Conservative buy",
+			duration:                17520,
+			maxDcaTrades:            3,
+			dcaPercentThresholdBuy:  7,
+			dcaPercentThresholdSell: 45,
+		},
+		{
+			name:                    "1 year - Aggressive trades",
+			duration:                8760,
+			maxDcaTrades:            6,
+			dcaPercentThresholdBuy:  1,
+			dcaPercentThresholdSell: 5,
+		},
+		{
+			name:                    "2 years - Aggressive trades",
+			duration:                17520,
+			maxDcaTrades:            6,
+			dcaPercentThresholdBuy:  1,
+			dcaPercentThresholdSell: 5,
+		},
 	}
 
-	klineSizeHours := float64(dur.Hours())
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			dataHoursAgo = tc.duration
+			require.NoError(t, runBot(tc.maxDcaTrades, tc.dcaPercentThresholdBuy, tc.dcaPercentThresholdSell))
+		})
+	}
+}
 
-	logger, err := zap.NewProduction()
+func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell float64) error {
+	config := zap.NewProductionConfig()
+	config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
+
+	logger, err := config.Build()
 	if err != nil {
 		return fmt.Errorf("failed to initialize logger: %w", err)
 	}
@@ -71,47 +98,52 @@ func runBot() error {
 	balanceBTC, _ := decimal.NewFromString(btcBalanceInWallet)
 	balanceUSDT, _ := decimal.NewFromString(usdtBalanceInWallet)
 
-	trader, tradeServiceFactory := createTradeServiceFactory(logger, pair, prices, balanceBTC, balanceUSDT)
-	trader.Sell(balanceBTC)
+	trader, tradeServiceFactory := createTradeServiceFactory(logger, pair, prices, balanceBTC, balanceUSDT, maxDcaTrades, dcaPercentThresholdBuy, dcaPercentThresholdSell)
 
-	klineBuffer := make([]*entity.Kline, 0, klineFrame)
+	price, ok := <-prices
+	if !ok {
+		return fmt.Errorf("prices channel is closed")
+	}
+
 	var (
-		counter      uint
-		lastAction   = entity.ActionBuy
-		lastPriceBTC = decimal.Zero
+		lastAction   = entity.ActionSell // Start with ActionSell so we'll buy first
+		lastPriceBTC = price
 		tradeService *services.TradeService
 	)
 
-	for kline := range klines {
-		counter++
-
-		// maintain kline buffer size
-		if len(klineBuffer) >= klineFrame {
-			klineBuffer = klineBuffer[1:]
-		}
-		klineBuffer = append(klineBuffer, &kline)
-
-		hoursSpent := calculateHoursSpent(counter, klineSizeHours)
-
-		// rebalance or initialize trade service if necessary
-		if hoursSpent >= rebalanceHours || tradeService == nil {
-			counter = 0
-			if tradeService != nil {
-				if err = tradeService.Close(); err != nil {
-					return fmt.Errorf("failed to close trade service: %w", err)
-				}
-			}
-
-			tradeService, err = tradeServiceFactory(klineBuffer, lastAction)
-			if err != nil {
-				if !strings.Contains(err.Error(), "channel less than min") {
-					log.Fatalf("err trade svc create %s", err)
-				}
-
-				continue
-			}
+	// If we're starting with USDT (no BTC), we need to make an initial buy
+	if balanceBTC.IsZero() && balanceUSDT.IsPositive() {
+		// Create the trade service
+		tradeService, err = tradeServiceFactory(lastAction)
+		if err != nil {
+			log.Fatalf("Failed to create trade service for initial buy: %s", err)
 		}
 
+		// Calculate initial buy amount (USDT divided by maxDcaTrades)
+		initialBuyAmount := balanceUSDT.Div(decimal.NewFromInt(int64(maxDcaTrades)))
+
+		// Execute the buy
+		if err := trader.Buy(initialBuyAmount); err != nil {
+			log.Fatalf("Failed to execute initial buy: %s", err)
+		}
+
+		log.Infof("Executed initial buy: %s BTC at price %s",
+			initialBuyAmount.Div(price).StringFixed(8),
+			price.StringFixed(2))
+
+		// Update lastAction
+		lastAction = entity.ActionBuy
+	}
+
+	// Создаем TradeService один раз перед циклом
+	tradeService, err = tradeServiceFactory(lastAction)
+	if err != nil {
+		if !strings.Contains(err.Error(), "channel less than min") {
+			log.Fatalf("err trade svc create %s", err)
+		}
+	}
+
+	for range klines {
 		// execute trade
 		tradeEvent, err := tradeService.Trade()
 		if err != nil {
@@ -119,39 +151,47 @@ func runBot() error {
 		}
 
 		if tradeEvent != nil && tradeEvent.Action != entity.ActionNull {
-			lastAction = tradeEvent.Action
 			lastPriceBTC = tradeEvent.Price
+			log.Infof("Trade executed: %s at price %s, amount %s, current deals count: %d",
+				tradeEvent.Action, tradeEvent.Price, tradeEvent.Amount, trader.dealsCount)
 		}
 	}
-
-	trader.Sell(trader.balance1)
 
 	summarizeResults(log, trader, pair, balanceBTC, lastPriceBTC)
 	return nil
 }
 
-func calculateHoursSpent(counter uint, klineSizeHours float64) float64 {
-	if klineSizeHours < 1 {
-		return float64(counter) * klineSizeHours
-	}
-	return float64(counter)
-}
-
 func summarizeResults(log *zap.SugaredLogger, trader *traderCsv, pair *entity.Pair, initialBalanceBTC, lastPriceBTC decimal.Decimal) {
+	// Get the initial USDT balance from the trader
+	initialBalanceUSDT, _ := decimal.NewFromString(usdtBalanceInWallet)
+
 	log.Infof("Deals: %d", trader.dealsCount)
 	log.Infof("Total balance of %s: %s (was %s)", pair.From, trader.balance1.StringFixed(5), initialBalanceBTC.StringFixed(5))
-	log.Infof("Total balance of %s: %s (was %s)", pair.To, trader.balance2.StringFixed(5), decimal.Zero)
+	log.Infof("Total balance of %s: %s (was %s)", pair.To, trader.balance2.StringFixed(5), initialBalanceUSDT.StringFixed(5))
 	log.Infof("Total fee: %s", trader.fee.StringFixed(5))
 
+	// Calculate total profit in USDT
 	totalProfit := calculateTotalProfit(trader)
 	if trader.balance1.IsPositive() {
 		totalProfit = totalProfit.Add(lastPriceBTC.Mul(trader.balance1))
 	}
 
 	log.Infof("Total profit: %s %s", totalProfit.StringFixed(2), pair.To)
-	log.Infof("%s%% profit (you have %s USDT equivivalent at start)", totalProfit.Sub(trader.firstbalance2).
-		Mul(decimal.NewFromInt(100)).Div(trader.firstbalance2).StringFixed(2),
-		trader.firstbalance2.StringFixed(2))
+
+	// Calculate profit percentage based on initial USDT investment
+	var profitPercent string
+	if initialBalanceUSDT.IsPositive() {
+		// Profit = (Current USDT - Initial USDT) / Initial USDT * 100
+		profitPercent = totalProfit.Sub(initialBalanceUSDT).Mul(decimal.NewFromInt(100)).Div(initialBalanceUSDT).StringFixed(2)
+	} else if initialBalanceBTC.IsPositive() {
+		// Fallback to BTC calculation if we started with BTC
+		initialValueUSDT := initialBalanceBTC.Mul(lastPriceBTC)
+		profitPercent = totalProfit.Sub(initialValueUSDT).Mul(decimal.NewFromInt(100)).Div(initialValueUSDT).StringFixed(2)
+	} else {
+		profitPercent = "N/A"
+	}
+
+	log.Infof("%s%% profit (initial investment: %s USDT)", profitPercent, initialBalanceUSDT.StringFixed(2))
 }
 
 func calculateTotalProfit(trader *traderCsv) decimal.Decimal {
@@ -159,7 +199,7 @@ func calculateTotalProfit(trader *traderCsv) decimal.Decimal {
 }
 
 func prepareData(filePath string, pair *entity.Pair) (chan decimal.Decimal, chan entity.Kline, func(), error) {
-	collectData, err := dataColletorFactory(filePath, pair)
+	collectData, err := DataCollectorFactory(filePath, pair)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -180,31 +220,48 @@ func prepareData(filePath string, pair *entity.Pair) (chan decimal.Decimal, chan
 	return prices, klines, cleanup, nil
 }
 
-func createTradeServiceFactory(logger *zap.Logger, pair *entity.Pair, prices chan decimal.Decimal, balanceBTC, balanceUSDT decimal.Decimal) (*traderCsv, func([]*entity.Kline, entity.Action) (*services.TradeService, error)) {
+func createTradeServiceFactory(logger *zap.Logger, pair *entity.Pair, prices chan decimal.Decimal, balanceBTC, balanceUSDT decimal.Decimal, maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell float64) (*traderCsv, func(entity.Action) (*services.TradeService, error)) {
 	pricer := &pricerCsv{pricesCh: prices}
 	trader := &traderCsv{pair: pair, balance1: balanceBTC, balance2: balanceUSDT, pricesCh: prices}
 
-	return trader, func(klines []*entity.Kline, lastAction entity.Action) (*services.TradeService, error) {
-		// Simplified without channel calculation since channel package was removed
-		// Using simple price-based logic instead
-		if len(klines) == 0 {
-			return nil, fmt.Errorf("no klines provided")
-		}
+	tradeServiceLoggerConfig := zap.NewProductionConfig()
+	tradeServiceLoggerConfig.Level = zap.NewAtomicLevelAt(zap.ErrorLevel)
+	tradeServiceLogger, _ := tradeServiceLoggerConfig.Build()
 
-		// Updated signature to match NewTradeService requirements:
-		// NewTradeService(l *zap.Logger, pair entity.Pair, amount decimal.Decimal, pricer Pricer, trader trader.Trader, maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell decimal.Decimal)
+	return trader, func(lastAction entity.Action) (*services.TradeService, error) {
+
+		dcaPercentThresholdBuyDecimal := decimal.NewFromFloat(dcaPercentThresholdBuy)
+		dcaPercentThresholdSellDecimal := decimal.NewFromFloat(dcaPercentThresholdSell)
+
 		ts, err := services.NewTradeService(
-			logger,
+			tradeServiceLogger,
 			*pair,
-			balanceBTC,                // amount
-			pricer,                    // pricer
-			trader,                    // trader
-			5,                         // maxDcaTrades
-			decimal.NewFromFloat(2.0), // dcaPercentThresholdBuy
-			decimal.NewFromFloat(5.0), // dcaPercentThresholdSell
+			balanceUSDT,
+			pricer,
+			trader,
+			maxDcaTrades,
+			dcaPercentThresholdBuyDecimal,
+			dcaPercentThresholdSellDecimal,
 		)
 		if err != nil {
 			return nil, err
+		}
+
+		// Получаем текущую цену напрямую из pricer
+		currentPrice, _ := pricer.GetPrice(*pair)
+
+		initialAmount := balanceUSDT.Div(decimal.NewFromInt(int64(maxDcaTrades)))
+
+		// When starting with USDT (balanceBTC is zero), we want to record initial purchase when lastAction is Sell
+		// When starting with BTC, we want to record initial purchase when lastAction is Buy
+		if (balanceBTC.IsZero() && lastAction == entity.ActionSell) || (!balanceBTC.IsZero() && lastAction == entity.ActionBuy) {
+			if err := ts.RecordInitialPurchase(currentPrice, initialAmount, time.Now()); err != nil {
+				if !strings.Contains(err.Error(), "initial purchase already recorded") {
+					logger.Error("Failed to record initial purchase", zap.Error(err))
+					return nil, err
+				}
+				logger.Debug("Initial purchase already recorded, ignoring")
+			}
 		}
 
 		return ts, nil
@@ -218,7 +275,6 @@ func loadPricesFromCSV(filePath string) (chan decimal.Decimal, chan entity.Kline
 	priceData, klineData := parseCSV(filePath)
 	go func() {
 		for _, price := range priceData {
-			prices <- price
 			prices <- price
 		}
 		close(prices)
@@ -252,11 +308,11 @@ func parseCSV(filePath string) ([]decimal.Decimal, []entity.Kline) {
 	klines := make([]entity.Kline, 0, len(records))
 	for _, record := range records {
 		open, _ := decimal.NewFromString(record[0])
-		high, _ := decimal.NewFromString(record[1])
-		low, _ := decimal.NewFromString(record[2])
+		_, _ = decimal.NewFromString(record[1])
+		_, _ = decimal.NewFromString(record[2])
 		closePrice, _ := decimal.NewFromString(record[3])
 
-		price := high.Add(low).Div(decimal.NewFromInt(2))
+		price := closePrice
 		prices = append(prices, price)
 		klines = append(klines, entity.Kline{Open: open, Close: closePrice})
 	}
