@@ -25,8 +25,9 @@ type Config struct {
 
 type ConfigTmp struct {
 	Pair                       string        `yaml:"pair"`
+	Platform                   string        `yaml:"platform"`
 	Amount                     string        `yaml:"amount"`
-	PollPriceInterval          time.Duration `yaml:"poll_price_interval"`
+	PollPriceInterval          time.Duration `yaml:"pollpriceinterval"`
 	MaxDcaTradesStr            string        `yaml:"max_dca_trades,omitempty"`
 	DcaPercentThresholdBuyStr  string        `yaml:"dca_percent_threshold_buy,omitempty"`
 	DcaPercentThresholdSellStr string        `yaml:"dca_percent_threshold_sell,omitempty"`
@@ -49,9 +50,9 @@ func Get() ([]Config, error) {
 			Pair:                    pair,
 			Amount:                  amount,
 			PollPriceInterval:       pollPriceInterval,
-			MaxDcaTrades:            15,
-			DcaPercentThresholdBuy:  decimal.NewFromInt(1),
-			DcaPercentThresholdSell: decimal.NewFromInt(7),
+			MaxDcaTrades:            3,
+			DcaPercentThresholdBuy:  decimal.NewFromFloat(3.5),
+			DcaPercentThresholdSell: decimal.NewFromInt(66),
 		},
 	}, nil
 }
@@ -59,7 +60,7 @@ func Get() ([]Config, error) {
 func getFromCLI() (pair entity.Pair, amount decimal.Decimal,
 	pollPriceInterval time.Duration, _ error) {
 	pairFlag := flag.String("pair", "BTC_USDT", "trade pair, example: BTC_USDT")
-	useb := flag.String("amount", "100", "percent of balance usage, for example 90 means 90%")
+	amountFlag := flag.String("amount", "100", "amount to trade")
 	pi := flag.Duration("pollpriceinterval", 5*time.Minute, "poll market price interval")
 
 	flag.Parse()
@@ -69,19 +70,12 @@ func getFromCLI() (pair entity.Pair, amount decimal.Decimal,
 	if err != nil {
 		return entity.Pair{}, decimal.Decimal{}, 0, fmt.Errorf("invalid --pair provided, --pair=%s", *pairFlag)
 	}
-	amount, err = decimal.NewFromString(*useb)
+	amount, err = decimal.NewFromString(*amountFlag)
 	if err != nil {
 		return entity.Pair{}, decimal.Decimal{}, 0, err
 	}
 
 	pollPriceInterval = *pi
-
-	ub := amount.BigInt().Int64()
-
-	if ub < 0 || ub > 100 {
-		return entity.Pair{}, decimal.Decimal{}, 0,
-			fmt.Errorf("invalid --amount provided, --amount=%s", amount.String())
-	}
 
 	return pair, amount, pollPriceInterval, nil
 }
