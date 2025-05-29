@@ -1,6 +1,6 @@
 module github.com/vadiminshakov/marti
 
-go 1.23.0
+go 1.24.0
 
 require (
 	github.com/adshao/go-binance/v2 v2.8.2
