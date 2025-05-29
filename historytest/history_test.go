@@ -41,29 +41,29 @@ func TestProfit(t *testing.T) {
 		{
 			name:                    "1 year - Conservative buy",
 			duration:                8760,
-			maxDcaTrades:            3,
-			dcaPercentThresholdBuy:  7,
-			dcaPercentThresholdSell: 45,
+			maxDcaTrades:            2,
+			dcaPercentThresholdBuy:  9.5,
+			dcaPercentThresholdSell: 66,
 		},
 		{
 			name:                    "2 years - Conservative buy",
 			duration:                17520,
 			maxDcaTrades:            3,
-			dcaPercentThresholdBuy:  7,
-			dcaPercentThresholdSell: 45,
+			dcaPercentThresholdBuy:  9.5,
+			dcaPercentThresholdSell: 66,
 		},
 		{
 			name:                    "1 year - Aggressive trades",
 			duration:                8760,
-			maxDcaTrades:            6,
-			dcaPercentThresholdBuy:  1,
+			maxDcaTrades:            3,
+			dcaPercentThresholdBuy:  0.8,
 			dcaPercentThresholdSell: 5,
 		},
 		{
 			name:                    "2 years - Aggressive trades",
 			duration:                17520,
-			maxDcaTrades:            6,
-			dcaPercentThresholdBuy:  1,
+			maxDcaTrades:            3,
+			dcaPercentThresholdBuy:  0.8,
 			dcaPercentThresholdSell: 5,
 		},
 	}
@@ -255,7 +255,7 @@ func createTradeServiceFactory(logger *zap.Logger, pair *entity.Pair, prices cha
 		// When starting with USDT (balanceBTC is zero), we want to record initial purchase when lastAction is Sell
 		// When starting with BTC, we want to record initial purchase when lastAction is Buy
 		if (balanceBTC.IsZero() && lastAction == entity.ActionSell) || (!balanceBTC.IsZero() && lastAction == entity.ActionBuy) {
-			if err := ts.RecordInitialPurchase(currentPrice, initialAmount, time.Now()); err != nil {
+			if err := ts.AddDCAPurchase(currentPrice, initialAmount, time.Now(), 0); err != nil {
 				if !strings.Contains(err.Error(), "initial purchase already recorded") {
 					logger.Error("Failed to record initial purchase", zap.Error(err))
 					return nil, err
