@@ -1,17 +1,18 @@
-package main
+package historytest
 
 import (
 	"context"
 	"encoding/csv"
 	"errors"
-	"github.com/adshao/go-binance/v2"
-	"github.com/vadiminshakov/marti/internal/entity"
 	"os"
 	"sort"
 	"time"
+
+	"github.com/adshao/go-binance/v2"
+	"github.com/vadiminshakov/marti/internal/entity"
 )
 
-func dataColletorFactory(filePath string, pair *entity.Pair) (func(fromHoursAgo, toHoursAgo int, klinesize string) error, error) {
+func DataCollectorFactory(filePath string, pair *entity.Pair) (func(fromHoursAgo, toHoursAgo int, klinesize string) error, error) {
 	apikey := os.Getenv("APIKEY")
 	if len(apikey) == 0 {
 		return nil, errors.New("APIKEY env is not set")
@@ -33,6 +34,8 @@ func dataColletorFactory(filePath string, pair *entity.Pair) (func(fromHoursAgo,
 	}, nil
 }
 
+// collectMarketData fetches historical market data from Binance for a given pair and time range
+// This is used within the closure returned by DataCollectorFactory
 func collectMarketData(client *binance.Client, pair *entity.Pair, fromHoursAgo, toHoursAgo int, klinesize string) ([][]string, error) {
 	startTime := time.Now().Add(-time.Duration(fromHoursAgo)*time.Hour).Unix() * 1000
 	endTime := time.Now().Add(-time.Duration(toHoursAgo)*time.Hour).Unix() * 1000
