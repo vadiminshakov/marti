@@ -1,6 +1,6 @@
 module github.com/vadiminshakov/marti
 
-go 1.23.0
+go 1.24.0
 
 require (
 	github.com/adshao/go-binance/v2 v2.8.2
@@ -8,7 +8,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/shopspring/decimal v1.4.0
 	github.com/stretchr/testify v1.9.0
-	github.com/vadiminshakov/gowal v0.0.3-0.20250115221951-bf192ea01e26
+	github.com/vadiminshakov/gowal v0.0.3
 	go.uber.org/zap v1.24.0
 	gopkg.in/yaml.v3 v3.0.1
 )
