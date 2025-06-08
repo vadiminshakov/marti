@@ -19,21 +19,21 @@ func TestIsPercentDifferenceSignificant(t *testing.T) {
 			currentPrice:     decimal.Zero,
 			referencePrice:   decimal.Zero,
 			thresholdPercent: decimal.NewFromInt(1),
-			expected:         false, // No difference (0 is not > threshold)
+			expected:         false, // no difference (0 is not > threshold)
 		},
 		{
 			name:             "ref zero, current non-zero, threshold positive",
 			currentPrice:     decimal.NewFromInt(10),
 			referencePrice:   decimal.Zero,
 			thresholdPercent: decimal.NewFromInt(1),
-			expected:         true, // Infinite difference, considered significant if threshold > 0
+			expected:         false, // reference price is zero, so false returned
 		},
 		{
 			name:             "ref zero, current non-zero, threshold zero",
 			currentPrice:     decimal.NewFromInt(10),
 			referencePrice:   decimal.Zero,
-			thresholdPercent: decimal.Zero, // Threshold is 0
-			expected:         true, // Infinite difference is > 0
+			thresholdPercent: decimal.Zero,
+			expected:         false, // reference price is zero, so false returned
 		},
 		{
 			name:             "ref zero, current zero, threshold zero",
@@ -123,8 +123,6 @@ func TestIsPercentDifferenceSignificant(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// The function is not exported, so we call it directly as it's in the same package.
-			// If it were in a different package and not exported, testing would be harder.
 			if got := isPercentDifferenceSignificant(tt.currentPrice, tt.referencePrice, tt.thresholdPercent); got != tt.expected {
 				t.Errorf("isPercentDifferenceSignificant(%s, %s, %s) = %v, want %v", tt.currentPrice.String(), tt.referencePrice.String(), tt.thresholdPercent.String(), got, tt.expected)
 			}
