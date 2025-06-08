@@ -11,24 +11,34 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/config"
 
+	"github.com/vadiminshakov/marti/internal/entity"
 	"github.com/vadiminshakov/marti/internal/services"
 	"github.com/vadiminshakov/marti/internal/services/pricer"
 	"github.com/vadiminshakov/marti/internal/services/trader"
 	"go.uber.org/zap"
 )
 
+type tradersvc interface {
+	Buy(amount decimal.Decimal) error
+	Sell(amount decimal.Decimal) error
+}
+
+type pricersvc interface {
+	GetPrice(pair entity.Pair) (decimal.Decimal, error)
+}
+
 // TradingBot represents a single trading instance
 type TradingBot struct {
-	Trader       trader.Trader
-	Pricer       pricer.Pricer
+	Trader       tradersvc
+	Pricer       pricersvc
 	Config       config.Config
 	tradeService *services.TradeService
 }
 
 // NewTradingBot creates a new trading bot instance
 func NewTradingBot(conf config.Config, client interface{}) (*TradingBot, error) {
-	var currentTrader trader.Trader
-	var currentPricer pricer.Pricer
+	var currentTrader tradersvc
+	var currentPricer pricersvc
 	var err error
 
 	switch conf.Platform {
