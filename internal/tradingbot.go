@@ -64,7 +64,7 @@ func NewTradingBot(conf config.Config, client interface{}) (*TradingBot, error) 
 	tradeService, err := services.NewTradeService(
 		tsLogger,
 		conf.Pair,
-		conf.Amount, // This is the base amount for each DCA operation.
+		conf.Amount,
 		currentPricer,
 		currentTrader,
 		conf.MaxDcaTrades,
@@ -83,18 +83,45 @@ func NewTradingBot(conf config.Config, client interface{}) (*TradingBot, error) 
 	}, nil
 }
 
+// executeInitialBuy handles the initial purchase logic
+func (b *TradingBot) executeInitialBuy(logger *zap.Logger, currentPrice, calculatedInitialBuyAmount decimal.Decimal) error {
+	if len(b.tradeService.GetDCASeries().Purchases) == 0 {
+		logger.Info("New DCA series initiated in TradeService. Executing initial buy with Trader.",
+			zap.String("pair", b.Config.Pair.String()),
+			zap.String("price", currentPrice.String()),
+			zap.String("amount", calculatedInitialBuyAmount.String()))
+
+		if buyErr := b.Trader.Buy(calculatedInitialBuyAmount); buyErr != nil {
+			logger.Error("Initial buy execution failed after series was marked for init in TradeService",
+				zap.Error(buyErr),
+				zap.String("pair", b.Config.Pair.String()))
+
+			return errors.Wrapf(buyErr, "initial buy execution failed for %s after series marked for init", b.Config.Pair.String())
+		}
+
+		if err := b.tradeService.AddDCAPurchase(currentPrice, calculatedInitialBuyAmount, time.Now(), 0); err != nil {
+			logger.Error("Failed to record initial purchase state in TradeService for a new series",
+				zap.Error(err),
+				zap.String("pair", b.Config.Pair.String()))
+
+			return errors.Wrapf(err, "failed to record initial purchase state for new series for %s", b.Config.Pair.String())
+		}
+
+		logger.Info("Initial buy executed successfully.",
+			zap.String("pair", b.Config.Pair.String()),
+			zap.String("amount", calculatedInitialBuyAmount.String()))
+	} else {
+		logger.Info("DCA series already has purchases (loaded from WAL). Skipping explicit initial buy.",
+			zap.String("pair", b.Config.Pair.String()))
+	}
+
+	return nil
+}
+
 // Run executes the trading bot
 func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
 	defer b.tradeService.Close()
-
-	// Initial Buy Logic:
-	// 1. Get current price.
-	// 2. Try to record this as an initial purchase with TradeService.
-	//    RecordInitialPurchase checks if purchases already exist.
-	//    If it returns "already recorded" error, we log and continue (series exists).
-	//    If it returns any other error, it's critical (e.g., WAL save failed for a new series).
-	//    If it returns nil, the series was new and placeholder recorded. We then execute the actual buy.
-
+	
 	// Get current price and wait for it to drop before first buy
 	currentPrice, err := b.Pricer.GetPrice(b.Config.Pair)
 	if err != nil {
@@ -126,38 +153,10 @@ func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
 		zap.String("currentPrice", currentPrice.String()),
 		zap.String("requiredDropPercent", b.Config.DcaPercentThresholdBuy.String()))
 
-	// Attempt to record the potential first purchase.
-	if len(b.tradeService.GetDCASeries().Purchases) == 0 {
-		logger.Info("New DCA series initiated in TradeService. Executing initial buy with Trader.",
-			zap.String("pair", b.Config.Pair.String()),
-			zap.String("price", currentPrice.String()),
-			zap.String("amount", calculatedInitialBuyAmount.String()))
-
-		if buyErr := b.Trader.Buy(calculatedInitialBuyAmount); buyErr != nil {
-			logger.Error("Initial buy execution failed after series was marked for init in TradeService",
-				zap.Error(buyErr),
-				zap.String("pair", b.Config.Pair.String()))
-			// CRITICAL: State recorded in WAL, but buy failed. Manual intervention might be needed.
-			// Or, implement logic to revert/remove the last WAL entry in TradeService.
-			return errors.Wrapf(buyErr, "initial buy execution failed for %s after series marked for init", b.Config.Pair.String())
-		}
-
-		if err := b.tradeService.AddDCAPurchase(currentPrice, calculatedInitialBuyAmount, time.Now(), 0); err != nil {
-			logger.Error("Failed to record initial purchase state in TradeService for a new series",
-				zap.Error(err),
-				zap.String("pair", b.Config.Pair.String()))
-			return errors.Wrapf(err, "failed to record initial purchase state for new series for %s", b.Config.Pair.String())
-		}
-
-		logger.Info("Initial buy executed successfully.",
-			zap.String("pair", b.Config.Pair.String()),
-			zap.String("amount", calculatedInitialBuyAmount.String()))
-	} else {
-		logger.Info("DCA series already has purchases (likely loaded from WAL). Skipping explicit initial buy.",
-			zap.String("pair", b.Config.Pair.String()))
+	if err := b.executeInitialBuy(logger, currentPrice, calculatedInitialBuyAmount); err != nil {
+		return err
 	}
 
-	// --- Main Trading Loop ---
 	ticker := time.NewTicker(b.Config.PollPriceInterval)
 	defer ticker.Stop()
 
@@ -172,14 +171,12 @@ func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
 			logger.Debug("Trade service tick", zap.String("pair", b.Config.Pair.String()))
 			tradeEvent, err := b.tradeService.Trade()
 			if err != nil {
-				// services.ErrNoData is a common, non-critical error if WAL is empty or no initial data.
 				if errors.Is(err, services.ErrNoData) {
 					logger.Info("TradeService returned no data, continuing", zap.String("pair", b.Config.Pair.String()), zap.Error(err))
 				} else {
-					// For other errors, log as error and continue, or decide if some are fatal.
 					logger.Error("TradeService.Trade failed", zap.String("pair", b.Config.Pair.String()), zap.Error(err))
 				}
-				continue // Continue to next tick
+				continue
 			}
 
 			if tradeEvent != nil {
