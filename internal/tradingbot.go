@@ -83,23 +83,24 @@ func NewTradingBot(conf config.Config, client interface{}) (*TradingBot, error) 
 	}, nil
 }
 
+// Close closes the trading bot
+func (b *TradingBot) Close() {
+	b.tradeService.Close()
+}
 
-
-// Run executes the trading bot
-func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
-	defer b.tradeService.Close()
-	
+// prepareInitialBuy gets the current price and calculates the initial buy amount
+func (b *TradingBot) prepareInitialBuy(logger *zap.Logger) (decimal.Decimal, decimal.Decimal, error) {
 	// Get current price and wait for it to drop before first buy
 	currentPrice, err := b.Pricer.GetPrice(b.Config.Pair)
 	if err != nil {
 		logger.Error("Failed to get current price for initial buy check", zap.Error(err), zap.String("pair", b.Config.Pair.String()))
-		return errors.Wrapf(err, "failed to get current price for initial buy check for %s", b.Config.Pair.String())
+		return decimal.Zero, decimal.Zero, errors.Wrapf(err, "failed to get current price for initial buy check for %s", b.Config.Pair.String())
 	}
 
 	// Calculate individual buy amount for the initial purchase
 	if b.Config.MaxDcaTrades < 1 {
 		logger.Error("Initial buy error: MaxDcaTrades must be at least 1.", zap.Int("maxDcaTrades", b.Config.MaxDcaTrades))
-		return fmt.Errorf("MaxDcaTrades must be at least 1, configured value: %d", b.Config.MaxDcaTrades)
+		return decimal.Zero, decimal.Zero, fmt.Errorf("MaxDcaTrades must be at least 1, configured value: %d", b.Config.MaxDcaTrades)
 	}
 	maxDcaTradesDecimal := decimal.NewFromInt(int64(b.Config.MaxDcaTrades))
 	calculatedInitialBuyAmount := b.Config.Amount.Div(maxDcaTradesDecimal)
@@ -108,12 +109,17 @@ func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
 		logger.Error("Initial buy error: calculatedInitialBuyAmount is zero. Check Amount and MaxDcaTrades config.",
 			zap.String("amount", b.Config.Amount.String()),
 			zap.Int("maxDcaTrades", b.Config.MaxDcaTrades))
-		return fmt.Errorf("calculatedInitialBuyAmount is zero, check Amount (%s) and MaxDcaTrades (%d)", b.Config.Amount.String(), b.Config.MaxDcaTrades)
+		return decimal.Zero, decimal.Zero, fmt.Errorf("calculatedInitialBuyAmount is zero, check Amount (%s) and MaxDcaTrades (%d)", b.Config.Amount.String(), b.Config.MaxDcaTrades)
 	}
 
 	// Set initial price as reference
 	b.tradeService.SetLastSellPrice(currentPrice)
 	
+	return currentPrice, calculatedInitialBuyAmount, nil
+}
+
+// executeInitialBuy checks if a DCA series exists and executes initial buy if needed
+func (b *TradingBot) executeInitialBuy(logger *zap.Logger, currentPrice decimal.Decimal, calculatedInitialBuyAmount decimal.Decimal) error {
 	// Check if we have any existing DCA series
 	if len(b.tradeService.GetDCASeries().Purchases) == 0 {
 		// No DCA series exists, execute initial buy
@@ -146,6 +152,22 @@ func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
 		logger.Info("DCA series already exists (loaded from WAL). Continuing with existing trades.",
 			zap.String("pair", b.Config.Pair.String()),
 			zap.Int("existingPurchases", len(b.tradeService.GetDCASeries().Purchases)))
+	}
+	
+	return nil
+}
+
+// Run executes the trading bot
+func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
+	defer b.tradeService.Close()
+	
+	currentPrice, calculatedInitialBuyAmount, err := b.prepareInitialBuy(logger)
+	if err != nil {
+		return err
+	}
+	
+	if err := b.executeInitialBuy(logger, currentPrice, calculatedInitialBuyAmount); err != nil {
+		return err
 	}
 
 	ticker := time.NewTicker(b.Config.PollPriceInterval)
