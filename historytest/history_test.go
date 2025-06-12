@@ -55,16 +55,16 @@ func TestProfit(t *testing.T) {
 		{
 			name:                    "1 year - Aggressive trades",
 			duration:                8760,
-			maxDcaTrades:            3,
+			maxDcaTrades:            30,
 			dcaPercentThresholdBuy:  0.8,
-			dcaPercentThresholdSell: 5,
+			dcaPercentThresholdSell: 2,
 		},
 		{
 			name:                    "2 years - Aggressive trades",
 			duration:                17520,
-			maxDcaTrades:            3,
+			maxDcaTrades:            30,
 			dcaPercentThresholdBuy:  0.8,
-			dcaPercentThresholdSell: 5,
+			dcaPercentThresholdSell: 2,
 		},
 	}
 
