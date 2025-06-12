@@ -83,40 +83,7 @@ func NewTradingBot(conf config.Config, client interface{}) (*TradingBot, error) 
 	}, nil
 }
 
-// executeInitialBuy handles the initial purchase logic
-func (b *TradingBot) executeInitialBuy(logger *zap.Logger, currentPrice, calculatedInitialBuyAmount decimal.Decimal) error {
-	if len(b.tradeService.GetDCASeries().Purchases) == 0 {
-		logger.Info("New DCA series initiated in TradeService. Executing initial buy with Trader.",
-			zap.String("pair", b.Config.Pair.String()),
-			zap.String("price", currentPrice.String()),
-			zap.String("amount", calculatedInitialBuyAmount.String()))
 
-		if buyErr := b.Trader.Buy(calculatedInitialBuyAmount); buyErr != nil {
-			logger.Error("Initial buy execution failed after series was marked for init in TradeService",
-				zap.Error(buyErr),
-				zap.String("pair", b.Config.Pair.String()))
-
-			return errors.Wrapf(buyErr, "initial buy execution failed for %s after series marked for init", b.Config.Pair.String())
-		}
-
-		if err := b.tradeService.AddDCAPurchase(currentPrice, calculatedInitialBuyAmount, time.Now(), 0); err != nil {
-			logger.Error("Failed to record initial purchase state in TradeService for a new series",
-				zap.Error(err),
-				zap.String("pair", b.Config.Pair.String()))
-
-			return errors.Wrapf(err, "failed to record initial purchase state for new series for %s", b.Config.Pair.String())
-		}
-
-		logger.Info("Initial buy executed successfully.",
-			zap.String("pair", b.Config.Pair.String()),
-			zap.String("amount", calculatedInitialBuyAmount.String()))
-	} else {
-		logger.Info("DCA series already has purchases (loaded from WAL). Skipping explicit initial buy.",
-			zap.String("pair", b.Config.Pair.String()))
-	}
-
-	return nil
-}
 
 // Run executes the trading bot
 func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
@@ -144,17 +111,41 @@ func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
 		return fmt.Errorf("calculatedInitialBuyAmount is zero, check Amount (%s) and MaxDcaTrades (%d)", b.Config.Amount.String(), b.Config.MaxDcaTrades)
 	}
 
-	// Set initial price as reference for waiting for dip
+	// Set initial price as reference
 	b.tradeService.SetLastSellPrice(currentPrice)
-	b.tradeService.SetWaitingForDip(true)
-
-	logger.Info("Waiting for initial price drop before first buy",
-		zap.String("pair", b.Config.Pair.String()),
-		zap.String("currentPrice", currentPrice.String()),
-		zap.String("requiredDropPercent", b.Config.DcaPercentThresholdBuy.String()))
-
-	if err := b.executeInitialBuy(logger, currentPrice, calculatedInitialBuyAmount); err != nil {
-		return err
+	
+	// Check if we have any existing DCA series
+	if len(b.tradeService.GetDCASeries().Purchases) == 0 {
+		// No DCA series exists, execute initial buy
+		logger.Info("No existing DCA series. Executing initial buy.",
+			zap.String("pair", b.Config.Pair.String()),
+			zap.String("currentPrice", currentPrice.String()),
+			zap.String("amount", calculatedInitialBuyAmount.String()))
+		
+		// Execute initial buy
+		if buyErr := b.Trader.Buy(calculatedInitialBuyAmount); buyErr != nil {
+			logger.Error("Initial buy execution failed",
+				zap.Error(buyErr),
+				zap.String("pair", b.Config.Pair.String()))
+			return errors.Wrapf(buyErr, "initial buy execution failed for %s", b.Config.Pair.String())
+		}
+		
+		// Record the purchase
+		if err := b.tradeService.AddDCAPurchase(currentPrice, calculatedInitialBuyAmount, time.Now(), 0); err != nil {
+			logger.Error("Failed to record initial purchase state",
+				zap.Error(err),
+				zap.String("pair", b.Config.Pair.String()))
+			return errors.Wrapf(err, "failed to record initial purchase state for %s", b.Config.Pair.String())
+		}
+		
+		logger.Info("Initial buy executed successfully.",
+			zap.String("pair", b.Config.Pair.String()),
+			zap.String("amount", calculatedInitialBuyAmount.String()))
+	} else {
+		// DCA series already exists (loaded from WAL)
+		logger.Info("DCA series already exists (loaded from WAL). Continuing with existing trades.",
+			zap.String("pair", b.Config.Pair.String()),
+			zap.Int("existingPurchases", len(b.tradeService.GetDCASeries().Purchases)))
 	}
 
 	ticker := time.NewTicker(b.Config.PollPriceInterval)
