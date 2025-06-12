@@ -13,12 +13,12 @@ import (
 )
 
 func DataCollectorFactory(filePath string, pair *entity.Pair) (func(fromHoursAgo, toHoursAgo int, klinesize string) error, error) {
-	apikey := os.Getenv("APIKEY")
+	apikey := os.Getenv("BINANCE_API_KEY")
 	if len(apikey) == 0 {
-		return nil, errors.New("APIKEY env is not set")
+		return nil, errors.New("BINANCE_API_KEY env is not set")
 	}
 
-	secretkey := os.Getenv("SECRETKEY")
+	secretkey := os.Getenv("BINANCE_API_SECRET")
 	if len(apikey) == 0 {
 		return nil, errors.New("SECRETKEY env is not set")
 	}
