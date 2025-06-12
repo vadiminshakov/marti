@@ -173,7 +173,7 @@ func (t *TradeService) Trade() (*entity.TradeEvent, error) {
 				zap.String("lastSellPrice", t.lastSellPrice.String()),
 				zap.String("percentChange", percentChange.String()))
 
-			t.waitingForDip = false
+			t.SetWaitingForDip(false)
 
 			if err := t.AddDCAPurchase(price, t.individualBuyAmount, time.Now(), 0); err != nil {
 				t.l.Error("Failed to record initial purchase after price drop", zap.Error(err))
@@ -329,7 +329,7 @@ func (t *TradeService) actSell(price decimal.Decimal) (*entity.TradeEvent, error
 		t.tradePart = decimal.Zero
 
 		t.lastSellPrice = price
-		t.waitingForDip = true
+		t.SetWaitingForDip(true)
 		t.l.Info("Waiting for price to drop before starting new DCA series",
 			zap.String("lastSellPrice", price.String()),
 			zap.String("requiredDropPercent", t.dcaPercentThresholdBuy.String()))
@@ -339,12 +339,12 @@ func (t *TradeService) actSell(price decimal.Decimal) (*entity.TradeEvent, error
 		t.dcaSeries.TotalAmount = t.dcaSeries.TotalAmount.Sub(amountToSell)
 
 		if t.dcaSeries.TotalAmount.LessThanOrEqual(decimal.Zero) {
-			t.l.Info("Total amount became zero or less after partial sell. Treating as full sell for reset purposes.",
+			t.l.Info("Total amount became zero after partial sell. Resetting DCA series, waiting for price drop before starting new DCA series.",
 				zap.String("remainingTotalAmount", t.dcaSeries.TotalAmount.String()))
 			t.dcaSeries = &DCASeries{Purchases: make([]DCAPurchase, 0)} // Reset purchases
 			t.tradePart = decimal.Zero                                  // Reset tradePart
 			t.lastSellPrice = price
-			t.waitingForDip = true
+			t.SetWaitingForDip(true)
 		}
 	}
 
