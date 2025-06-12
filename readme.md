@@ -1,35 +1,55 @@
+# Marti
+
 ![](https://github.com/vadiminshakov/marti/workflows/tests/badge.svg)
 
 ![marti](https://github.com/vadiminshakov/marti/blob/main/img.png)
 
-Simple and reliable bot for cryptocurrency trading. The bot supports multiple trading platforms (currently Binance and Bybit) and uses a DCA (Dollar Cost Average) strategy with the ability to sell at profit and re-enter the market after a price dip. The modular architecture allows for the expansion of trading platforms: the core can be integrated with any platform, including the stock market.
+A cryptocurrency trading bot using DCA (Dollar Cost Average) strategy with profit-taking and market re-entry capabilities.
 
-To start the bot, simply specify the configuration file:
-```
-export APIKEY=your_api_key
-export SECRETKEY=your_api_secret
+## Features
+
+- Multi-exchange support (Binance, Bybit)
+- DCA strategy with configurable parameters
+- Automatic profit-taking when price rises by a set percentage
+- Market re-entry after price dips
+- Modular architecture for easy extension to other platforms
+
+## Quick Start
+
+```bash
+# Set API credentials
+export BINANCE_API_KEY=your_api_key
+export BINANCE_API_SECRET=your_api_secret
+Or
+# Set Bybit API credentials
+export BYBIT_API_KEY=your_api_key
+export BYBIT_API_SECRET=your_api_secret
+
+# Build and run
 go build
 ./marti --config config.yaml
 ```
 
-**Configuration:**
+## Configuration
 
-This application has a configuration that can be customized using YAML file:
+Create a `config.yaml` file:
 
-_config.yaml_
 ```yaml
-# The trading pair. The pair should be in the format COIN1_COIN2.
-- pair: BTC_USDT
-  # The trading platform (binance or bybit)
-  platform: binance
-  # The percentage of available balance to be used for trading. The value should be in the range of 0 to 100.
-  amount: 38
-  # The time interval between polling market prices to make trading decision (buy/sell/do nothing).
-  pollpriceinterval: 5m
-  # The maximum number of DCA trades to be executed.
-  max_dca_trades: 3
-  # The percentage of the price drop required to trigger a buy.
-  dca_percent_threshold_buy: 3.5
-  # The percentage of the price rise required to trigger a sell.
-  dca_percent_threshold_sell: 66
+- pair: BTC_USDT                     # Trading pair in COIN1_COIN2 format
+  platform: binance                  # Exchange (binance or bybit supported)
+  amount: 38                         # Percentage of balance to use (0-100)
+  pollpriceinterval: 5m              # Interval between price checks
+  max_dca_trades: 4                  # Maximum number of DCA trades
+  dca_percent_threshold_buy: 3.5     # Price drop percentage to trigger buy
+  dca_percent_threshold_sell: 66     # Price rise percentage to trigger sell
 ```
+
+## Testing with Historical Data
+
+```bash
+BINANCE_API_KEY=your_api_key BINANCE_API_SECRET=your_api_secret go test -v ./historytest
+```
+
+## License
+
+MIT
