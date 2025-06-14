@@ -1,10 +1,303 @@
 package services
 
 import (
+	"errors"
+	"fmt"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"github.com/vadiminshakov/gowal"
+	"github.com/vadiminshakov/marti/internal/entity"
+	pricerMock "github.com/vadiminshakov/marti/internal/services/pricer/mock"
+	traderMock "github.com/vadiminshakov/marti/internal/services/trader/mock"
+	"go.uber.org/zap"
 )
+
+func decimalMatcher(expected decimal.Decimal) interface{} {
+	return mock.MatchedBy(func(actual decimal.Decimal) bool {
+		return expected.Equal(actual)
+	})
+}
+
+func createTestTradeService(t *testing.T, pricer pricer, trader tradersvc) *TradeService {
+	logger := zap.NewNop()
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+	amount := decimal.NewFromInt(1000)
+
+	tempDir, err := os.MkdirTemp("", "test_wal_*")
+	require.NoError(t, err, "Failed to create temp directory")
+
+	t.Cleanup(func() {
+		os.RemoveAll(tempDir)
+	})
+
+	ts, err := createTradeServiceWithWALDir(logger, pair, amount, pricer, trader, 4, decimal.NewFromInt(5), decimal.NewFromInt(10), tempDir)
+	require.NoError(t, err, "Failed to create TradeService")
+
+	return ts
+}
+
+func createTradeServiceWithWALDir(l *zap.Logger, pair entity.Pair, amount decimal.Decimal, pricer pricer, trader tradersvc,
+	maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell decimal.Decimal, walDir string) (*TradeService, error) {
+
+	if maxDcaTrades < 1 {
+		return nil, fmt.Errorf("MaxDcaTrades must be at least 1, got %d", maxDcaTrades)
+	}
+
+	maxDcaTradesDecimal := decimal.NewFromInt(int64(maxDcaTrades))
+	individualBuyAmount := amount.Div(maxDcaTradesDecimal)
+
+	if individualBuyAmount.IsZero() {
+		return nil, errors.New("calculated individual buy amount is zero, check total capital (Amount) and MaxDcaTrades")
+	}
+
+	walCfg := gowal.Config{
+		Dir:              walDir,
+		Prefix:           "log_",
+		SegmentThreshold: 1000,
+		MaxSegments:      100,
+		IsInSyncDiskMode: true,
+	}
+
+	wal, err := gowal.NewWAL(walCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create WAL: %w", err)
+	}
+
+	dcaSeries := &DCASeries{
+		Purchases: make([]DCAPurchase, 0),
+	}
+
+	return &TradeService{
+		pair:                    pair,
+		amount:                  amount,
+		tradePart:               decimal.Zero,
+		pricer:                  pricer,
+		trader:                  trader,
+		l:                       l,
+		wal:                     wal,
+		dcaSeries:               dcaSeries,
+		maxDcaTrades:            maxDcaTrades,
+		dcaPercentThresholdBuy:  dcaPercentThresholdBuy,
+		dcaPercentThresholdSell: dcaPercentThresholdSell,
+		individualBuyAmount:     individualBuyAmount,
+		lastSellPrice:           decimal.Zero,
+		waitingForDip:           false,
+	}, nil
+}
+
+func TestTradeService_Trade_NoPriceData(t *testing.T) {
+	mockPricer := pricerMock.NewPricer(t)
+	mockTrader := traderMock.NewTrader(t)
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+
+	mockPricer.On("GetPrice", pair).Return(decimal.Zero, errors.New("price fetch error"))
+
+	ts := createTestTradeService(t, mockPricer, mockTrader)
+	defer ts.Close()
+
+	tradeEvent, err := ts.Trade()
+
+	require.Error(t, err, "expected error when pricer fails")
+	require.Nil(t, tradeEvent, "expected nil TradeEvent when pricer fails")
+}
+
+func TestTradeService_Trade_NoExistingPurchases(t *testing.T) {
+	mockPricer := pricerMock.NewPricer(t)
+	mockTrader := traderMock.NewTrader(t)
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+
+	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(50000), nil)
+
+	ts := createTestTradeService(t, mockPricer, mockTrader)
+	defer ts.Close()
+
+	tradeEvent, err := ts.Trade()
+	require.NoError(t, err, "unexpected error")
+	require.Nil(t, tradeEvent, "expected nil TradeEvent when no existing purchases")
+}
+
+func TestTradeService_Trade_WaitingForDip_PriceDropped(t *testing.T) {
+	mockPricer := pricerMock.NewPricer(t)
+	mockTrader := traderMock.NewTrader(t)
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+
+	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(45000), nil) // 10% drop from 50000
+	mockTrader.On("Buy", decimalMatcher(decimal.NewFromInt(250))).Return(nil)
+
+	ts := createTestTradeService(t, mockPricer, mockTrader)
+	defer ts.Close()
+
+	ts.SetLastSellPrice(decimal.NewFromInt(50000))
+	ts.SetWaitingForDip(true)
+
+	tradeEvent, err := ts.Trade()
+	require.NoError(t, err, "unexpected error")
+	require.NotNil(t, tradeEvent, "expected TradeEvent when price drops during dip waiting")
+	require.Equal(t, entity.ActionBuy, tradeEvent.Action, "expected Buy action")
+	require.True(t, tradeEvent.Amount.Equal(decimal.NewFromInt(250)), "expected amount 250, got %v", tradeEvent.Amount)
+}
+
+func TestTradeService_Trade_WaitingForDip_PriceNotDroppedEnough(t *testing.T) {
+	mockPricer := pricerMock.NewPricer(t)
+	mockTrader := traderMock.NewTrader(t)
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+
+	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(48000), nil) // only 4% drop from 50000
+
+	ts := createTestTradeService(t, mockPricer, mockTrader)
+	defer ts.Close()
+
+	ts.SetLastSellPrice(decimal.NewFromInt(50000))
+	ts.SetWaitingForDip(true)
+
+	tradeEvent, err := ts.Trade()
+	require.NoError(t, err, "unexpected error")
+	require.Nil(t, tradeEvent, "expected nil TradeEvent when price hasn't dropped enough")
+}
+
+func TestTradeService_Trade_DCABuy_PriceSignificantlyLower(t *testing.T) {
+	mockPricer := pricerMock.NewPricer(t)
+	mockTrader := traderMock.NewTrader(t)
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+
+	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(45000), nil) // significantly lower price
+	mockTrader.On("Buy", decimalMatcher(decimal.NewFromInt(250))).Return(nil)
+
+	ts := createTestTradeService(t, mockPricer, mockTrader)
+	defer ts.Close()
+
+	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 0)
+	require.NoError(t, err, "Failed to add initial DCA purchase")
+	ts.tradePart = decimal.NewFromInt(1)
+
+	tradeEvent, err := ts.Trade()
+	require.NoError(t, err, "unexpected error")
+	require.NotNil(t, tradeEvent, "expected TradeEvent for DCA buy")
+	require.Equal(t, entity.ActionBuy, tradeEvent.Action, "expected Buy action")
+	require.True(t, tradeEvent.Amount.Equal(decimal.NewFromInt(250)), "expected amount 250, got %v", tradeEvent.Amount)
+}
+
+func TestTradeService_Trade_DCABuy_MaxTradesReached(t *testing.T) {
+	mockPricer := pricerMock.NewPricer(t)
+	mockTrader := traderMock.NewTrader(t)
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+
+	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(45000), nil) // significantly lower price
+
+	ts := createTestTradeService(t, mockPricer, mockTrader)
+	defer ts.Close()
+
+	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 0)
+	require.NoError(t, err, "Failed to add initial DCA purchase")
+	ts.tradePart = decimal.NewFromInt(4) // Max trades reached
+
+	tradeEvent, err := ts.Trade()
+	require.NoError(t, err, "unexpected error")
+	require.Nil(t, tradeEvent, "expected nil TradeEvent when max DCA trades reached")
+}
+
+func TestTradeService_Trade_Sell_PriceSignificantlyHigher(t *testing.T) {
+	mockPricer := pricerMock.NewPricer(t)
+	mockTrader := traderMock.NewTrader(t)
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+
+	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(55500), nil) // 11% higher than avg entry (>10% threshold)
+	mockTrader.On("Sell", decimalMatcher(decimal.NewFromInt(250))).Return(nil)
+
+	ts := createTestTradeService(t, mockPricer, mockTrader)
+	defer ts.Close()
+
+	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 0)
+	require.NoError(t, err, "failed to add initial DCA purchase")
+
+	tradeEvent, err := ts.Trade()
+	require.NoError(t, err, "unexpected error")
+	require.NotNil(t, tradeEvent, "expected TradeEvent for sell")
+	require.Equal(t, entity.ActionSell, tradeEvent.Action, "expected Sell action")
+}
+
+func TestTradeService_Trade_Sell_FullSellOnDoubleThreshold(t *testing.T) {
+	mockPricer := pricerMock.NewPricer(t)
+	mockTrader := traderMock.NewTrader(t)
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+
+	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(61000), nil) // 22% higher than avg entry (>20% double threshold)
+	mockTrader.On("Sell", decimalMatcher(decimal.NewFromInt(250))).Return(nil)
+
+	ts := createTestTradeService(t, mockPricer, mockTrader)
+	defer ts.Close()
+
+	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 0)
+	require.NoError(t, err, "failed to add initial DCA purchase")
+
+	tradeEvent, err := ts.Trade()
+	require.NoError(t, err, "unexpected error")
+	require.NotNil(t, tradeEvent, "expected TradeEvent for sell")
+	require.Equal(t, entity.ActionSell, tradeEvent.Action, "expected Sell action")
+	require.True(t, tradeEvent.Amount.Equal(decimal.NewFromInt(250)), "expected full sell amount 250, got %v", tradeEvent.Amount)
+}
+
+func TestTradeService_Trade_NoAction_PriceInRange(t *testing.T) {
+	mockPricer := pricerMock.NewPricer(t)
+	mockTrader := traderMock.NewTrader(t)
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+
+	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(50500), nil) // only 1% change
+
+	ts := createTestTradeService(t, mockPricer, mockTrader)
+	defer ts.Close()
+
+	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 0)
+	require.NoError(t, err, "failed to add initial DCA purchase")
+
+	tradeEvent, err := ts.Trade()
+	require.NoError(t, err, "unexpected error")
+	require.Nil(t, tradeEvent, "expected nil TradeEvent when price change is not significant")
+}
+
+func TestTradeService_Trade_BuyError(t *testing.T) {
+	mockPricer := pricerMock.NewPricer(t)
+	mockTrader := traderMock.NewTrader(t)
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+
+	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(45000), nil) // significantly lower price
+	mockTrader.On("Buy", decimalMatcher(decimal.NewFromInt(250))).Return(errors.New("buy failed"))
+
+	ts := createTestTradeService(t, mockPricer, mockTrader)
+	defer ts.Close()
+
+	// Add initial purchase
+	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 0)
+	require.NoError(t, err, "failed to add initial DCA purchase")
+
+	tradeEvent, err := ts.Trade()
+	require.Error(t, err, "expected error when buy fails")
+	require.Nil(t, tradeEvent, "expected nil TradeEvent when buy fails")
+}
+
+func TestTradeService_Trade_SellError(t *testing.T) {
+	mockPricer := pricerMock.NewPricer(t)
+	mockTrader := traderMock.NewTrader(t)
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+
+	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(55500), nil) // 11% higher than avg entry (>10% threshold)
+	mockTrader.On("Sell", decimalMatcher(decimal.NewFromInt(250))).Return(errors.New("sell failed"))
+
+	ts := createTestTradeService(t, mockPricer, mockTrader)
+	defer ts.Close()
+
+	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 0)
+	require.NoError(t, err, "failed to add initial DCA purchase")
+
+	tradeEvent, err := ts.Trade()
+	require.Error(t, err, "expected error when sell fails")
+	require.Nil(t, tradeEvent, "expected nil TradeEvent when sell fails")
+}
 
 func TestIsPercentDifferenceSignificant(t *testing.T) {
 	tests := []struct {
@@ -123,9 +416,9 @@ func TestIsPercentDifferenceSignificant(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isPercentDifferenceSignificant(tt.currentPrice, tt.referencePrice, tt.thresholdPercent); got != tt.expected {
-				t.Errorf("isPercentDifferenceSignificant(%s, %s, %s) = %v, want %v", tt.currentPrice.String(), tt.referencePrice.String(), tt.thresholdPercent.String(), got, tt.expected)
-			}
+			got := isPercentDifferenceSignificant(tt.currentPrice, tt.referencePrice, tt.thresholdPercent)
+			require.Equal(t, tt.expected, got, "isPercentDifferenceSignificant(%s, %s, %s) = %v, want %v",
+				tt.currentPrice.String(), tt.referencePrice.String(), tt.thresholdPercent.String(), got, tt.expected)
 		})
 	}
 }
