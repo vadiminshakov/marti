@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/vadiminshakov/gowal"
 	"github.com/vadiminshakov/marti/internal/entity"
-	pricerMock "github.com/vadiminshakov/marti/internal/services/pricer/mock"
-	traderMock "github.com/vadiminshakov/marti/internal/services/trader/mock"
+	pricerMock "github.com/vadiminshakov/marti/mocks/pricer"
+	traderMock "github.com/vadiminshakov/marti/mocks/trader"
 	"go.uber.org/zap"
 )
 
