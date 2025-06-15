@@ -90,14 +90,12 @@ func (b *TradingBot) Close() {
 
 // prepareInitialBuy gets the current price and calculates the initial buy amount
 func (b *TradingBot) prepareInitialBuy(logger *zap.Logger) (decimal.Decimal, decimal.Decimal, error) {
-	// Get current price and wait for it to drop before first buy
 	currentPrice, err := b.Pricer.GetPrice(b.Config.Pair)
 	if err != nil {
 		logger.Error("Failed to get current price for initial buy check", zap.Error(err), zap.String("pair", b.Config.Pair.String()))
 		return decimal.Zero, decimal.Zero, errors.Wrapf(err, "failed to get current price for initial buy check for %s", b.Config.Pair.String())
 	}
 
-	// Calculate individual buy amount for the initial purchase
 	if b.Config.MaxDcaTrades < 1 {
 		logger.Error("Initial buy error: MaxDcaTrades must be at least 1.", zap.Int("maxDcaTrades", b.Config.MaxDcaTrades))
 		return decimal.Zero, decimal.Zero, fmt.Errorf("MaxDcaTrades must be at least 1, configured value: %d", b.Config.MaxDcaTrades)
@@ -120,15 +118,12 @@ func (b *TradingBot) prepareInitialBuy(logger *zap.Logger) (decimal.Decimal, dec
 
 // executeInitialBuy checks if a DCA series exists and executes initial buy if needed
 func (b *TradingBot) executeInitialBuy(logger *zap.Logger, currentPrice decimal.Decimal, calculatedInitialBuyAmount decimal.Decimal) error {
-	// Check if we have any existing DCA series
 	if len(b.tradeService.GetDCASeries().Purchases) == 0 {
-		// No DCA series exists, execute initial buy
 		logger.Info("No existing DCA series. Executing initial buy.",
 			zap.String("pair", b.Config.Pair.String()),
 			zap.String("currentPrice", currentPrice.String()),
 			zap.String("amount", calculatedInitialBuyAmount.String()))
 		
-		// Execute initial buy
 		if buyErr := b.Trader.Buy(calculatedInitialBuyAmount); buyErr != nil {
 			logger.Error("Initial buy execution failed",
 				zap.Error(buyErr),
@@ -136,7 +131,6 @@ func (b *TradingBot) executeInitialBuy(logger *zap.Logger, currentPrice decimal.
 			return errors.Wrapf(buyErr, "initial buy execution failed for %s", b.Config.Pair.String())
 		}
 		
-		// Record the purchase
 		if err := b.tradeService.AddDCAPurchase(currentPrice, calculatedInitialBuyAmount, time.Now(), 0); err != nil {
 			logger.Error("Failed to record initial purchase state",
 				zap.Error(err),
@@ -148,7 +142,6 @@ func (b *TradingBot) executeInitialBuy(logger *zap.Logger, currentPrice decimal.
 			zap.String("pair", b.Config.Pair.String()),
 			zap.String("amount", calculatedInitialBuyAmount.String()))
 	} else {
-		// DCA series already exists (loaded from WAL)
 		logger.Info("DCA series already exists (loaded from WAL). Continuing with existing trades.",
 			zap.String("pair", b.Config.Pair.String()),
 			zap.Int("existingPurchases", len(b.tradeService.GetDCASeries().Purchases)))
