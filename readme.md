@@ -2,7 +2,7 @@
 
 ![](https://github.com/vadiminshakov/marti/workflows/tests/badge.svg)
 
-![marti](https://github.com/vadiminshakov/marti/blob/main/img.png)
+![marti](https://github.com/vadiminshakov/marti/blob/main/logo.png)
 
 A cryptocurrency trading bot using DCA (Dollar Cost Average) strategy with profit-taking and market re-entry capabilities.
 
