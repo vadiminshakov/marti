@@ -27,7 +27,7 @@ func TestNewTradingBot(t *testing.T) {
 	tests := []struct {
 		name             string
 		platform         string
-		client           interface{}
+		client           any
 		expectError      bool
 		expectedErrorMsg string
 	}{

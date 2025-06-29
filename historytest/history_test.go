@@ -11,8 +11,9 @@ import (
 
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
+	"github.com/vadiminshakov/marti/internal"
 	"github.com/vadiminshakov/marti/internal/entity"
-	"github.com/vadiminshakov/marti/internal/services"
+	"github.com/vadiminshakov/marti/internal/services/strategy"
 	"go.uber.org/zap"
 )
 
@@ -98,7 +99,7 @@ func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell fl
 	balanceBTC, _ := decimal.NewFromString(btcBalanceInWallet)
 	balanceUSDT, _ := decimal.NewFromString(usdtBalanceInWallet)
 
-	trader, tradeServiceFactory := createTradeServiceFactory(logger, pair, prices, balanceBTC, balanceUSDT, maxDcaTrades, dcaPercentThresholdBuy, dcaPercentThresholdSell)
+	trader, strategyFactory := createStrategyFactory(logger, pair, prices, balanceBTC, balanceUSDT, maxDcaTrades, dcaPercentThresholdBuy, dcaPercentThresholdSell)
 
 	price, ok := <-prices
 	if !ok {
@@ -106,31 +107,27 @@ func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell fl
 	}
 
 	var (
-		lastAction   = entity.ActionSell // Start with ActionSell so we'll buy first
-		lastPriceBTC = price
-		tradeService *services.TradeService
+		lastPriceBTC    = price
+		tradingStrategy internal.TradingStrategy
 	)
 
-	// If we're starting with USDT (no BTC), we need to make an initial buy
-	if balanceBTC.IsZero() && balanceUSDT.IsPositive() {
-		// Create the trade service
-		tradeService, err = tradeServiceFactory(lastAction)
-		if err != nil {
-			log.Fatalf("Failed to create trade service for initial buy: %s", err)
+	tradingStrategy, err = strategyFactory()
+	if err != nil {
+		if !strings.Contains(err.Error(), "channel less than min") {
+			log.Fatalf("failed to create trading strategy: %s", err)
 		}
 	}
 
-	// Создаем TradeService один раз перед циклом
-	tradeService, err = tradeServiceFactory(lastAction)
-	if err != nil {
-		if !strings.Contains(err.Error(), "channel less than min") {
-			log.Fatalf("err trade svc create %s", err)
+	if tradingStrategy != nil {
+		if err := tradingStrategy.Initialize(); err != nil {
+			log.Fatalf("failed to initialize strategy: %s", err)
 		}
+		defer tradingStrategy.Close()
 	}
 
 	for range klines {
 		// execute trade
-		tradeEvent, err := tradeService.Trade()
+		tradeEvent, err := tradingStrategy.Trade()
 		if err != nil {
 			log.Debug(err)
 		}
@@ -205,21 +202,16 @@ func prepareData(filePath string, pair *entity.Pair) (chan decimal.Decimal, chan
 	return prices, klines, cleanup, nil
 }
 
-func createTradeServiceFactory(logger *zap.Logger, pair *entity.Pair, prices chan decimal.Decimal, balanceBTC, balanceUSDT decimal.Decimal, maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell float64) (*traderCsv, func(entity.Action) (*services.TradeService, error)) {
+func createStrategyFactory(logger *zap.Logger, pair *entity.Pair, prices chan decimal.Decimal, balanceBTC, balanceUSDT decimal.Decimal, maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell float64) (*traderCsv, func() (internal.TradingStrategy, error)) {
 	pricer := &pricerCsv{pricesCh: prices}
 	trader := &traderCsv{pair: pair, balance1: balanceBTC, balance2: balanceUSDT, pricesCh: prices}
 
-	tradeServiceLoggerConfig := zap.NewProductionConfig()
-	tradeServiceLoggerConfig.Level = zap.NewAtomicLevelAt(zap.ErrorLevel)
-	tradeServiceLogger, _ := tradeServiceLoggerConfig.Build()
-
-	return trader, func(lastAction entity.Action) (*services.TradeService, error) {
-
+	return trader, func() (internal.TradingStrategy, error) {
 		dcaPercentThresholdBuyDecimal := decimal.NewFromFloat(dcaPercentThresholdBuy)
 		dcaPercentThresholdSellDecimal := decimal.NewFromFloat(dcaPercentThresholdSell)
 
-		ts, err := services.NewTradeService(
-			tradeServiceLogger,
+		dcaStrategy, err := strategy.NewDCAStrategy(
+			logger,
 			*pair,
 			balanceUSDT,
 			pricer,
@@ -232,24 +224,7 @@ func createTradeServiceFactory(logger *zap.Logger, pair *entity.Pair, prices cha
 			return nil, err
 		}
 
-		// Получаем текущую цену напрямую из pricer
-		currentPrice, _ := pricer.GetPrice(*pair)
-
-		initialAmount := balanceUSDT.Div(decimal.NewFromInt(int64(maxDcaTrades)))
-
-		// When starting with USDT (balanceBTC is zero), we want to record initial purchase when lastAction is Sell
-		// When starting with BTC, we want to record initial purchase when lastAction is Buy
-		if (balanceBTC.IsZero() && lastAction == entity.ActionSell) || (!balanceBTC.IsZero() && lastAction == entity.ActionBuy) {
-			if err := ts.AddDCAPurchase(currentPrice, initialAmount, time.Now(), 0); err != nil {
-				if !strings.Contains(err.Error(), "initial purchase already recorded") {
-					logger.Error("Failed to record initial purchase", zap.Error(err))
-					return nil, err
-				}
-				logger.Debug("Initial purchase already recorded, ignoring")
-			}
-		}
-
-		return ts, nil
+		return dcaStrategy, nil
 	}
 }
 
