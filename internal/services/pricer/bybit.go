@@ -1,6 +1,7 @@
 package pricer
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/hirokisan/bybit/v2"
@@ -16,7 +17,7 @@ func NewBybitPricer(client *bybit.Client) *BybitPricer {
 	return &BybitPricer{client: client}
 }
 
-func (p *BybitPricer) GetPrice(pair entity.Pair) (decimal.Decimal, error) {
+func (p *BybitPricer) GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error) {
 	symbol := bybit.SymbolV5(pair.Symbol())
 
 	result, err := p.client.V5().Market().GetTickers(bybit.V5GetTickersParam{

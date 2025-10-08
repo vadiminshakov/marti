@@ -1,6 +1,8 @@
 package trader
 
 import (
+	"context"
+
 	"github.com/hirokisan/bybit/v2"
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
@@ -16,7 +18,7 @@ func NewBybitTrader(client *bybit.Client, pair entity.Pair) (*BybitTrader, error
 	return &BybitTrader{pair: pair, client: client}, nil
 }
 
-func (t *BybitTrader) Buy(amount decimal.Decimal) error {
+func (t *BybitTrader) Buy(ctx context.Context, amount decimal.Decimal) error {
 	amount = amount.RoundFloor(4)
 	_, err := t.client.V5().Order().CreateOrder(bybit.V5CreateOrderParam{
 		Category:   "spot",
@@ -32,7 +34,7 @@ func (t *BybitTrader) Buy(amount decimal.Decimal) error {
 	return nil
 }
 
-func (t *BybitTrader) Sell(amount decimal.Decimal) error {
+func (t *BybitTrader) Sell(ctx context.Context, amount decimal.Decimal) error {
 	amount = amount.RoundFloor(4)
 	_, err := t.client.V5().Order().CreateOrder(bybit.V5CreateOrderParam{
 		Category:   "spot",

@@ -3,6 +3,8 @@
 package trader
 
 import (
+	"context"
+
 	decimal "github.com/shopspring/decimal"
 
 	mock "github.com/stretchr/testify/mock"
@@ -18,13 +20,13 @@ type Trader struct {
 	mock.Mock
 }
 
-// Buy provides a mock function with given fields: amount
-func (_m *Trader) Buy(amount decimal.Decimal) error {
-	ret := _m.Called(amount)
+// Buy provides a mock function with given fields: ctx, amount
+func (_m *Trader) Buy(ctx context.Context, amount decimal.Decimal) error {
+	ret := _m.Called(ctx, amount)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(decimal.Decimal) error); ok {
-		r0 = rf(amount)
+	if rf, ok := ret.Get(0).(func(context.Context, decimal.Decimal) error); ok {
+		r0 = rf(ctx, amount)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -32,13 +34,13 @@ func (_m *Trader) Buy(amount decimal.Decimal) error {
 	return r0
 }
 
-// Sell provides a mock function with given fields: amount
-func (_m *Trader) Sell(amount decimal.Decimal) error {
-	ret := _m.Called(amount)
+// Sell provides a mock function with given fields: ctx, amount
+func (_m *Trader) Sell(ctx context.Context, amount decimal.Decimal) error {
+	ret := _m.Called(ctx, amount)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(decimal.Decimal) error); ok {
-		r0 = rf(amount)
+	if rf, ok := ret.Get(0).(func(context.Context, decimal.Decimal) error); ok {
+		r0 = rf(ctx, amount)
 	} else {
 		r0 = ret.Error(0)
 	}

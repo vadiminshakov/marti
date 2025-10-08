@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -46,13 +47,14 @@ func TestDCAStrategy_Initialize(t *testing.T) {
 	mockTrader := traderMock.NewTrader(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 
-	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(50000), nil)
-	mockTrader.On("Buy", decimalMatcher(decimal.NewFromInt(250))).Return(nil)
+	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(50000), nil)
+	mockTrader.On("Buy", mock.Anything, decimalMatcher(decimal.NewFromInt(250))).Return(nil)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	err := ts.Initialize()
+	ctx := context.Background()
+	err := ts.Initialize(ctx)
 	require.NoError(t, err, "Initialize should succeed")
 	require.Equal(t, 1, len(ts.GetDCASeries().Purchases), "Should have one purchase after initialize")
 }
@@ -114,12 +116,13 @@ func TestDCAStrategy_Trade_NoPriceData(t *testing.T) {
 	mockTrader := traderMock.NewTrader(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 
-	mockPricer.On("GetPrice", pair).Return(decimal.Zero, errors.New("price fetch error"))
+	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.Zero, errors.New("price fetch error"))
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	tradeEvent, err := ts.Trade()
+	ctx := context.Background()
+	tradeEvent, err := ts.Trade(ctx)
 
 	require.Error(t, err, "expected error when pricer fails")
 	require.Nil(t, tradeEvent, "expected nil TradeEvent when pricer fails")
@@ -130,12 +133,13 @@ func TestDCAStrategy_Trade_NoExistingPurchases(t *testing.T) {
 	mockTrader := traderMock.NewTrader(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 
-	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(50000), nil)
+	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(50000), nil)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	tradeEvent, err := ts.Trade()
+	ctx := context.Background()
+	tradeEvent, err := ts.Trade(ctx)
 	require.Error(t, err, "expected ErrNoData when no existing purchases")
 	require.True(t, errors.Is(err, ErrNoData), "expected ErrNoData")
 	require.Nil(t, tradeEvent, "expected nil TradeEvent when no existing purchases")
@@ -146,8 +150,8 @@ func TestDCAStrategy_Trade_WaitingForDip_PriceDropped(t *testing.T) {
 	mockTrader := traderMock.NewTrader(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 
-	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(45000), nil) // 10% drop from 50000
-	mockTrader.On("Buy", decimalMatcher(decimal.NewFromInt(250))).Return(nil)
+	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(45000), nil) // 10% drop from 50000
+	mockTrader.On("Buy", mock.Anything, decimalMatcher(decimal.NewFromInt(250))).Return(nil)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
@@ -155,7 +159,8 @@ func TestDCAStrategy_Trade_WaitingForDip_PriceDropped(t *testing.T) {
 	ts.SetLastSellPrice(decimal.NewFromInt(50000))
 	ts.SetWaitingForDip(true)
 
-	tradeEvent, err := ts.Trade()
+	ctx := context.Background()
+	tradeEvent, err := ts.Trade(ctx)
 	require.NoError(t, err, "unexpected error")
 	require.NotNil(t, tradeEvent, "expected TradeEvent when price drops during dip waiting")
 	require.Equal(t, entity.ActionBuy, tradeEvent.Action, "expected Buy action")
@@ -167,7 +172,7 @@ func TestDCAStrategy_Trade_WaitingForDip_PriceNotDroppedEnough(t *testing.T) {
 	mockTrader := traderMock.NewTrader(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 
-	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(48000), nil) // only 4% drop from 50000
+	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(48000), nil) // only 4% drop from 50000
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
@@ -175,7 +180,8 @@ func TestDCAStrategy_Trade_WaitingForDip_PriceNotDroppedEnough(t *testing.T) {
 	ts.SetLastSellPrice(decimal.NewFromInt(50000))
 	ts.SetWaitingForDip(true)
 
-	tradeEvent, err := ts.Trade()
+	ctx := context.Background()
+	tradeEvent, err := ts.Trade(ctx)
 	require.NoError(t, err, "unexpected error")
 	require.Nil(t, tradeEvent, "expected nil TradeEvent when price hasn't dropped enough")
 }
@@ -185,8 +191,8 @@ func TestDCAStrategy_Trade_DCABuy_PriceSignificantlyLower(t *testing.T) {
 	mockTrader := traderMock.NewTrader(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 
-	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(45000), nil) // significantly lower price
-	mockTrader.On("Buy", decimalMatcher(decimal.NewFromInt(250))).Return(nil)
+	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(45000), nil) // significantly lower price
+	mockTrader.On("Buy", mock.Anything, decimalMatcher(decimal.NewFromInt(250))).Return(nil)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
@@ -195,7 +201,8 @@ func TestDCAStrategy_Trade_DCABuy_PriceSignificantlyLower(t *testing.T) {
 	require.NoError(t, err, "Failed to add initial DCA purchase")
 	ts.tradePart = decimal.NewFromInt(1)
 
-	tradeEvent, err := ts.Trade()
+	ctx := context.Background()
+	tradeEvent, err := ts.Trade(ctx)
 	require.NoError(t, err, "unexpected error")
 	require.NotNil(t, tradeEvent, "expected TradeEvent for DCA buy")
 	require.Equal(t, entity.ActionBuy, tradeEvent.Action, "expected Buy action")
@@ -207,7 +214,7 @@ func TestDCAStrategy_Trade_DCABuy_MaxTradesReached(t *testing.T) {
 	mockTrader := traderMock.NewTrader(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 
-	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(45000), nil) // significantly lower price
+	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(45000), nil) // significantly lower price
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
@@ -216,7 +223,8 @@ func TestDCAStrategy_Trade_DCABuy_MaxTradesReached(t *testing.T) {
 	require.NoError(t, err, "Failed to add initial DCA purchase")
 	ts.tradePart = decimal.NewFromInt(4) // Max trades reached
 
-	tradeEvent, err := ts.Trade()
+	ctx := context.Background()
+	tradeEvent, err := ts.Trade(ctx)
 	require.NoError(t, err, "unexpected error")
 	require.Nil(t, tradeEvent, "expected nil TradeEvent when max DCA trades reached")
 }
@@ -226,8 +234,8 @@ func TestDCAStrategy_Trade_Sell_PriceSignificantlyHigher(t *testing.T) {
 	mockTrader := traderMock.NewTrader(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 
-	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(55500), nil) // 11% higher than avg entry (>10% threshold)
-	mockTrader.On("Sell", decimalMatcher(decimal.NewFromInt(250))).Return(nil)
+	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(55500), nil) // 11% higher than avg entry (>10% threshold)
+	mockTrader.On("Sell", mock.Anything, decimalMatcher(decimal.NewFromInt(250))).Return(nil)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
@@ -235,7 +243,8 @@ func TestDCAStrategy_Trade_Sell_PriceSignificantlyHigher(t *testing.T) {
 	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
 	require.NoError(t, err, "failed to add initial DCA purchase")
 
-	tradeEvent, err := ts.Trade()
+	ctx := context.Background()
+	tradeEvent, err := ts.Trade(ctx)
 	require.NoError(t, err, "unexpected error")
 	require.NotNil(t, tradeEvent, "expected TradeEvent for sell")
 	require.Equal(t, entity.ActionSell, tradeEvent.Action, "expected Sell action")
@@ -246,8 +255,8 @@ func TestDCAStrategy_Trade_Sell_FullSellOnDoubleThreshold(t *testing.T) {
 	mockTrader := traderMock.NewTrader(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 
-	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(61000), nil) // 22% higher than avg entry (>20% double threshold)
-	mockTrader.On("Sell", decimalMatcher(decimal.NewFromInt(250))).Return(nil)
+	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(61000), nil) // 22% higher than avg entry (>20% double threshold)
+	mockTrader.On("Sell", mock.Anything, decimalMatcher(decimal.NewFromInt(250))).Return(nil)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
@@ -255,7 +264,8 @@ func TestDCAStrategy_Trade_Sell_FullSellOnDoubleThreshold(t *testing.T) {
 	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
 	require.NoError(t, err, "failed to add initial DCA purchase")
 
-	tradeEvent, err := ts.Trade()
+	ctx := context.Background()
+	tradeEvent, err := ts.Trade(ctx)
 	require.NoError(t, err, "unexpected error")
 	require.NotNil(t, tradeEvent, "expected TradeEvent for sell")
 	require.Equal(t, entity.ActionSell, tradeEvent.Action, "expected Sell action")
@@ -267,7 +277,7 @@ func TestDCAStrategy_Trade_NoAction_PriceInRange(t *testing.T) {
 	mockTrader := traderMock.NewTrader(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 
-	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(50500), nil) // only 1% change
+	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(50500), nil) // only 1% change
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
@@ -275,7 +285,8 @@ func TestDCAStrategy_Trade_NoAction_PriceInRange(t *testing.T) {
 	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
 	require.NoError(t, err, "failed to add initial DCA purchase")
 
-	tradeEvent, err := ts.Trade()
+	ctx := context.Background()
+	tradeEvent, err := ts.Trade(ctx)
 	require.NoError(t, err, "unexpected error")
 	require.Nil(t, tradeEvent, "expected nil TradeEvent when price change is not significant")
 }
@@ -285,8 +296,8 @@ func TestDCAStrategy_Trade_BuyError(t *testing.T) {
 	mockTrader := traderMock.NewTrader(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 
-	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(45000), nil) // significantly lower price
-	mockTrader.On("Buy", decimalMatcher(decimal.NewFromInt(250))).Return(errors.New("buy failed"))
+	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(45000), nil) // significantly lower price
+	mockTrader.On("Buy", mock.Anything, decimalMatcher(decimal.NewFromInt(250))).Return(errors.New("buy failed"))
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
@@ -295,7 +306,8 @@ func TestDCAStrategy_Trade_BuyError(t *testing.T) {
 	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
 	require.NoError(t, err, "failed to add initial DCA purchase")
 
-	tradeEvent, err := ts.Trade()
+	ctx := context.Background()
+	tradeEvent, err := ts.Trade(ctx)
 	require.Error(t, err, "expected error when buy fails")
 	require.Nil(t, tradeEvent, "expected nil TradeEvent when buy fails")
 }
@@ -305,8 +317,8 @@ func TestDCAStrategy_Trade_SellError(t *testing.T) {
 	mockTrader := traderMock.NewTrader(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 
-	mockPricer.On("GetPrice", pair).Return(decimal.NewFromInt(55500), nil) // 11% higher than avg entry (>10% threshold)
-	mockTrader.On("Sell", decimalMatcher(decimal.NewFromInt(250))).Return(errors.New("sell failed"))
+	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(55500), nil) // 11% higher than avg entry (>10% threshold)
+	mockTrader.On("Sell", mock.Anything, decimalMatcher(decimal.NewFromInt(250))).Return(errors.New("sell failed"))
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
@@ -314,7 +326,8 @@ func TestDCAStrategy_Trade_SellError(t *testing.T) {
 	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
 	require.NoError(t, err, "failed to add initial DCA purchase")
 
-	tradeEvent, err := ts.Trade()
+	ctx := context.Background()
+	tradeEvent, err := ts.Trade(ctx)
 	require.Error(t, err, "expected error when sell fails")
 	require.Nil(t, tradeEvent, "expected nil TradeEvent when sell fails")
 }

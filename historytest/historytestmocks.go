@@ -1,6 +1,7 @@
 package historytest
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/pkg/errors"
@@ -16,7 +17,7 @@ type pricerCsv struct {
 	pricesCh chan decimal.Decimal
 }
 
-func (p *pricerCsv) GetPrice(pair entity.Pair) (decimal.Decimal, error) {
+func (p *pricerCsv) GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error) {
 	return <-p.pricesCh, nil
 }
 
@@ -32,7 +33,7 @@ type traderCsv struct {
 }
 
 // Buy buys amount of asset in trade pair.
-func (t *traderCsv) Buy(amount decimal.Decimal) error {
+func (t *traderCsv) Buy(ctx context.Context, amount decimal.Decimal) error {
 	price, ok := <-t.pricesCh
 	if !ok && price.IsZero() {
 		return errors.New("prices channel is closed")
@@ -62,7 +63,7 @@ func (t *traderCsv) Buy(amount decimal.Decimal) error {
 }
 
 // Sell sells amount of asset in trade pair.
-func (t *traderCsv) Sell(amount decimal.Decimal) error {
+func (t *traderCsv) Sell(ctx context.Context, amount decimal.Decimal) error {
 	// If we don't have any BTC, we can't sell
 	if t.balance1.LessThanOrEqual(decimal.Zero) {
 		return fmt.Errorf("cannot sell BTC, balance is zero")

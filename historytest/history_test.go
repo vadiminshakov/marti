@@ -1,6 +1,7 @@
 package historytest
 
 import (
+	"context"
 	"encoding/csv"
 	"fmt"
 	"log"
@@ -133,8 +134,10 @@ func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell fl
 		}
 	}
 
+	ctx := context.Background()
+
 	if tradingStrategy != nil {
-		if err := tradingStrategy.Initialize(); err != nil {
+		if err := tradingStrategy.Initialize(ctx); err != nil {
 			log.Fatalf("failed to initialize strategy: %s", err)
 		}
 		defer tradingStrategy.Close()
@@ -142,7 +145,7 @@ func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell fl
 
 	for range klines {
 		// execute trade
-		tradeEvent, err := tradingStrategy.Trade()
+		tradeEvent, err := tradingStrategy.Trade(ctx)
 		if err != nil {
 			log.Debug(err)
 		}
