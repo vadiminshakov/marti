@@ -28,7 +28,7 @@ type TradingBot struct {
 
 // NewTradingBot creates a new trading bot instance
 func NewTradingBot(conf config.Config, client any) (*TradingBot, error) {
-	currentTrader, currentPricer, err := CreateTraderAndPricer(conf.Platform, conf.Pair, client)
+	currentTrader, currentPricer, err := createTraderAndPricer(conf.Platform, conf.Pair, client)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create trader and pricer")
 	}

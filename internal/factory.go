@@ -13,19 +13,17 @@ import (
 	"github.com/vadiminshakov/marti/internal/services/trader"
 )
 
-// Trader interface for trading operations
 type Trader interface {
 	Buy(ctx context.Context, amount decimal.Decimal) error
 	Sell(ctx context.Context, amount decimal.Decimal) error
 }
 
-// Pricer interface for price retrieval
 type Pricer interface {
 	GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error)
 }
 
-// CreateTraderAndPricer creates trader and pricer instances based on platform
-func CreateTraderAndPricer(platform string, pair entity.Pair, client any) (Trader, Pricer, error) {
+// createTraderAndPricer creates trader and pricer instances based on platform
+func createTraderAndPricer(platform string, pair entity.Pair, client any) (Trader, Pricer, error) {
 	switch platform {
 	case "binance":
 		binanceClient, ok := client.(*binance.Client)
