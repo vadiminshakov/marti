@@ -101,10 +101,12 @@ func NewDCAStrategy(l *zap.Logger, pair entity.Pair, amount decimal.Decimal, pri
 		}
 	}
 
+	initialTradePart := decimal.NewFromInt(int64(len(dcaSeries.Purchases)))
+
 	return &DCAStrategy{
 		pair:                    pair,
 		amount:                  amount,
-		tradePart:               decimal.Zero,
+		tradePart:               initialTradePart,
 		pricer:                  pricer,
 		trader:                  trader,
 		l:                       l,
@@ -150,6 +152,8 @@ func (d *DCAStrategy) AddDCAPurchase(price, amount decimal.Decimal, purchaseTime
 			Add(price.Mul(amount)).Div(d.dcaSeries.TotalAmount)
 	}
 
+	d.tradePart = decimal.NewFromInt(int64(len(d.dcaSeries.Purchases)))
+
 	return d.saveDCASeries()
 }
 
@@ -179,7 +183,6 @@ func (d *DCAStrategy) Trade() (*entity.TradeEvent, error) {
 				d.l.Error("Failed to record initial purchase after price drop", zap.Error(err))
 				return nil, err
 			}
-			d.tradePart = decimal.NewFromInt(1)
 
 			d.l.Info("Initial purchase recorded successfully",
 				zap.String("pair", d.pair.String()),
@@ -271,8 +274,6 @@ func (d *DCAStrategy) actBuy(price decimal.Decimal) (*entity.TradeEvent, error) 
 		zap.String("amount", d.individualBuyAmount.String()),
 		zap.String("avg_entry_price", d.dcaSeries.AvgEntryPrice.String()))
 
-	d.tradePart = d.tradePart.Add(decimal.NewFromInt(1))
-
 	return tradeEvent, nil
 }
 
@@ -335,10 +336,9 @@ func (d *DCAStrategy) actSell(price decimal.Decimal) (*entity.TradeEvent, error)
 			zap.String("requiredDropPercent", d.dcaPercentThresholdBuy.String()))
 	} else {
 		d.l.Info("Partial sell executed.", zap.String("amountSold", amountToSell.String()))
+		d.removeAmountFromPurchases(amountToSell)
 
-		d.dcaSeries.TotalAmount = d.dcaSeries.TotalAmount.Sub(amountToSell)
-
-		if d.dcaSeries.TotalAmount.LessThanOrEqual(decimal.Zero) {
+		if len(d.dcaSeries.Purchases) == 0 || d.dcaSeries.TotalAmount.LessThanOrEqual(decimal.Zero) {
 			d.l.Info("Total amount became zero after partial sell. Resetting DCA series, waiting for price drop before starting new DCA series.",
 				zap.String("remainingTotalAmount", d.dcaSeries.TotalAmount.String()))
 			d.dcaSeries = &DCASeries{Purchases: make([]DCAPurchase, 0)} // Reset purchases
@@ -391,13 +391,59 @@ func (d *DCAStrategy) SetWaitingForDip(waiting bool) {
 	d.waitingForDip = waiting
 }
 
+func (d *DCAStrategy) removeAmountFromPurchases(amount decimal.Decimal) {
+	if amount.LessThanOrEqual(decimal.Zero) || len(d.dcaSeries.Purchases) == 0 {
+		return
+	}
+
+	remaining := amount
+
+	for i := len(d.dcaSeries.Purchases) - 1; i >= 0 && remaining.GreaterThan(decimal.Zero); i-- {
+		purchase := d.dcaSeries.Purchases[i]
+
+		if purchase.Amount.LessThanOrEqual(remaining) {
+			remaining = remaining.Sub(purchase.Amount)
+			d.dcaSeries.Purchases = d.dcaSeries.Purchases[:i]
+			continue
+		}
+
+		purchase.Amount = purchase.Amount.Sub(remaining)
+		d.dcaSeries.Purchases[i] = purchase
+		remaining = decimal.Zero
+	}
+
+	d.recalculateSeriesStats()
+	d.tradePart = decimal.NewFromInt(int64(len(d.dcaSeries.Purchases)))
+}
+
+func (d *DCAStrategy) recalculateSeriesStats() {
+	if len(d.dcaSeries.Purchases) == 0 {
+		d.dcaSeries.TotalAmount = decimal.Zero
+		d.dcaSeries.AvgEntryPrice = decimal.Zero
+		d.dcaSeries.FirstBuyTime = time.Time{}
+		return
+	}
+
+	totalAmount := decimal.Zero
+	weightedPriceSum := decimal.Zero
+
+	for _, purchase := range d.dcaSeries.Purchases {
+		totalAmount = totalAmount.Add(purchase.Amount)
+		weightedPriceSum = weightedPriceSum.Add(purchase.Price.Mul(purchase.Amount))
+	}
+
+	d.dcaSeries.TotalAmount = totalAmount
+	d.dcaSeries.AvgEntryPrice = weightedPriceSum.Div(totalAmount)
+	d.dcaSeries.FirstBuyTime = d.dcaSeries.Purchases[0].Time
+}
+
 // Initialize prepares the DCA strategy by setting up initial price reference and executing initial buy if needed
 func (d *DCAStrategy) Initialize() error {
 	currentPrice, calculatedInitialBuyAmount, err := d.prepareInitialBuy()
 	if err != nil {
 		return err
 	}
-	
+
 	return d.executeInitialBuy(currentPrice, calculatedInitialBuyAmount)
 }
 
@@ -425,7 +471,7 @@ func (d *DCAStrategy) prepareInitialBuy() (decimal.Decimal, decimal.Decimal, err
 
 	// Set initial price as reference
 	d.SetLastSellPrice(currentPrice)
-	
+
 	return currentPrice, calculatedInitialBuyAmount, nil
 }
 
@@ -436,21 +482,21 @@ func (d *DCAStrategy) executeInitialBuy(currentPrice decimal.Decimal, calculated
 			zap.String("pair", d.pair.String()),
 			zap.String("currentPrice", currentPrice.String()),
 			zap.String("amount", calculatedInitialBuyAmount.String()))
-		
+
 		if buyErr := d.trader.Buy(calculatedInitialBuyAmount); buyErr != nil {
 			d.l.Error("Initial buy execution failed",
 				zap.Error(buyErr),
 				zap.String("pair", d.pair.String()))
 			return errors.Wrapf(buyErr, "initial buy execution failed for %s", d.pair.String())
 		}
-		
+
 		if err := d.AddDCAPurchase(currentPrice, calculatedInitialBuyAmount, time.Now(), 0); err != nil {
 			d.l.Error("Failed to record initial purchase state",
 				zap.Error(err),
 				zap.String("pair", d.pair.String()))
 			return errors.Wrapf(err, "failed to record initial purchase state for %s", d.pair.String())
 		}
-		
+
 		d.l.Info("Initial buy executed successfully.",
 			zap.String("pair", d.pair.String()),
 			zap.String("amount", calculatedInitialBuyAmount.String()))
@@ -459,6 +505,6 @@ func (d *DCAStrategy) executeInitialBuy(currentPrice decimal.Decimal, calculated
 			zap.String("pair", d.pair.String()),
 			zap.Int("existingPurchases", len(d.dcaSeries.Purchases)))
 	}
-	
+
 	return nil
 }
