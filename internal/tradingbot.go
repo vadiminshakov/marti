@@ -20,8 +20,6 @@ type TradingStrategy interface {
 
 // TradingBot represents a single trading instance
 type TradingBot struct {
-	Trader          Trader
-	Pricer          Pricer
 	Config          config.Config
 	tradingStrategy TradingStrategy
 }
@@ -34,7 +32,7 @@ func NewTradingBot(conf config.Config, client any) (*TradingBot, error) {
 	}
 
 	tsLogger := zap.L().With(zap.String("pair", conf.Pair.String()))
-	tradingStrategy, err := strategy.NewDCAStrategy(
+	tradingStrategy, err := createTradingStrategy(
 		tsLogger,
 		conf.Pair,
 		conf.Amount,
@@ -45,12 +43,10 @@ func NewTradingBot(conf config.Config, client any) (*TradingBot, error) {
 		conf.DcaPercentThresholdSell,
 	)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create DCAStrategy")
+		return nil, errors.Wrap(err, "failed to create trading strategy")
 	}
 
 	return &TradingBot{
-		Trader:          currentTrader,
-		Pricer:          currentPricer,
 		Config:          conf,
 		tradingStrategy: tradingStrategy,
 	}, nil
