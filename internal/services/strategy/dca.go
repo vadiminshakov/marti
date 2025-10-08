@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -39,12 +40,12 @@ type DCASeries struct {
 const dcaSeriesKeyPrefix = "dca_series_"
 
 type tradersvc interface {
-	Buy(amount decimal.Decimal) error
-	Sell(amount decimal.Decimal) error
+	Buy(ctx context.Context, amount decimal.Decimal) error
+	Sell(ctx context.Context, amount decimal.Decimal) error
 }
 
 type pricer interface {
-	GetPrice(pair entity.Pair) (decimal.Decimal, error)
+	GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error)
 }
 
 // DCAStrategy makes trades for specific trade pair using DCA strategy.
@@ -188,8 +189,8 @@ func (d *DCAStrategy) GetDCASeries() *DCASeries {
 }
 
 // Trade is the main method responsible for executing trading logic based on the current price of the asset.
-func (d *DCAStrategy) Trade() (*entity.TradeEvent, error) {
-	price, err := d.pricer.GetPrice(d.pair)
+func (d *DCAStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
+	price, err := d.pricer.GetPrice(ctx, d.pair)
 	if err != nil {
 		return nil, errors.Wrapf(err, "pricer failed for pair %s", d.pair.String())
 	}
@@ -204,7 +205,7 @@ func (d *DCAStrategy) Trade() (*entity.TradeEvent, error) {
 
 			d.SetWaitingForDip(false)
 
-			tradeEvent, err := d.actBuy(price)
+			tradeEvent, err := d.actBuy(ctx, price)
 			if err != nil {
 				d.l.Error("Failed to record initial purchase after price drop", zap.Error(err))
 				return tradeEvent, err
@@ -237,7 +238,7 @@ func (d *DCAStrategy) Trade() (*entity.TradeEvent, error) {
 			d.l.Info("Price significantly lower than average, attempting DCA buy.",
 				zap.String("price", price.String()),
 				zap.String("avgEntryPrice", d.dcaSeries.AvgEntryPrice.String()))
-			tradeEvent, err := d.actBuy(price)
+			tradeEvent, err := d.actBuy(ctx, price)
 			return tradeEvent, err
 		}
 		d.l.Info("Price significantly lower, but max DCA trades reached or tradePart issue.",
@@ -250,7 +251,7 @@ func (d *DCAStrategy) Trade() (*entity.TradeEvent, error) {
 		d.l.Info("Price significantly higher than average, attempting sell.",
 			zap.String("price", price.String()),
 			zap.String("avgEntryPrice", d.dcaSeries.AvgEntryPrice.String()))
-		return d.actSell(price)
+		return d.actSell(ctx, price)
 	}
 
 	d.l.Debug("No significant price movement for action",
@@ -263,9 +264,9 @@ func (d *DCAStrategy) Close() error {
 	return d.wal.Close()
 }
 
-func (d *DCAStrategy) actBuy(price decimal.Decimal) (*entity.TradeEvent, error) {
+func (d *DCAStrategy) actBuy(ctx context.Context, price decimal.Decimal) (*entity.TradeEvent, error) {
 	operationTime := time.Now()
-	if err := d.trader.Buy(d.individualBuyAmount); err != nil {
+	if err := d.trader.Buy(ctx, d.individualBuyAmount); err != nil {
 		return nil, errors.Wrapf(err, "trader buy failed for pair %s with amount %s", d.pair.String(), d.individualBuyAmount.String())
 	}
 
@@ -294,7 +295,7 @@ func (d *DCAStrategy) actBuy(price decimal.Decimal) (*entity.TradeEvent, error) 
 	return tradeEvent, nil
 }
 
-func (d *DCAStrategy) actSell(price decimal.Decimal) (*entity.TradeEvent, error) {
+func (d *DCAStrategy) actSell(ctx context.Context, price decimal.Decimal) (*entity.TradeEvent, error) {
 	profit := price.Sub(d.dcaSeries.AvgEntryPrice).Div(d.dcaSeries.AvgEntryPrice).Mul(decimal.NewFromInt(100))
 
 	amountToSell := decimal.Zero
@@ -331,7 +332,7 @@ func (d *DCAStrategy) actSell(price decimal.Decimal) (*entity.TradeEvent, error)
 		return nil, nil
 	}
 
-	if err := d.trader.Sell(amountToSell); err != nil {
+	if err := d.trader.Sell(ctx, amountToSell); err != nil {
 		return nil, errors.Wrapf(err, "trader sell failed for pair %s, amount %s", d.pair.String(), amountToSell.String())
 	}
 
@@ -461,18 +462,18 @@ func (d *DCAStrategy) recalculateSeriesStats() {
 }
 
 // Initialize prepares the DCA strategy by setting up initial price reference and executing initial buy if needed
-func (d *DCAStrategy) Initialize() error {
-	currentPrice, calculatedInitialBuyAmount, err := d.prepareInitialBuy()
+func (d *DCAStrategy) Initialize(ctx context.Context) error {
+	currentPrice, calculatedInitialBuyAmount, err := d.prepareInitialBuy(ctx)
 	if err != nil {
 		return err
 	}
 
-	return d.executeInitialBuy(currentPrice, calculatedInitialBuyAmount)
+	return d.executeInitialBuy(ctx, currentPrice, calculatedInitialBuyAmount)
 }
 
 // prepareInitialBuy gets the current price and calculates the initial buy amount
-func (d *DCAStrategy) prepareInitialBuy() (decimal.Decimal, decimal.Decimal, error) {
-	currentPrice, err := d.pricer.GetPrice(d.pair)
+func (d *DCAStrategy) prepareInitialBuy(ctx context.Context) (decimal.Decimal, decimal.Decimal, error) {
+	currentPrice, err := d.pricer.GetPrice(ctx, d.pair)
 	if err != nil {
 		d.l.Error("Failed to get current price for initial buy check", zap.Error(err), zap.String("pair", d.pair.String()))
 		return decimal.Zero, decimal.Zero, errors.Wrapf(err, "failed to get current price for initial buy check for %s", d.pair.String())
@@ -501,14 +502,14 @@ func (d *DCAStrategy) prepareInitialBuy() (decimal.Decimal, decimal.Decimal, err
 }
 
 // executeInitialBuy checks if a DCA series exists and executes initial buy if needed
-func (d *DCAStrategy) executeInitialBuy(currentPrice decimal.Decimal, calculatedInitialBuyAmount decimal.Decimal) error {
+func (d *DCAStrategy) executeInitialBuy(ctx context.Context, currentPrice decimal.Decimal, calculatedInitialBuyAmount decimal.Decimal) error {
 	if len(d.dcaSeries.Purchases) == 0 {
 		d.l.Info("No existing DCA series. Executing initial buy.",
 			zap.String("pair", d.pair.String()),
 			zap.String("currentPrice", currentPrice.String()),
 			zap.String("amount", calculatedInitialBuyAmount.String()))
 
-		if buyErr := d.trader.Buy(calculatedInitialBuyAmount); buyErr != nil {
+		if buyErr := d.trader.Buy(ctx, calculatedInitialBuyAmount); buyErr != nil {
 			d.l.Error("Initial buy execution failed",
 				zap.Error(buyErr),
 				zap.String("pair", d.pair.String()))
