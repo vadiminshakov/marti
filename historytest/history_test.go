@@ -42,49 +42,64 @@ func TestProfit(t *testing.T) {
 		{
 			name:                    "1 year - Conservative buy",
 			duration:                8760,
-			maxDcaTrades:            2,
-			dcaPercentThresholdBuy:  9.5,
-			dcaPercentThresholdSell: 66,
+			maxDcaTrades:            3,
+			dcaPercentThresholdBuy:  2,
+			dcaPercentThresholdSell: 60,
 		},
 		{
 			name:                    "2 years - Conservative buy",
 			duration:                17520,
 			maxDcaTrades:            3,
-			dcaPercentThresholdBuy:  3.5,
-			dcaPercentThresholdSell: 66,
+			dcaPercentThresholdBuy:  2,
+			dcaPercentThresholdSell: 60,
 		},
 		{
 			name:                    "1 year - Aggressive trades",
 			duration:                8760,
-			maxDcaTrades:            30,
-			dcaPercentThresholdBuy:  0.8,
-			dcaPercentThresholdSell: 2,
+			maxDcaTrades:            20,
+			dcaPercentThresholdBuy:  2,
+			dcaPercentThresholdSell: 4,
 		},
 		{
 			name:                    "2 years - Aggressive trades",
 			duration:                17520,
-			maxDcaTrades:            30,
-			dcaPercentThresholdBuy:  0.8,
-			dcaPercentThresholdSell: 2,
+			maxDcaTrades:            20,
+			dcaPercentThresholdBuy:  2,
+			dcaPercentThresholdSell: 4,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			dataHoursAgo = tc.duration
-			require.NoError(t, runBot(tc.maxDcaTrades, tc.dcaPercentThresholdBuy, tc.dcaPercentThresholdSell))
+			summary, err := runBot(tc.maxDcaTrades, tc.dcaPercentThresholdBuy, tc.dcaPercentThresholdSell)
+			require.NoError(t, err)
+
+			fmt.Printf("[%s] Deals: %d\n", tc.name, summary.Deals)
+			fmt.Printf("[%s] Total balance of %s: %s (was %s)\n", tc.name, summary.PairFrom, summary.BalanceFromFinal.StringFixed(5), summary.BalanceFromInitial.StringFixed(5))
+			fmt.Printf("[%s] Total balance of %s: %s (was %s)\n", tc.name, summary.PairTo, summary.BalanceToFinal.StringFixed(5), summary.BalanceToInitial.StringFixed(5))
+			fmt.Printf("[%s] Total fee: %s\n", tc.name, summary.TotalFee.StringFixed(5))
+			fmt.Printf("[%s] Total profit: %s %s\n", tc.name, summary.TotalProfit.StringFixed(2), summary.PairTo)
+			fmt.Printf("[%s] %s%% profit (initial investment: %s %s)\n", tc.name, summary.ProfitPercent, summary.BalanceToInitial.StringFixed(2), summary.PairTo)
 		})
 	}
 }
 
-func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell float64) error {
-	config := zap.NewProductionConfig()
-	config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
+type botSummary struct {
+	Deals              uint
+	PairFrom           string
+	PairTo             string
+	BalanceFromInitial decimal.Decimal
+	BalanceFromFinal   decimal.Decimal
+	BalanceToInitial   decimal.Decimal
+	BalanceToFinal     decimal.Decimal
+	TotalFee           decimal.Decimal
+	TotalProfit        decimal.Decimal
+	ProfitPercent      string
+}
 
-	logger, err := config.Build()
-	if err != nil {
-		return fmt.Errorf("failed to initialize logger: %w", err)
-	}
+func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell float64) (botSummary, error) {
+	logger := zap.NewNop()
 	defer logger.Sync()
 	log := logger.Sugar()
 
@@ -92,7 +107,7 @@ func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell fl
 
 	prices, klines, cleanup, err := prepareData(dataFile, pair)
 	if err != nil {
-		return fmt.Errorf("failed to prepare data: %w", err)
+		return botSummary{}, fmt.Errorf("failed to prepare data: %w", err)
 	}
 	defer cleanup()
 
@@ -103,7 +118,7 @@ func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell fl
 
 	price, ok := <-prices
 	if !ok {
-		return fmt.Errorf("prices channel is closed")
+		return botSummary{}, fmt.Errorf("prices channel is closed")
 	}
 
 	var (
@@ -139,26 +154,18 @@ func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell fl
 		}
 	}
 
-	summarizeResults(log, trader, pair, balanceBTC, lastPriceBTC)
-	return nil
+	return summarizeResults(trader, pair, balanceBTC, lastPriceBTC), nil
 }
 
-func summarizeResults(log *zap.SugaredLogger, trader *traderCsv, pair *entity.Pair, initialBalanceBTC, lastPriceBTC decimal.Decimal) {
+func summarizeResults(trader *traderCsv, pair *entity.Pair, initialBalanceBTC, lastPriceBTC decimal.Decimal) botSummary {
 	// Get the initial USDT balance from the trader
 	initialBalanceUSDT, _ := decimal.NewFromString(usdtBalanceInWallet)
-
-	log.Infof("Deals: %d", trader.dealsCount)
-	log.Infof("Total balance of %s: %s (was %s)", pair.From, trader.balance1.StringFixed(5), initialBalanceBTC.StringFixed(5))
-	log.Infof("Total balance of %s: %s (was %s)", pair.To, trader.balance2.StringFixed(5), initialBalanceUSDT.StringFixed(5))
-	log.Infof("Total fee: %s", trader.fee.StringFixed(5))
 
 	// Calculate total profit in USDT
 	totalProfit := calculateTotalProfit(trader)
 	if trader.balance1.IsPositive() {
 		totalProfit = totalProfit.Add(lastPriceBTC.Mul(trader.balance1))
 	}
-
-	log.Infof("Total profit: %s %s", totalProfit.StringFixed(2), pair.To)
 
 	// Calculate profit percentage based on initial USDT investment
 	var profitPercent string
@@ -173,7 +180,18 @@ func summarizeResults(log *zap.SugaredLogger, trader *traderCsv, pair *entity.Pa
 		profitPercent = "N/A"
 	}
 
-	log.Infof("%s%% profit (initial investment: %s USDT)", profitPercent, initialBalanceUSDT.StringFixed(2))
+	return botSummary{
+		Deals:              trader.dealsCount,
+		PairFrom:           pair.From,
+		PairTo:             pair.To,
+		BalanceFromInitial: initialBalanceBTC,
+		BalanceFromFinal:   trader.balance1,
+		BalanceToInitial:   initialBalanceUSDT,
+		BalanceToFinal:     trader.balance2,
+		TotalFee:           trader.fee,
+		TotalProfit:        totalProfit,
+		ProfitPercent:      profitPercent,
+	}
 }
 
 func calculateTotalProfit(trader *traderCsv) decimal.Decimal {
