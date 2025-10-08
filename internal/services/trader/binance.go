@@ -17,22 +17,22 @@ func NewBinanceTrader(client *binance.Client, pair entity.Pair) (*BinanceTrader,
 	return &BinanceTrader{pair: pair, client: client}, nil
 }
 
-func (t *BinanceTrader) Buy(amount decimal.Decimal) error {
+func (t *BinanceTrader) Buy(ctx context.Context, amount decimal.Decimal) error {
 	amount = amount.RoundFloor(4)
 	_, err := t.client.NewCreateOrderService().Symbol(t.pair.Symbol()).
 		Side(binance.SideTypeBuy).Type(binance.OrderTypeMarket).
 		Quantity(amount.String()).
-		Do(context.Background())
+		Do(ctx)
 
 	return err
 }
 
-func (t *BinanceTrader) Sell(amount decimal.Decimal) error {
+func (t *BinanceTrader) Sell(ctx context.Context, amount decimal.Decimal) error {
 	amount = amount.RoundFloor(4)
 	_, err := t.client.NewCreateOrderService().Symbol(t.pair.Symbol()).
 		Side(binance.SideTypeSell).Type(binance.OrderTypeMarket).
 		Quantity(amount.String()).
-		Do(context.Background())
+		Do(ctx)
 
 	return err
 }
