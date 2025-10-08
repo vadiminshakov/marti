@@ -2,74 +2,35 @@ package internal
 
 import (
 	"context"
-	"fmt"
 	"time"
 
-	binance "github.com/adshao/go-binance/v2"
-	bybit "github.com/hirokisan/bybit/v2"
 	"github.com/pkg/errors"
-	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/config"
 
 	"github.com/vadiminshakov/marti/internal/entity"
-	"github.com/vadiminshakov/marti/internal/services/pricer"
 	"github.com/vadiminshakov/marti/internal/services/strategy"
-	"github.com/vadiminshakov/marti/internal/services/trader"
 	"go.uber.org/zap"
 )
 
-type tradersvc interface {
-	Buy(amount decimal.Decimal) error
-	Sell(amount decimal.Decimal) error
-}
-
-type pricersvc interface {
-	GetPrice(pair entity.Pair) (decimal.Decimal, error)
-}
-
 type TradingStrategy interface {
-	Initialize() error
-	Trade() (*entity.TradeEvent, error)
+	Initialize(ctx context.Context) error
+	Trade(ctx context.Context) (*entity.TradeEvent, error)
 	Close() error
 }
 
 // TradingBot represents a single trading instance
 type TradingBot struct {
-	Trader          tradersvc
-	Pricer          pricersvc
+	Trader          Trader
+	Pricer          Pricer
 	Config          config.Config
 	tradingStrategy TradingStrategy
 }
 
 // NewTradingBot creates a new trading bot instance
 func NewTradingBot(conf config.Config, client any) (*TradingBot, error) {
-	var currentTrader tradersvc
-	var currentPricer pricersvc
-	var err error
-
-	switch conf.Platform {
-	case "binance":
-		binanceClient, ok := client.(*binance.Client)
-		if !ok || binanceClient == nil {
-			return nil, fmt.Errorf("binance platform expects *binance.Client, got %T", client)
-		}
-		currentTrader, err = trader.NewBinanceTrader(binanceClient, conf.Pair)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to create BinanceTrader")
-		}
-		currentPricer = pricer.NewBinancePricer(binanceClient)
-	case "bybit":
-		bybitClient, ok := client.(*bybit.Client)
-		if !ok || bybitClient == nil {
-			return nil, fmt.Errorf("bybit platform expects *bybit.Client, got %T", client)
-		}
-		currentTrader, err = trader.NewBybitTrader(bybitClient, conf.Pair)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to create BybitTrader")
-		}
-		currentPricer = pricer.NewBybitPricer(bybitClient)
-	default:
-		return nil, fmt.Errorf("unsupported platform: %s", conf.Platform)
+	currentTrader, currentPricer, err := CreateTraderAndPricer(conf.Platform, conf.Pair, client)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create trader and pricer")
 	}
 
 	tsLogger := zap.L().With(zap.String("pair", conf.Pair.String()))
@@ -102,10 +63,8 @@ func (b *TradingBot) Close() {
 
 // Run executes the trading bot
 func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
-	defer b.tradingStrategy.Close()
-
 	// Initialize trading strategy (handles initial buy if needed)
-	if err := b.tradingStrategy.Initialize(); err != nil {
+	if err := b.tradingStrategy.Initialize(ctx); err != nil {
 		return errors.Wrap(err, "failed to initialize trading strategy")
 	}
 
@@ -121,7 +80,7 @@ func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
 			return ctx.Err()
 		case <-ticker.C:
 			logger.Debug("Trade service tick", zap.String("pair", b.Config.Pair.String()))
-			tradeEvent, err := b.tradingStrategy.Trade()
+			tradeEvent, err := b.tradingStrategy.Trade(ctx)
 			if err != nil {
 				if errors.Is(err, strategy.ErrNoData) {
 					logger.Debug("Trading strategy returned no data, continuing", zap.String("pair", b.Config.Pair.String()))
