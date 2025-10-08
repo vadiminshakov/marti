@@ -164,15 +164,17 @@ func (d *DCAStrategy) AddDCAPurchase(price, amount decimal.Decimal, purchaseTime
 	}
 
 	d.dcaSeries.Purchases = append(d.dcaSeries.Purchases, purchase)
-	d.dcaSeries.TotalAmount = d.dcaSeries.TotalAmount.Add(amount)
 
 	// Update average entry price
 	if len(d.dcaSeries.Purchases) == 1 {
 		d.dcaSeries.AvgEntryPrice = price
 		d.dcaSeries.FirstBuyTime = purchase.Time
+		d.dcaSeries.TotalAmount = amount
 	} else {
-		d.dcaSeries.AvgEntryPrice = d.dcaSeries.AvgEntryPrice.Mul(d.dcaSeries.TotalAmount.Sub(amount)).
-			Add(price.Mul(amount)).Div(d.dcaSeries.TotalAmount)
+		oldTotalAmount := d.dcaSeries.TotalAmount
+		d.dcaSeries.TotalAmount = oldTotalAmount.Add(amount)
+		totalWeightedPrice := d.dcaSeries.AvgEntryPrice.Mul(oldTotalAmount).Add(price.Mul(amount))
+		d.dcaSeries.AvgEntryPrice = totalWeightedPrice.Div(d.dcaSeries.TotalAmount)
 	}
 
 	d.tradePart = decimal.NewFromInt(int64(len(d.dcaSeries.Purchases)))

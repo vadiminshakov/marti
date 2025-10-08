@@ -71,6 +71,8 @@ func createDCAStrategyWithWALDir(l *zap.Logger, pair entity.Pair, amount decimal
 		return nil, errors.New("calculated individual buy amount is zero, check total capital (Amount) and MaxDcaTrades")
 	}
 
+	seriesKey := fmt.Sprintf("%s%s", dcaSeriesKeyPrefix, pair.String())
+
 	walCfg := gowal.Config{
 		Dir:              walDir,
 		Prefix:           "log_",
@@ -103,6 +105,7 @@ func createDCAStrategyWithWALDir(l *zap.Logger, pair entity.Pair, amount decimal
 		individualBuyAmount:     individualBuyAmount,
 		lastSellPrice:           decimal.Zero,
 		waitingForDip:           false,
+		seriesKey:               seriesKey,
 	}, nil
 }
 
