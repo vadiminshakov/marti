@@ -10,7 +10,9 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/internal/entity"
 	"github.com/vadiminshakov/marti/internal/services/pricer"
+	"github.com/vadiminshakov/marti/internal/services/strategy"
 	"github.com/vadiminshakov/marti/internal/services/trader"
+	"go.uber.org/zap"
 )
 
 type Trader interface {
@@ -56,4 +58,28 @@ func createTraderAndPricer(platform string, pair entity.Pair, client any) (Trade
 	default:
 		return nil, nil, fmt.Errorf("unsupported platform: %s", platform)
 	}
+}
+
+// createTradingStrategy creates a trading strategy instance
+func createTradingStrategy(
+	logger *zap.Logger,
+	pair entity.Pair,
+	amount decimal.Decimal,
+	pricer Pricer,
+	trader Trader,
+	maxDcaTrades int,
+	dcaPercentThresholdBuy decimal.Decimal,
+	dcaPercentThresholdSell decimal.Decimal,
+) (TradingStrategy, error) {
+	// currently only DCA strategy is supported, but this can be extended
+	return strategy.NewDCAStrategy(
+		logger,
+		pair,
+		amount,
+		pricer,
+		trader,
+		maxDcaTrades,
+		dcaPercentThresholdBuy,
+		dcaPercentThresholdSell,
+	)
 }
