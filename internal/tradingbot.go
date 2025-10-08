@@ -35,9 +35,9 @@ type TradingStrategy interface {
 
 // TradingBot represents a single trading instance
 type TradingBot struct {
-	Trader       tradersvc
-	Pricer       pricersvc
-	Config       config.Config
+	Trader          tradersvc
+	Pricer          pricersvc
+	Config          config.Config
 	tradingStrategy TradingStrategy
 }
 
@@ -49,14 +49,20 @@ func NewTradingBot(conf config.Config, client any) (*TradingBot, error) {
 
 	switch conf.Platform {
 	case "binance":
-		binanceClient := client.(*binance.Client)
+		binanceClient, ok := client.(*binance.Client)
+		if !ok || binanceClient == nil {
+			return nil, fmt.Errorf("binance platform expects *binance.Client, got %T", client)
+		}
 		currentTrader, err = trader.NewBinanceTrader(binanceClient, conf.Pair)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to create BinanceTrader")
 		}
 		currentPricer = pricer.NewBinancePricer(binanceClient)
 	case "bybit":
-		bybitClient := client.(*bybit.Client)
+		bybitClient, ok := client.(*bybit.Client)
+		if !ok || bybitClient == nil {
+			return nil, fmt.Errorf("bybit platform expects *bybit.Client, got %T", client)
+		}
 		currentTrader, err = trader.NewBybitTrader(bybitClient, conf.Pair)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to create BybitTrader")
@@ -94,11 +100,10 @@ func (b *TradingBot) Close() {
 	b.tradingStrategy.Close()
 }
 
-
 // Run executes the trading bot
 func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
 	defer b.tradingStrategy.Close()
-	
+
 	// Initialize trading strategy (handles initial buy if needed)
 	if err := b.tradingStrategy.Initialize(); err != nil {
 		return errors.Wrap(err, "failed to initialize trading strategy")
