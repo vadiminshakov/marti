@@ -3,6 +3,8 @@ package strategy
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/pkg/errors"
@@ -30,7 +32,11 @@ type DCASeries struct {
 	AvgEntryPrice decimal.Decimal `json:"avg_entry_price"`
 	FirstBuyTime  time.Time       `json:"first_buy_time"`
 	TotalAmount   decimal.Decimal `json:"total_amount"`
+	LastSellPrice decimal.Decimal `json:"last_sell_price"`
+	WaitingForDip bool            `json:"waiting_for_dip"`
 }
+
+const dcaSeriesKeyPrefix = "dca_series_"
 
 type tradersvc interface {
 	Buy(amount decimal.Decimal) error
@@ -57,6 +63,7 @@ type DCAStrategy struct {
 	individualBuyAmount     decimal.Decimal
 	lastSellPrice           decimal.Decimal
 	waitingForDip           bool
+	seriesKey               string
 }
 
 // NewDCAStrategy creates new DCAStrategy instance.
@@ -74,8 +81,15 @@ func NewDCAStrategy(l *zap.Logger, pair entity.Pair, amount decimal.Decimal, pri
 		return nil, errors.New("calculated individual buy amount is zero, check total capital (Amount) and MaxDcaTrades")
 	}
 
+	walDir := filepath.Join("./wal", pair.String())
+	if err := os.MkdirAll(walDir, 0o755); err != nil {
+		return nil, errors.Wrapf(err, "failed to ensure WAL directory %s", walDir)
+	}
+
+	seriesKey := fmt.Sprintf("%s%s", dcaSeriesKeyPrefix, pair.String())
+
 	walCfg := gowal.Config{
-		Dir:              "./wal",
+		Dir:              walDir,
 		Prefix:           "log_",
 		SegmentThreshold: 1000,
 		MaxSegments:      100,
@@ -93,7 +107,7 @@ func NewDCAStrategy(l *zap.Logger, pair entity.Pair, amount decimal.Decimal, pri
 	}
 
 	for msg := range wal.Iterator() {
-		if msg.Key == "dca_series" {
+		if msg.Key == seriesKey {
 			if err := json.Unmarshal(msg.Value, dcaSeries); err != nil {
 				l.Error("failed to unmarshal DCA series", zap.Error(err))
 				continue
@@ -116,19 +130,23 @@ func NewDCAStrategy(l *zap.Logger, pair entity.Pair, amount decimal.Decimal, pri
 		dcaPercentThresholdBuy:  dcaPercentThresholdBuy,
 		dcaPercentThresholdSell: dcaPercentThresholdSell,
 		individualBuyAmount:     individualBuyAmount,
-		lastSellPrice:           decimal.Zero,
-		waitingForDip:           false,
+		lastSellPrice:           dcaSeries.LastSellPrice,
+		waitingForDip:           dcaSeries.WaitingForDip,
+		seriesKey:               seriesKey,
 	}, nil
 }
 
 // saveDCASeries saves the current DCA series to WAL
 func (d *DCAStrategy) saveDCASeries() error {
+	d.dcaSeries.LastSellPrice = d.lastSellPrice
+	d.dcaSeries.WaitingForDip = d.waitingForDip
+
 	data, err := json.Marshal(d.dcaSeries)
 	if err != nil {
 		return errors.Wrap(err, "failed to marshal DCA series")
 	}
 
-	return d.wal.Write(uint64(time.Now().UnixNano()), "dca_series", data)
+	return d.wal.Write(uint64(time.Now().UnixNano()), d.seriesKey, data)
 }
 
 // AddDCAPurchase adds a new DCA purchase to the series and saves it to WAL
@@ -179,27 +197,16 @@ func (d *DCAStrategy) Trade() (*entity.TradeEvent, error) {
 
 			d.SetWaitingForDip(false)
 
-			if err := d.AddDCAPurchase(price, d.individualBuyAmount, time.Now(), 0); err != nil {
+			tradeEvent, err := d.actBuy(price)
+			if err != nil {
 				d.l.Error("Failed to record initial purchase after price drop", zap.Error(err))
-				return nil, err
+				return tradeEvent, err
 			}
 
 			d.l.Info("Initial purchase recorded successfully",
 				zap.String("pair", d.pair.String()),
 				zap.String("price", price.String()),
-				zap.String("amount", d.individualBuyAmount.String()),
-				zap.Time("time", time.Now()))
-
-			tradeEvent := &entity.TradeEvent{
-				Action: entity.ActionBuy,
-				Amount: d.individualBuyAmount,
-				Pair:   d.pair,
-				Price:  price,
-			}
-
-			if err := d.trader.Buy(d.individualBuyAmount); err != nil {
-				return nil, errors.Wrapf(err, "trader buy failed for pair %s with amount %s", d.pair.String(), d.individualBuyAmount.String())
-			}
+				zap.String("amount", d.individualBuyAmount.String()))
 
 			return tradeEvent, nil
 		} else {
@@ -250,14 +257,9 @@ func (d *DCAStrategy) Close() error {
 }
 
 func (d *DCAStrategy) actBuy(price decimal.Decimal) (*entity.TradeEvent, error) {
+	operationTime := time.Now()
 	if err := d.trader.Buy(d.individualBuyAmount); err != nil {
 		return nil, errors.Wrapf(err, "trader buy failed for pair %s with amount %s", d.pair.String(), d.individualBuyAmount.String())
-	}
-
-	if err := d.AddDCAPurchase(price, d.individualBuyAmount, time.Now(), int(d.tradePart.IntPart())); err != nil {
-		d.l.Error("failed to save DCA purchase",
-			zap.Error(err),
-			zap.String("pair", d.pair.String()))
 	}
 
 	tradeEvent := &entity.TradeEvent{
@@ -265,6 +267,14 @@ func (d *DCAStrategy) actBuy(price decimal.Decimal) (*entity.TradeEvent, error) 
 		Amount: d.individualBuyAmount,
 		Pair:   d.pair,
 		Price:  price,
+	}
+
+	tradePartValue := int(d.tradePart.IntPart())
+	if err := d.AddDCAPurchase(price, d.individualBuyAmount, operationTime, tradePartValue); err != nil {
+		d.l.Error("failed to save DCA purchase",
+			zap.Error(err),
+			zap.String("pair", d.pair.String()))
+		return tradeEvent, err
 	}
 
 	d.l.Info("DCA buy executed",
@@ -329,7 +339,7 @@ func (d *DCAStrategy) actSell(price decimal.Decimal) (*entity.TradeEvent, error)
 		// Reset trade part counter
 		d.tradePart = decimal.Zero
 
-		d.lastSellPrice = price
+		d.SetLastSellPrice(price)
 		d.SetWaitingForDip(true)
 		d.l.Info("Waiting for price to drop before starting new DCA series",
 			zap.String("lastSellPrice", price.String()),
@@ -343,7 +353,7 @@ func (d *DCAStrategy) actSell(price decimal.Decimal) (*entity.TradeEvent, error)
 				zap.String("remainingTotalAmount", d.dcaSeries.TotalAmount.String()))
 			d.dcaSeries = &DCASeries{Purchases: make([]DCAPurchase, 0)} // Reset purchases
 			d.tradePart = decimal.Zero                                  // Reset tradePart
-			d.lastSellPrice = price
+			d.SetLastSellPrice(price)
 			d.SetWaitingForDip(true)
 		}
 	}
@@ -385,10 +395,16 @@ func isPercentDifferenceSignificant(currentPrice, referencePrice, thresholdPerce
 
 func (d *DCAStrategy) SetLastSellPrice(price decimal.Decimal) {
 	d.lastSellPrice = price
+	if d.dcaSeries != nil {
+		d.dcaSeries.LastSellPrice = price
+	}
 }
 
 func (d *DCAStrategy) SetWaitingForDip(waiting bool) {
 	d.waitingForDip = waiting
+	if d.dcaSeries != nil {
+		d.dcaSeries.WaitingForDip = waiting
+	}
 }
 
 func (d *DCAStrategy) removeAmountFromPurchases(amount decimal.Decimal) {
