@@ -151,11 +151,16 @@ func (d *DCAStrategy) saveDCASeries() error {
 
 // AddDCAPurchase adds a new DCA purchase to the series and saves it to WAL
 func (d *DCAStrategy) AddDCAPurchase(price, amount decimal.Decimal, purchaseTime time.Time, tradePartValue int) error {
+	partNumber := tradePartValue
+	if partNumber < 1 {
+		partNumber = len(d.dcaSeries.Purchases) + 1
+	}
+
 	purchase := DCAPurchase{
 		Price:     price,
 		Amount:    amount,
-		Time:      purchaseTime,   // Use passed purchaseTime
-		TradePart: tradePartValue, // Use passed tradePartValue
+		Time:      purchaseTime,
+		TradePart: partNumber,
 	}
 
 	d.dcaSeries.Purchases = append(d.dcaSeries.Purchases, purchase)
@@ -269,7 +274,7 @@ func (d *DCAStrategy) actBuy(price decimal.Decimal) (*entity.TradeEvent, error) 
 		Price:  price,
 	}
 
-	tradePartValue := int(d.tradePart.IntPart())
+	tradePartValue := int(d.tradePart.IntPart()) + 1
 	if err := d.AddDCAPurchase(price, d.individualBuyAmount, operationTime, tradePartValue); err != nil {
 		d.l.Error("failed to save DCA purchase",
 			zap.Error(err),
@@ -485,8 +490,10 @@ func (d *DCAStrategy) prepareInitialBuy() (decimal.Decimal, decimal.Decimal, err
 		return decimal.Zero, decimal.Zero, fmt.Errorf("calculatedInitialBuyAmount is zero, check Amount (%s) and MaxDcaTrades (%d)", d.amount.String(), d.maxDcaTrades)
 	}
 
-	// Set initial price as reference
-	d.SetLastSellPrice(currentPrice)
+	if d.lastSellPrice.IsZero() {
+		// Only set the reference price when there is no persisted sell price yet
+		d.SetLastSellPrice(currentPrice)
+	}
 
 	return currentPrice, calculatedInitialBuyAmount, nil
 }
@@ -506,7 +513,7 @@ func (d *DCAStrategy) executeInitialBuy(currentPrice decimal.Decimal, calculated
 			return errors.Wrapf(buyErr, "initial buy execution failed for %s", d.pair.String())
 		}
 
-		if err := d.AddDCAPurchase(currentPrice, calculatedInitialBuyAmount, time.Now(), 0); err != nil {
+		if err := d.AddDCAPurchase(currentPrice, calculatedInitialBuyAmount, time.Now(), 1); err != nil {
 			d.l.Error("Failed to record initial purchase state",
 				zap.Error(err),
 				zap.String("pair", d.pair.String()))

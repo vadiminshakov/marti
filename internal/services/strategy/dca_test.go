@@ -188,7 +188,7 @@ func TestDCAStrategy_Trade_DCABuy_PriceSignificantlyLower(t *testing.T) {
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 0)
+	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
 	require.NoError(t, err, "Failed to add initial DCA purchase")
 	ts.tradePart = decimal.NewFromInt(1)
 
@@ -209,7 +209,7 @@ func TestDCAStrategy_Trade_DCABuy_MaxTradesReached(t *testing.T) {
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 0)
+	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
 	require.NoError(t, err, "Failed to add initial DCA purchase")
 	ts.tradePart = decimal.NewFromInt(4) // Max trades reached
 
@@ -229,7 +229,7 @@ func TestDCAStrategy_Trade_Sell_PriceSignificantlyHigher(t *testing.T) {
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 0)
+	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
 	require.NoError(t, err, "failed to add initial DCA purchase")
 
 	tradeEvent, err := ts.Trade()
@@ -249,7 +249,7 @@ func TestDCAStrategy_Trade_Sell_FullSellOnDoubleThreshold(t *testing.T) {
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 0)
+	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
 	require.NoError(t, err, "failed to add initial DCA purchase")
 
 	tradeEvent, err := ts.Trade()
@@ -269,7 +269,7 @@ func TestDCAStrategy_Trade_NoAction_PriceInRange(t *testing.T) {
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 0)
+	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
 	require.NoError(t, err, "failed to add initial DCA purchase")
 
 	tradeEvent, err := ts.Trade()
@@ -289,7 +289,7 @@ func TestDCAStrategy_Trade_BuyError(t *testing.T) {
 	defer ts.Close()
 
 	// Add initial purchase
-	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 0)
+	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
 	require.NoError(t, err, "failed to add initial DCA purchase")
 
 	tradeEvent, err := ts.Trade()
@@ -308,7 +308,7 @@ func TestDCAStrategy_Trade_SellError(t *testing.T) {
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 0)
+	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
 	require.NoError(t, err, "failed to add initial DCA purchase")
 
 	tradeEvent, err := ts.Trade()
