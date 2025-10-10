@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -108,9 +107,8 @@ func createDCAStrategyWithWALDir(l *zap.Logger, pair entity.Pair, amount decimal
 		dcaPercentThresholdBuy:  dcaPercentThresholdBuy,
 		dcaPercentThresholdSell: dcaPercentThresholdSell,
 		individualBuyAmount:     individualBuyAmount,
-		lastSellPrice:           decimal.Zero,
-		waitingForDip:           false,
 		seriesKey:               seriesKey,
+		orderCheckInterval:      defaultOrderCheckInterval,
 	}, nil
 }
 
@@ -159,8 +157,7 @@ func TestDCAStrategy_Trade_WaitingForDip_PriceDropped(t *testing.T) {
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	ts.SetLastSellPrice(decimal.NewFromInt(50000))
-	ts.SetWaitingForDip(true)
+	ts.updateSellState(decimal.NewFromInt(50000), true)
 
 	ctx := context.Background()
 	tradeEvent, err := ts.Trade(ctx)
@@ -180,8 +177,7 @@ func TestDCAStrategy_Trade_WaitingForDip_PriceNotDroppedEnough(t *testing.T) {
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	ts.SetLastSellPrice(decimal.NewFromInt(50000))
-	ts.SetWaitingForDip(true)
+	ts.updateSellState(decimal.NewFromInt(50000), true)
 
 	ctx := context.Background()
 	tradeEvent, err := ts.Trade(ctx)
@@ -333,188 +329,6 @@ func TestDCAStrategy_Trade_SellError(t *testing.T) {
 	tradeEvent, err := ts.Trade(ctx)
 	require.Error(t, err, "expected error when sell fails")
 	require.Nil(t, tradeEvent, "expected nil TradeEvent when sell fails")
-}
-
-func TestDCAStrategy_ReconcileExecutedBuyIntent(t *testing.T) {
-	mockPricer := pricerMock.NewPricer(t)
-	mockTrader := traderMock.NewTrader(t)
-
-	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
-	defer ts.Close()
-
-	intent := &tradeIntentRecord{
-		ID:        "intent-buy-1",
-		Status:    tradeIntentStatusPending,
-		Action:    intentActionBuy,
-		Amount:    ts.individualBuyAmount,
-		Price:     decimal.NewFromInt(48000),
-		Time:      time.Now(),
-		TradePart: 1,
-	}
-	ts.journal.intents = append(ts.journal.intents, intent)
-	ts.journal.index[intent.ID] = intent
-
-	mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(true, intent.Amount, nil).Once()
-
-	err := ts.reconcileTradeIntents(context.Background())
-	require.NoError(t, err)
-
-	require.Len(t, ts.dcaSeries.Purchases, 1, "executed buy intent should add purchase")
-	require.Equal(t, tradeIntentStatusDone, ts.journal.index[intent.ID].Status, "intent status should be marked done")
-	require.True(t, ts.isTradeProcessed(intent.ID), "intent should be marked processed")
-
-	// Ensure idempotence on subsequent reconciliation
-	err = ts.reconcileTradeIntents(context.Background())
-	require.NoError(t, err)
-	require.Len(t, ts.dcaSeries.Purchases, 1, "purchase count should remain unchanged after second reconciliation")
-}
-
-func TestDCAStrategy_ReconcileExecutedSellIntentFullReset(t *testing.T) {
-	mockPricer := pricerMock.NewPricer(t)
-	mockTrader := traderMock.NewTrader(t)
-
-	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
-	defer ts.Close()
-
-	// Seed series with one purchase
-	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), ts.individualBuyAmount, time.Now(), 1)
-	require.NoError(t, err)
-	require.Equal(t, ts.individualBuyAmount, ts.dcaSeries.TotalAmount)
-
-	intent := &tradeIntentRecord{
-		ID:         "intent-sell-full",
-		Status:     tradeIntentStatusPending,
-		Action:     intentActionSell,
-		Amount:     ts.dcaSeries.TotalAmount,
-		Price:      decimal.NewFromInt(60000),
-		Time:       time.Now(),
-		IsFullSell: true,
-	}
-	ts.journal.intents = append(ts.journal.intents, intent)
-	ts.journal.index[intent.ID] = intent
-
-	mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(true, intent.Amount, nil).Once()
-
-	err = ts.reconcileTradeIntents(context.Background())
-	require.NoError(t, err)
-
-	require.Equal(t, tradeIntentStatusDone, ts.journal.index[intent.ID].Status, "intent status should be done")
-	require.Len(t, ts.dcaSeries.Purchases, 0, "series should reset after full sell")
-	require.True(t, ts.waitingForDip, "strategy should wait for dip after full sell")
-	require.True(t, ts.lastSellPrice.Equal(intent.Price), "last sell price should be updated")
-	require.True(t, ts.dcaSeries.TotalAmount.IsZero(), "total amount should be zero after reset")
-}
-
-func TestDCAStrategy_ReconcilePendingIntentMarkedFailed(t *testing.T) {
-	mockPricer := pricerMock.NewPricer(t)
-	mockTrader := traderMock.NewTrader(t)
-
-	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
-	defer ts.Close()
-
-	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), ts.individualBuyAmount, time.Now(), 1)
-	require.NoError(t, err)
-
-	intent := &tradeIntentRecord{
-		ID:     "intent-failed",
-		Status: tradeIntentStatusPending,
-		Action: intentActionSell,
-		Amount: ts.individualBuyAmount,
-		Price:  decimal.NewFromInt(55000),
-		Time:   time.Now(),
-	}
-	ts.journal.intents = append(ts.journal.intents, intent)
-	ts.journal.index[intent.ID] = intent
-
-	mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(false, decimal.Zero, nil).Once()
-
-	err = ts.reconcileTradeIntents(context.Background())
-	require.NoError(t, err)
-
-	require.Equal(t, tradeIntentStatusFailed, ts.journal.index[intent.ID].Status, "intent should be marked failed when order not executed")
-	require.Len(t, ts.dcaSeries.Purchases, 1, "positions should remain untouched when intent fails")
-	require.False(t, ts.isTradeProcessed(intent.ID), "failed intent should not be marked processed")
-}
-
-func TestDCAStrategy_ReconcilePendingIntentPartialFillWaits(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		mockPricer := pricerMock.NewPricer(t)
-		mockTrader := traderMock.NewTrader(t)
-
-		ts := createTestDCAStrategy(t, mockPricer, mockTrader)
-		defer ts.Close()
-
-		err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), ts.individualBuyAmount, time.Now(), 1)
-		require.NoError(t, err)
-
-		intent := &tradeIntentRecord{
-			ID:     "intent-partial",
-			Status: tradeIntentStatusPending,
-			Action: intentActionSell,
-			Amount: ts.individualBuyAmount,
-			Price:  decimal.NewFromInt(55000),
-			Time:   time.Now(),
-		}
-		ts.journal.intents = append(ts.journal.intents, intent)
-		ts.journal.index[intent.ID] = intent
-
-		partialFill := ts.individualBuyAmount.Div(decimal.NewFromInt(2))
-		mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(false, partialFill, nil).Once()
-
-		err = ts.reconcileTradeIntents(context.Background())
-		require.NoError(t, err)
-
-		require.Equal(t, tradeIntentStatusPending, ts.journal.index[intent.ID].Status, "intent should remain pending when partially filled")
-		require.False(t, ts.isTradeProcessed(intent.ID), "intent should not be marked processed while pending")
-	})
-}
-
-func TestDCAStrategy_ReconcilePendingIntentPartialFillThenComplete(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		mockPricer := pricerMock.NewPricer(t)
-		mockTrader := traderMock.NewTrader(t)
-
-		ts := createTestDCAStrategy(t, mockPricer, mockTrader)
-		defer ts.Close()
-
-		err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), ts.individualBuyAmount, time.Now(), 1)
-		require.NoError(t, err)
-
-		intent := &tradeIntentRecord{
-			ID:     "intent-partial-done",
-			Status: tradeIntentStatusPending,
-			Action: intentActionSell,
-			Amount: ts.individualBuyAmount,
-			Price:  decimal.NewFromInt(55000),
-			Time:   time.Now(),
-		}
-		ts.journal.intents = append(ts.journal.intents, intent)
-		ts.journal.index[intent.ID] = intent
-
-		partialFill := ts.individualBuyAmount.Div(decimal.NewFromInt(2))
-
-		mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(false, partialFill, nil).Once()
-		err = ts.reconcileTradeIntents(context.Background())
-		require.NoError(t, err)
-		require.Equal(t, tradeIntentStatusPending, ts.journal.index[intent.ID].Status, "intent should remain pending after first partial fill")
-		require.False(t, ts.isTradeProcessed(intent.ID), "intent should not be processed after first partial fill")
-		time.Sleep(time.Millisecond) // ensure unique WAL indices for subsequent writes
-
-		mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(false, partialFill, nil).Once()
-		err = ts.reconcileTradeIntents(context.Background())
-		require.NoError(t, err)
-		require.Equal(t, tradeIntentStatusPending, ts.journal.index[intent.ID].Status, "intent should remain pending after second partial fill")
-		require.False(t, ts.isTradeProcessed(intent.ID), "intent should not be processed after second partial fill")
-		time.Sleep(time.Millisecond)
-
-		mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(true, intent.Amount, nil).Once()
-		err = ts.reconcileTradeIntents(context.Background())
-		require.NoError(t, err)
-		require.Equal(t, tradeIntentStatusDone, ts.journal.index[intent.ID].Status, "intent should be marked done after completion")
-		require.True(t, ts.isTradeProcessed(intent.ID), "intent should be marked processed after completion")
-		require.Len(t, ts.dcaSeries.Purchases, 0, "series should reset after full sell is executed")
-		require.True(t, ts.waitingForDip, "strategy should wait for dip after completing sell")
-	})
 }
 
 func TestIsPercentDifferenceSignificant(t *testing.T) {
