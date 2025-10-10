@@ -225,7 +225,7 @@ func prepareData(filePath string, pair *entity.Pair) (chan decimal.Decimal, chan
 
 func createStrategyFactory(logger *zap.Logger, pair *entity.Pair, prices chan decimal.Decimal, balanceBTC, balanceUSDT decimal.Decimal, maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell float64) (*traderCsv, func() (internal.TradingStrategy, error)) {
 	pricer := &pricerCsv{pricesCh: prices}
-	trader := &traderCsv{pair: pair, balance1: balanceBTC, balance2: balanceUSDT, pricesCh: prices}
+	trader := &traderCsv{pair: pair, balance1: balanceBTC, balance2: balanceUSDT, pricesCh: prices, executed: make(map[string]decimal.Decimal)}
 
 	return trader, func() (internal.TradingStrategy, error) {
 		dcaPercentThresholdBuyDecimal := decimal.NewFromFloat(dcaPercentThresholdBuy)
