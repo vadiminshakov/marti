@@ -16,8 +16,9 @@ import (
 )
 
 type Trader interface {
-	Buy(ctx context.Context, amount decimal.Decimal) error
-	Sell(ctx context.Context, amount decimal.Decimal) error
+	Buy(ctx context.Context, amount decimal.Decimal, clientOrderID string) error
+	Sell(ctx context.Context, amount decimal.Decimal, clientOrderID string) error
+	OrderExecuted(ctx context.Context, clientOrderID string) (bool, decimal.Decimal, error)
 }
 
 type Pricer interface {
