@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -19,8 +20,11 @@ var (
 	ErrNoData = errors.New("no data found")
 )
 
+const dcaSeriesKeyPrefix = "dca_series_"
+
 // DCAPurchase represents a single DCA purchase
 type DCAPurchase struct {
+	ID        string          `json:"id"`
 	Price     decimal.Decimal `json:"price"`
 	Amount    decimal.Decimal `json:"amount"`
 	Time      time.Time       `json:"time"`
@@ -29,19 +33,19 @@ type DCAPurchase struct {
 
 // DCASeries represents a complete DCA series
 type DCASeries struct {
-	Purchases     []DCAPurchase   `json:"purchases"`
-	AvgEntryPrice decimal.Decimal `json:"avg_entry_price"`
-	FirstBuyTime  time.Time       `json:"first_buy_time"`
-	TotalAmount   decimal.Decimal `json:"total_amount"`
-	LastSellPrice decimal.Decimal `json:"last_sell_price"`
-	WaitingForDip bool            `json:"waiting_for_dip"`
+	Purchases         []DCAPurchase   `json:"purchases"`
+	AvgEntryPrice     decimal.Decimal `json:"avg_entry_price"`
+	FirstBuyTime      time.Time       `json:"first_buy_time"`
+	TotalAmount       decimal.Decimal `json:"total_amount"`
+	LastSellPrice     decimal.Decimal `json:"last_sell_price"`
+	WaitingForDip     bool            `json:"waiting_for_dip"`
+	ProcessedTradeIDs map[string]bool `json:"processed_trade_ids"`
 }
 
-const dcaSeriesKeyPrefix = "dca_series_"
-
 type tradersvc interface {
-	Buy(ctx context.Context, amount decimal.Decimal) error
-	Sell(ctx context.Context, amount decimal.Decimal) error
+	Buy(ctx context.Context, amount decimal.Decimal, clientOrderID string) error
+	Sell(ctx context.Context, amount decimal.Decimal, clientOrderID string) error
+	OrderExecuted(ctx context.Context, clientOrderID string) (executed bool, filledAmount decimal.Decimal, err error)
 }
 
 type pricer interface {
@@ -57,6 +61,7 @@ type DCAStrategy struct {
 	trader                  tradersvc
 	l                       *zap.Logger
 	wal                     *gowal.Wal
+	journal                 *tradeJournal
 	dcaSeries               *DCASeries
 	maxDcaTrades            int
 	dcaPercentThresholdBuy  decimal.Decimal
@@ -104,8 +109,11 @@ func NewDCAStrategy(l *zap.Logger, pair entity.Pair, amount decimal.Decimal, pri
 
 	// Try to recover DCA series from WAL
 	dcaSeries := &DCASeries{
-		Purchases: make([]DCAPurchase, 0),
+		Purchases:         make([]DCAPurchase, 0),
+		ProcessedTradeIDs: make(map[string]bool),
 	}
+
+	tradeIntents := make([]*tradeIntentRecord, 0)
 
 	for msg := range wal.Iterator() {
 		if msg.Key == seriesKey {
@@ -113,6 +121,17 @@ func NewDCAStrategy(l *zap.Logger, pair entity.Pair, amount decimal.Decimal, pri
 				l.Error("failed to unmarshal DCA series", zap.Error(err))
 				continue
 			}
+			continue
+		}
+
+		if strings.HasPrefix(msg.Key, tradeIntentKeyPrefix) {
+			var intent tradeIntentRecord
+			if err := json.Unmarshal(msg.Value, &intent); err != nil {
+				l.Error("failed to unmarshal trade intent", zap.Error(err), zap.String("key", msg.Key))
+				continue
+			}
+			intentCopy := intent
+			tradeIntents = append(tradeIntents, &intentCopy)
 		}
 	}
 
@@ -126,6 +145,7 @@ func NewDCAStrategy(l *zap.Logger, pair entity.Pair, amount decimal.Decimal, pri
 		trader:                  trader,
 		l:                       l,
 		wal:                     wal,
+		journal:                 newTradeJournal(wal, tradeIntents),
 		dcaSeries:               dcaSeries,
 		maxDcaTrades:            maxDcaTrades,
 		dcaPercentThresholdBuy:  dcaPercentThresholdBuy,
@@ -147,17 +167,41 @@ func (d *DCAStrategy) saveDCASeries() error {
 		return errors.Wrap(err, "failed to marshal DCA series")
 	}
 
-	return d.wal.Write(uint64(time.Now().UnixNano()), d.seriesKey, data)
+	nextIndex := d.wal.CurrentIndex() + 1
+	return d.wal.Write(nextIndex, d.seriesKey, data)
+}
+
+func (d *DCAStrategy) isTradeProcessed(intentID string) bool {
+	if intentID == "" || d.dcaSeries == nil {
+		return false
+	}
+	if len(d.dcaSeries.ProcessedTradeIDs) == 0 {
+		return false
+	}
+
+	return d.dcaSeries.ProcessedTradeIDs[intentID]
+}
+
+func (d *DCAStrategy) markTradeProcessed(intentID string) {
+	if intentID == "" || d.dcaSeries == nil {
+		return
+	}
+	d.dcaSeries.ProcessedTradeIDs[intentID] = true
 }
 
 // AddDCAPurchase adds a new DCA purchase to the series and saves it to WAL
-func (d *DCAStrategy) AddDCAPurchase(price, amount decimal.Decimal, purchaseTime time.Time, tradePartValue int) error {
+func (d *DCAStrategy) AddDCAPurchase(intentID string, price, amount decimal.Decimal, purchaseTime time.Time, tradePartValue int) error {
+	if intentID != "" && d.isTradeProcessed(intentID) {
+		return nil
+	}
+
 	partNumber := tradePartValue
 	if partNumber < 1 {
 		partNumber = len(d.dcaSeries.Purchases) + 1
 	}
 
 	purchase := DCAPurchase{
+		ID:        intentID,
 		Price:     price,
 		Amount:    amount,
 		Time:      purchaseTime,
@@ -180,6 +224,8 @@ func (d *DCAStrategy) AddDCAPurchase(price, amount decimal.Decimal, purchaseTime
 
 	d.tradePart = decimal.NewFromInt(int64(len(d.dcaSeries.Purchases)))
 
+	d.markTradeProcessed(intentID)
+
 	return d.saveDCASeries()
 }
 
@@ -188,8 +234,167 @@ func (d *DCAStrategy) GetDCASeries() *DCASeries {
 	return d.dcaSeries
 }
 
+func (d *DCAStrategy) markIntentFailed(intent *tradeIntentRecord, cause error) {
+	if d.journal == nil || intent == nil {
+		return
+	}
+	if err := d.journal.MarkFailed(intent, cause); err != nil {
+		d.l.Error("failed to persist failed trade intent status", zap.Error(err), zap.String("intent_id", intent.ID))
+	}
+}
+
+func (d *DCAStrategy) reconcileTradeIntents(ctx context.Context) error {
+	if d.journal == nil {
+		return nil
+	}
+
+	for _, intent := range d.journal.Intents() {
+		switch intent.Status {
+		case tradeIntentStatusDone, tradeIntentStatusFailed:
+			continue
+		case tradeIntentStatusPending:
+			executed, filledAmount, err := d.trader.OrderExecuted(ctx, intent.ID)
+			if err != nil {
+				d.l.Error("failed to verify pending trade intent status", zap.Error(err), zap.String("intent_id", intent.ID))
+				return err
+			}
+
+			if !executed {
+				if filledAmount.GreaterThan(decimal.Zero) {
+					d.l.Info("pending intent partially filled; waiting for completion",
+						zap.String("intent_id", intent.ID),
+						zap.String("action", string(intent.Action)),
+						zap.String("filled_amount", filledAmount.String()),
+						zap.String("requested_amount", intent.Amount.String()))
+						
+						time.Sleep(30 * time.Second)
+					continue
+				}
+
+				d.l.Warn("pending intent not executed; marking as failed",
+					zap.String("intent_id", intent.ID),
+					zap.String("action", string(intent.Action)))
+				d.markIntentFailed(intent, errors.New("order not executed"))
+				continue
+			}
+
+			if filledAmount.LessThanOrEqual(decimal.Zero) {
+				d.l.Warn("executed intent reported zero filled amount; marking as failed",
+					zap.String("intent_id", intent.ID),
+					zap.String("action", string(intent.Action)))
+				d.markIntentFailed(intent, errors.New("filled amount reported as zero"))
+				continue
+			}
+
+			if d.isTradeProcessed(intent.ID) {
+				if intent.Status != tradeIntentStatusDone {
+					if err := d.journal.MarkDone(intent); err != nil {
+						d.l.Error("failed to persist completed trade intent", zap.Error(err), zap.String("intent_id", intent.ID))
+						return err
+					}
+				}
+				continue
+			}
+
+			if !filledAmount.Equal(intent.Amount) {
+				if err := d.journal.UpdateAmount(intent, filledAmount); err != nil {
+					d.l.Error("failed to persist actual filled amount for intent",
+						zap.Error(err),
+						zap.String("intent_id", intent.ID),
+						zap.String("old_amount", intent.Amount.String()),
+						zap.String("filled_amount", filledAmount.String()))
+					return err
+				}
+			}
+
+			if err := d.applyExecutedIntent(intent); err != nil {
+				d.l.Error("failed to apply executed trade intent", zap.Error(err), zap.String("intent_id", intent.ID))
+				return err
+			}
+
+			if err := d.journal.MarkDone(intent); err != nil {
+				d.l.Error("failed to persist completed trade intent status", zap.Error(err), zap.String("intent_id", intent.ID))
+				return err
+			}
+		default:
+			d.l.Warn("encountered trade intent with unknown status", zap.String("status", intent.Status), zap.String("intent_id", intent.ID))
+		}
+	}
+	return nil
+}
+
+func (d *DCAStrategy) applyExecutedIntent(intent *tradeIntentRecord) error {
+	switch intent.Action {
+	case intentActionBuy:
+		return d.AddDCAPurchase(intent.ID, intent.Price, intent.Amount, intent.Time, intent.TradePart)
+	case intentActionSell:
+		return d.applyExecutedSell(intent)
+	default:
+		return fmt.Errorf("unknown trade intent action: %s", intent.Action)
+	}
+}
+
+func (d *DCAStrategy) applyExecutedSell(intent *tradeIntentRecord) error {
+	if d.isTradeProcessed(intent.ID) {
+		return nil
+	}
+
+	amountToSell := intent.Amount
+
+	if amountToSell.GreaterThan(d.dcaSeries.TotalAmount) {
+		amountToSell = d.dcaSeries.TotalAmount
+	}
+
+	if amountToSell.LessThanOrEqual(decimal.Zero) {
+		d.markTradeProcessed(intent.ID)
+		return d.saveDCASeries()
+	}
+
+	isFullSell := intent.IsFullSell || amountToSell.Equal(d.dcaSeries.TotalAmount)
+
+	if isFullSell {
+		d.l.Info("Full sell executed. Resetting DCA series.", zap.String("amountSold", amountToSell.String()))
+		d.dcaSeries = &DCASeries{
+			Purchases:         make([]DCAPurchase, 0),
+			ProcessedTradeIDs: d.dcaSeries.ProcessedTradeIDs,
+		}
+		d.tradePart = decimal.Zero
+		d.SetLastSellPrice(intent.Price)
+		d.SetWaitingForDip(true)
+		d.l.Info("Waiting for price to drop before starting new DCA series",
+			zap.String("lastSellPrice", intent.Price.String()),
+			zap.String("requiredDropPercent", d.dcaPercentThresholdBuy.String()))
+	} else {
+		d.l.Info("Partial sell executed.", zap.String("amountSold", amountToSell.String()))
+		d.removeAmountFromPurchases(amountToSell)
+		if len(d.dcaSeries.Purchases) == 0 || d.dcaSeries.TotalAmount.LessThanOrEqual(decimal.Zero) {
+			d.l.Info("Total amount became zero after partial sell. Resetting DCA series, waiting for price drop before starting new DCA series.",
+				zap.String("remainingTotalAmount", d.dcaSeries.TotalAmount.String()))
+			d.dcaSeries = &DCASeries{
+				Purchases:         make([]DCAPurchase, 0),
+				ProcessedTradeIDs: d.dcaSeries.ProcessedTradeIDs,
+			}
+			d.tradePart = decimal.Zero
+			d.SetLastSellPrice(intent.Price)
+			d.SetWaitingForDip(true)
+		}
+	}
+
+	d.markTradeProcessed(intent.ID)
+
+	if err := d.saveDCASeries(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // Trade is the main method responsible for executing trading logic based on the current price of the asset.
 func (d *DCAStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
+	if err := d.reconcileTradeIntents(ctx); err != nil {
+		return nil, err
+	}
+
 	price, err := d.pricer.GetPrice(ctx, d.pair)
 	if err != nil {
 		return nil, errors.Wrapf(err, "pricer failed for pair %s", d.pair.String())
@@ -203,11 +408,13 @@ func (d *DCAStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 				zap.String("lastSellPrice", d.lastSellPrice.String()),
 				zap.String("percentChange", percentChange.String()))
 
+			wasWaitingForDip := d.waitingForDip
 			d.SetWaitingForDip(false)
 
 			tradeEvent, err := d.actBuy(ctx, price)
 			if err != nil {
 				d.l.Error("Failed to record initial purchase after price drop", zap.Error(err))
+				d.SetWaitingForDip(wasWaitingForDip)
 				return tradeEvent, err
 			}
 
@@ -215,7 +422,6 @@ func (d *DCAStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 				zap.String("pair", d.pair.String()),
 				zap.String("price", price.String()),
 				zap.String("amount", d.individualBuyAmount.String()))
-
 			return tradeEvent, nil
 		} else {
 			d.l.Debug("Still waiting for price to drop from last sell price",
@@ -266,23 +472,33 @@ func (d *DCAStrategy) Close() error {
 
 func (d *DCAStrategy) actBuy(ctx context.Context, price decimal.Decimal) (*entity.TradeEvent, error) {
 	operationTime := time.Now()
-	if err := d.trader.Buy(ctx, d.individualBuyAmount); err != nil {
+	tradePartValue := int(d.tradePart.IntPart()) + 1
+
+	intent, err := d.journal.Prepare(intentActionBuy, price, d.individualBuyAmount, operationTime, tradePartValue, false)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := d.trader.Buy(ctx, d.individualBuyAmount, intent.ID); err != nil {
+		d.markIntentFailed(intent, err)
 		return nil, errors.Wrapf(err, "trader buy failed for pair %s with amount %s", d.pair.String(), d.individualBuyAmount.String())
 	}
 
-	tradeEvent := &entity.TradeEvent{
-		Action: entity.ActionBuy,
-		Amount: d.individualBuyAmount,
-		Pair:   d.pair,
-		Price:  price,
-	}
-
-	tradePartValue := int(d.tradePart.IntPart()) + 1
-	if err := d.AddDCAPurchase(price, d.individualBuyAmount, operationTime, tradePartValue); err != nil {
+	if err := d.AddDCAPurchase(intent.ID, price, d.individualBuyAmount, operationTime, tradePartValue); err != nil {
 		d.l.Error("failed to save DCA purchase",
 			zap.Error(err),
-			zap.String("pair", d.pair.String()))
-		return tradeEvent, err
+			zap.String("pair", d.pair.String()),
+			zap.String("intent_id", intent.ID))
+		return &entity.TradeEvent{
+			Action: entity.ActionBuy,
+			Amount: d.individualBuyAmount,
+			Pair:   d.pair,
+			Price:  price,
+		}, err
+	}
+
+	if err := d.journal.MarkDone(intent); err != nil {
+		return nil, err
 	}
 
 	d.l.Info("DCA buy executed",
@@ -292,7 +508,12 @@ func (d *DCAStrategy) actBuy(ctx context.Context, price decimal.Decimal) (*entit
 		zap.String("amount", d.individualBuyAmount.String()),
 		zap.String("avg_entry_price", d.dcaSeries.AvgEntryPrice.String()))
 
-	return tradeEvent, nil
+	return &entity.TradeEvent{
+		Action: entity.ActionBuy,
+		Amount: d.individualBuyAmount,
+		Pair:   d.pair,
+		Price:  price,
+	}, nil
 }
 
 func (d *DCAStrategy) actSell(ctx context.Context, price decimal.Decimal) (*entity.TradeEvent, error) {
@@ -332,49 +553,38 @@ func (d *DCAStrategy) actSell(ctx context.Context, price decimal.Decimal) (*enti
 		return nil, nil
 	}
 
-	if err := d.trader.Sell(ctx, amountToSell); err != nil {
+	operationTime := time.Now()
+
+	intent, err := d.journal.Prepare(intentActionSell, price, amountToSell, operationTime, 0, amountToSell.Equal(d.dcaSeries.TotalAmount))
+	if err != nil {
+		return nil, err
+	}
+
+	if err := d.trader.Sell(ctx, amountToSell, intent.ID); err != nil {
+		d.markIntentFailed(intent, err)
 		return nil, errors.Wrapf(err, "trader sell failed for pair %s, amount %s", d.pair.String(), amountToSell.String())
 	}
 
-	isFullSell := amountToSell.Equal(d.dcaSeries.TotalAmount)
-
-	if isFullSell {
-		d.l.Info("Full sell executed. Resetting DCA series.", zap.String("amountSold", amountToSell.String()))
-		// Reset DCA series
-		d.dcaSeries = &DCASeries{
-			Purchases: make([]DCAPurchase, 0),
-		}
-		// Reset trade part counter
-		d.tradePart = decimal.Zero
-
-		d.SetLastSellPrice(price)
-		d.SetWaitingForDip(true)
-		d.l.Info("Waiting for price to drop before starting new DCA series",
-			zap.String("lastSellPrice", price.String()),
-			zap.String("requiredDropPercent", d.dcaPercentThresholdBuy.String()))
-	} else {
-		d.l.Info("Partial sell executed.", zap.String("amountSold", amountToSell.String()))
-		d.removeAmountFromPurchases(amountToSell)
-
-		if len(d.dcaSeries.Purchases) == 0 || d.dcaSeries.TotalAmount.LessThanOrEqual(decimal.Zero) {
-			d.l.Info("Total amount became zero after partial sell. Resetting DCA series, waiting for price drop before starting new DCA series.",
-				zap.String("remainingTotalAmount", d.dcaSeries.TotalAmount.String()))
-			d.dcaSeries = &DCASeries{Purchases: make([]DCAPurchase, 0)} // Reset purchases
-			d.tradePart = decimal.Zero                                  // Reset tradePart
-			d.SetLastSellPrice(price)
-			d.SetWaitingForDip(true)
-		}
+	if err := d.applyExecutedSell(intent); err != nil {
+		d.l.Error("failed to apply sell intent to series",
+			zap.Error(err),
+			zap.String("pair", d.pair.String()),
+			zap.String("intent_id", intent.ID))
+		return &entity.TradeEvent{
+			Action: entity.ActionSell,
+			Amount: amountToSell,
+			Pair:   d.pair,
+			Price:  price,
+		}, err
 	}
 
-	if err := d.saveDCASeries(); err != nil {
-		d.l.Error("failed to save DCA series after sell",
-			zap.Error(err),
-			zap.String("pair", d.pair.String()))
+	if err := d.journal.MarkDone(intent); err != nil {
+		return nil, err
 	}
 
 	tradeEvent := &entity.TradeEvent{
 		Action: entity.ActionSell,
-		Amount: amountToSell,
+		Amount: intent.Amount,
 		Pair:   d.pair,
 		Price:  price,
 	}
@@ -398,7 +608,7 @@ func isPercentDifferenceSignificant(currentPrice, referencePrice, thresholdPerce
 	absPercentageDiff := percentageDiff.Abs()
 	absPercentageDiffHundred := absPercentageDiff.Mul(decimal.NewFromInt(100))
 
-	return absPercentageDiffHundred.GreaterThan(thresholdPercent)
+	return absPercentageDiffHundred.GreaterThanOrEqual(thresholdPercent)
 }
 
 func (d *DCAStrategy) SetLastSellPrice(price decimal.Decimal) {
@@ -463,6 +673,10 @@ func (d *DCAStrategy) recalculateSeriesStats() {
 
 // Initialize prepares the DCA strategy by setting up initial price reference and executing initial buy if needed
 func (d *DCAStrategy) Initialize(ctx context.Context) error {
+	if err := d.reconcileTradeIntents(ctx); err != nil {
+		return err
+	}
+
 	currentPrice, calculatedInitialBuyAmount, err := d.prepareInitialBuy(ctx)
 	if err != nil {
 		return err
@@ -509,18 +723,30 @@ func (d *DCAStrategy) executeInitialBuy(ctx context.Context, currentPrice decima
 			zap.String("currentPrice", currentPrice.String()),
 			zap.String("amount", calculatedInitialBuyAmount.String()))
 
-		if buyErr := d.trader.Buy(ctx, calculatedInitialBuyAmount); buyErr != nil {
+		operationTime := time.Now()
+
+		intent, err := d.journal.Prepare(intentActionBuy, currentPrice, calculatedInitialBuyAmount, operationTime, 1, false)
+		if err != nil {
+			return err
+		}
+
+		if buyErr := d.trader.Buy(ctx, calculatedInitialBuyAmount, intent.ID); buyErr != nil {
+			d.markIntentFailed(intent, buyErr)
 			d.l.Error("Initial buy execution failed",
 				zap.Error(buyErr),
 				zap.String("pair", d.pair.String()))
 			return errors.Wrapf(buyErr, "initial buy execution failed for %s", d.pair.String())
 		}
 
-		if err := d.AddDCAPurchase(currentPrice, calculatedInitialBuyAmount, time.Now(), 1); err != nil {
+		if err := d.AddDCAPurchase(intent.ID, currentPrice, calculatedInitialBuyAmount, operationTime, 1); err != nil {
 			d.l.Error("Failed to record initial purchase state",
 				zap.Error(err),
 				zap.String("pair", d.pair.String()))
 			return errors.Wrapf(err, "failed to record initial purchase state for %s", d.pair.String())
+		}
+
+		if err := d.journal.MarkDone(intent); err != nil {
+			return err
 		}
 
 		d.l.Info("Initial buy executed successfully.",

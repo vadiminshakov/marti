@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -48,7 +49,7 @@ func TestDCAStrategy_Initialize(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 
 	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(50000), nil)
-	mockTrader.On("Buy", mock.Anything, decimalMatcher(decimal.NewFromInt(250))).Return(nil)
+	mockTrader.On("Buy", mock.Anything, decimalMatcher(decimal.NewFromInt(250)), mock.AnythingOfType("string")).Return(nil)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
@@ -89,7 +90,8 @@ func createDCAStrategyWithWALDir(l *zap.Logger, pair entity.Pair, amount decimal
 	}
 
 	dcaSeries := &DCASeries{
-		Purchases: make([]DCAPurchase, 0),
+		Purchases:         make([]DCAPurchase, 0),
+		ProcessedTradeIDs: make(map[string]bool),
 	}
 
 	return &DCAStrategy{
@@ -100,6 +102,7 @@ func createDCAStrategyWithWALDir(l *zap.Logger, pair entity.Pair, amount decimal
 		trader:                  trader,
 		l:                       l,
 		wal:                     wal,
+		journal:                 newTradeJournal(wal, []*tradeIntentRecord{}),
 		dcaSeries:               dcaSeries,
 		maxDcaTrades:            maxDcaTrades,
 		dcaPercentThresholdBuy:  dcaPercentThresholdBuy,
@@ -151,7 +154,7 @@ func TestDCAStrategy_Trade_WaitingForDip_PriceDropped(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 
 	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(45000), nil) // 10% drop from 50000
-	mockTrader.On("Buy", mock.Anything, decimalMatcher(decimal.NewFromInt(250))).Return(nil)
+	mockTrader.On("Buy", mock.Anything, decimalMatcher(decimal.NewFromInt(250)), mock.AnythingOfType("string")).Return(nil)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
@@ -192,12 +195,12 @@ func TestDCAStrategy_Trade_DCABuy_PriceSignificantlyLower(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 
 	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(45000), nil) // significantly lower price
-	mockTrader.On("Buy", mock.Anything, decimalMatcher(decimal.NewFromInt(250))).Return(nil)
+	mockTrader.On("Buy", mock.Anything, decimalMatcher(decimal.NewFromInt(250)), mock.AnythingOfType("string")).Return(nil)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
+	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
 	require.NoError(t, err, "Failed to add initial DCA purchase")
 	ts.tradePart = decimal.NewFromInt(1)
 
@@ -219,7 +222,7 @@ func TestDCAStrategy_Trade_DCABuy_MaxTradesReached(t *testing.T) {
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
+	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
 	require.NoError(t, err, "Failed to add initial DCA purchase")
 	ts.tradePart = decimal.NewFromInt(4) // Max trades reached
 
@@ -235,12 +238,12 @@ func TestDCAStrategy_Trade_Sell_PriceSignificantlyHigher(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 
 	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(55500), nil) // 11% higher than avg entry (>10% threshold)
-	mockTrader.On("Sell", mock.Anything, decimalMatcher(decimal.NewFromInt(250))).Return(nil)
+	mockTrader.On("Sell", mock.Anything, decimalMatcher(decimal.NewFromInt(250)), mock.AnythingOfType("string")).Return(nil)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
+	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
 	require.NoError(t, err, "failed to add initial DCA purchase")
 
 	ctx := context.Background()
@@ -256,12 +259,12 @@ func TestDCAStrategy_Trade_Sell_FullSellOnDoubleThreshold(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 
 	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(61000), nil) // 22% higher than avg entry (>20% double threshold)
-	mockTrader.On("Sell", mock.Anything, decimalMatcher(decimal.NewFromInt(250))).Return(nil)
+	mockTrader.On("Sell", mock.Anything, decimalMatcher(decimal.NewFromInt(250)), mock.AnythingOfType("string")).Return(nil)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
+	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
 	require.NoError(t, err, "failed to add initial DCA purchase")
 
 	ctx := context.Background()
@@ -282,7 +285,7 @@ func TestDCAStrategy_Trade_NoAction_PriceInRange(t *testing.T) {
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
+	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
 	require.NoError(t, err, "failed to add initial DCA purchase")
 
 	ctx := context.Background()
@@ -297,13 +300,13 @@ func TestDCAStrategy_Trade_BuyError(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 
 	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(45000), nil) // significantly lower price
-	mockTrader.On("Buy", mock.Anything, decimalMatcher(decimal.NewFromInt(250))).Return(errors.New("buy failed"))
+	mockTrader.On("Buy", mock.Anything, decimalMatcher(decimal.NewFromInt(250)), mock.AnythingOfType("string")).Return(errors.New("buy failed"))
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
 	// Add initial purchase
-	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
+	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
 	require.NoError(t, err, "failed to add initial DCA purchase")
 
 	ctx := context.Background()
@@ -318,18 +321,200 @@ func TestDCAStrategy_Trade_SellError(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 
 	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(55500), nil) // 11% higher than avg entry (>10% threshold)
-	mockTrader.On("Sell", mock.Anything, decimalMatcher(decimal.NewFromInt(250))).Return(errors.New("sell failed"))
+	mockTrader.On("Sell", mock.Anything, decimalMatcher(decimal.NewFromInt(250)), mock.AnythingOfType("string")).Return(errors.New("sell failed"))
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	err := ts.AddDCAPurchase(decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
+	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(250), time.Now(), 1)
 	require.NoError(t, err, "failed to add initial DCA purchase")
 
 	ctx := context.Background()
 	tradeEvent, err := ts.Trade(ctx)
 	require.Error(t, err, "expected error when sell fails")
 	require.Nil(t, tradeEvent, "expected nil TradeEvent when sell fails")
+}
+
+func TestDCAStrategy_ReconcileExecutedBuyIntent(t *testing.T) {
+	mockPricer := pricerMock.NewPricer(t)
+	mockTrader := traderMock.NewTrader(t)
+
+	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
+	defer ts.Close()
+
+	intent := &tradeIntentRecord{
+		ID:        "intent-buy-1",
+		Status:    tradeIntentStatusPending,
+		Action:    intentActionBuy,
+		Amount:    ts.individualBuyAmount,
+		Price:     decimal.NewFromInt(48000),
+		Time:      time.Now(),
+		TradePart: 1,
+	}
+	ts.journal.intents = append(ts.journal.intents, intent)
+	ts.journal.index[intent.ID] = intent
+
+	mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(true, intent.Amount, nil).Once()
+
+	err := ts.reconcileTradeIntents(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, ts.dcaSeries.Purchases, 1, "executed buy intent should add purchase")
+	require.Equal(t, tradeIntentStatusDone, ts.journal.index[intent.ID].Status, "intent status should be marked done")
+	require.True(t, ts.isTradeProcessed(intent.ID), "intent should be marked processed")
+
+	// Ensure idempotence on subsequent reconciliation
+	err = ts.reconcileTradeIntents(context.Background())
+	require.NoError(t, err)
+	require.Len(t, ts.dcaSeries.Purchases, 1, "purchase count should remain unchanged after second reconciliation")
+}
+
+func TestDCAStrategy_ReconcileExecutedSellIntentFullReset(t *testing.T) {
+	mockPricer := pricerMock.NewPricer(t)
+	mockTrader := traderMock.NewTrader(t)
+
+	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
+	defer ts.Close()
+
+	// Seed series with one purchase
+	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), ts.individualBuyAmount, time.Now(), 1)
+	require.NoError(t, err)
+	require.Equal(t, ts.individualBuyAmount, ts.dcaSeries.TotalAmount)
+
+	intent := &tradeIntentRecord{
+		ID:         "intent-sell-full",
+		Status:     tradeIntentStatusPending,
+		Action:     intentActionSell,
+		Amount:     ts.dcaSeries.TotalAmount,
+		Price:      decimal.NewFromInt(60000),
+		Time:       time.Now(),
+		IsFullSell: true,
+	}
+	ts.journal.intents = append(ts.journal.intents, intent)
+	ts.journal.index[intent.ID] = intent
+
+	mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(true, intent.Amount, nil).Once()
+
+	err = ts.reconcileTradeIntents(context.Background())
+	require.NoError(t, err)
+
+	require.Equal(t, tradeIntentStatusDone, ts.journal.index[intent.ID].Status, "intent status should be done")
+	require.Len(t, ts.dcaSeries.Purchases, 0, "series should reset after full sell")
+	require.True(t, ts.waitingForDip, "strategy should wait for dip after full sell")
+	require.True(t, ts.lastSellPrice.Equal(intent.Price), "last sell price should be updated")
+	require.True(t, ts.dcaSeries.TotalAmount.IsZero(), "total amount should be zero after reset")
+}
+
+func TestDCAStrategy_ReconcilePendingIntentMarkedFailed(t *testing.T) {
+	mockPricer := pricerMock.NewPricer(t)
+	mockTrader := traderMock.NewTrader(t)
+
+	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
+	defer ts.Close()
+
+	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), ts.individualBuyAmount, time.Now(), 1)
+	require.NoError(t, err)
+
+	intent := &tradeIntentRecord{
+		ID:     "intent-failed",
+		Status: tradeIntentStatusPending,
+		Action: intentActionSell,
+		Amount: ts.individualBuyAmount,
+		Price:  decimal.NewFromInt(55000),
+		Time:   time.Now(),
+	}
+	ts.journal.intents = append(ts.journal.intents, intent)
+	ts.journal.index[intent.ID] = intent
+
+	mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(false, decimal.Zero, nil).Once()
+
+	err = ts.reconcileTradeIntents(context.Background())
+	require.NoError(t, err)
+
+	require.Equal(t, tradeIntentStatusFailed, ts.journal.index[intent.ID].Status, "intent should be marked failed when order not executed")
+	require.Len(t, ts.dcaSeries.Purchases, 1, "positions should remain untouched when intent fails")
+	require.False(t, ts.isTradeProcessed(intent.ID), "failed intent should not be marked processed")
+}
+
+func TestDCAStrategy_ReconcilePendingIntentPartialFillWaits(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mockPricer := pricerMock.NewPricer(t)
+		mockTrader := traderMock.NewTrader(t)
+
+		ts := createTestDCAStrategy(t, mockPricer, mockTrader)
+		defer ts.Close()
+
+		err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), ts.individualBuyAmount, time.Now(), 1)
+		require.NoError(t, err)
+
+		intent := &tradeIntentRecord{
+			ID:     "intent-partial",
+			Status: tradeIntentStatusPending,
+			Action: intentActionSell,
+			Amount: ts.individualBuyAmount,
+			Price:  decimal.NewFromInt(55000),
+			Time:   time.Now(),
+		}
+		ts.journal.intents = append(ts.journal.intents, intent)
+		ts.journal.index[intent.ID] = intent
+
+		partialFill := ts.individualBuyAmount.Div(decimal.NewFromInt(2))
+		mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(false, partialFill, nil).Once()
+
+		err = ts.reconcileTradeIntents(context.Background())
+		require.NoError(t, err)
+
+		require.Equal(t, tradeIntentStatusPending, ts.journal.index[intent.ID].Status, "intent should remain pending when partially filled")
+		require.False(t, ts.isTradeProcessed(intent.ID), "intent should not be marked processed while pending")
+	})
+}
+
+func TestDCAStrategy_ReconcilePendingIntentPartialFillThenComplete(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mockPricer := pricerMock.NewPricer(t)
+		mockTrader := traderMock.NewTrader(t)
+
+		ts := createTestDCAStrategy(t, mockPricer, mockTrader)
+		defer ts.Close()
+
+		err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), ts.individualBuyAmount, time.Now(), 1)
+		require.NoError(t, err)
+
+		intent := &tradeIntentRecord{
+			ID:     "intent-partial-done",
+			Status: tradeIntentStatusPending,
+			Action: intentActionSell,
+			Amount: ts.individualBuyAmount,
+			Price:  decimal.NewFromInt(55000),
+			Time:   time.Now(),
+		}
+		ts.journal.intents = append(ts.journal.intents, intent)
+		ts.journal.index[intent.ID] = intent
+
+		partialFill := ts.individualBuyAmount.Div(decimal.NewFromInt(2))
+
+		mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(false, partialFill, nil).Once()
+		err = ts.reconcileTradeIntents(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, tradeIntentStatusPending, ts.journal.index[intent.ID].Status, "intent should remain pending after first partial fill")
+		require.False(t, ts.isTradeProcessed(intent.ID), "intent should not be processed after first partial fill")
+		time.Sleep(time.Millisecond) // ensure unique WAL indices for subsequent writes
+
+		mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(false, partialFill, nil).Once()
+		err = ts.reconcileTradeIntents(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, tradeIntentStatusPending, ts.journal.index[intent.ID].Status, "intent should remain pending after second partial fill")
+		require.False(t, ts.isTradeProcessed(intent.ID), "intent should not be processed after second partial fill")
+		time.Sleep(time.Millisecond)
+
+		mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(true, intent.Amount, nil).Once()
+		err = ts.reconcileTradeIntents(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, tradeIntentStatusDone, ts.journal.index[intent.ID].Status, "intent should be marked done after completion")
+		require.True(t, ts.isTradeProcessed(intent.ID), "intent should be marked processed after completion")
+		require.Len(t, ts.dcaSeries.Purchases, 0, "series should reset after full sell is executed")
+		require.True(t, ts.waitingForDip, "strategy should wait for dip after completing sell")
+	})
 }
 
 func TestIsPercentDifferenceSignificant(t *testing.T) {
@@ -379,8 +564,8 @@ func TestIsPercentDifferenceSignificant(t *testing.T) {
 			name:             "current zero, ref non-zero, threshold exactly 100%",
 			currentPrice:     decimal.Zero,
 			referencePrice:   decimal.NewFromInt(10),
-			thresholdPercent: decimal.NewFromInt(100), // abs diff is 100%, 100 > 100 is false
-			expected:         false,
+			thresholdPercent: decimal.NewFromInt(100), // abs diff is 100%, threshold reached
+			expected:         true,
 		},
 		{
 			name:             "no change",
@@ -400,8 +585,8 @@ func TestIsPercentDifferenceSignificant(t *testing.T) {
 			name:             "increase, at threshold (using > logic, so false)",
 			currentPrice:     decimal.NewFromInt(101),
 			referencePrice:   decimal.NewFromInt(100),
-			thresholdPercent: decimal.NewFromInt(1), // 1% change, 1 > 1 is false
-			expected:         false,
+			thresholdPercent: decimal.NewFromInt(1), // 1% change meets threshold
+			expected:         true,
 		},
 		{
 			name:             "increase, above threshold",
@@ -421,8 +606,8 @@ func TestIsPercentDifferenceSignificant(t *testing.T) {
 			name:             "decrease, at threshold (using > logic, so false)",
 			currentPrice:     decimal.NewFromInt(99),
 			referencePrice:   decimal.NewFromInt(100),
-			thresholdPercent: decimal.NewFromInt(1), // abs 1% change, 1 > 1 is false
-			expected:         false,
+			thresholdPercent: decimal.NewFromInt(1), // abs 1% change meets threshold
+			expected:         true,
 		},
 		{
 			name:             "decrease, above threshold",
