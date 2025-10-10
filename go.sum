@@ -40,8 +40,6 @@ github.com/stretchr/objx v0.5.2/go.mod h1:FRsXN1f5AsAjCGJKqEizvkpNtU+EGNCLh3NxZ/
 github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=
 github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsTg=
 github.com/stretchr/testify v1.9.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
-github.com/vadiminshakov/gowal v0.0.3-0.20250115221951-bf192ea01e26 h1:MXkPcr/It56YW/jL9Gp13VB0G72wJwV3ks5IT192xKY=
-github.com/vadiminshakov/gowal v0.0.3-0.20250115221951-bf192ea01e26/go.mod h1:NMvNH0xjRPYSrcaIg/JhqB5uTneFdgo45+Fs2sk+Esc=
 github.com/vadiminshakov/gowal v0.0.3 h1:XMxHfAgyonyBi8aoU4o01Rqthmo43xKTQLCRR+lFD5Q=
 github.com/vadiminshakov/gowal v0.0.3/go.mod h1:NMvNH0xjRPYSrcaIg/JhqB5uTneFdgo45+Fs2sk+Esc=
 github.com/vmihailenco/msgpack/v5 v5.4.1 h1:cQriyiUvjTwOHg8QZaPihLWeRAAVoCpE00IUPn0Bjt8=
