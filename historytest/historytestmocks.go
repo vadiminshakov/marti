@@ -30,10 +30,11 @@ type traderCsv struct {
 	pricesCh      chan decimal.Decimal
 	fee           decimal.Decimal
 	dealsCount    uint
+	executed      map[string]decimal.Decimal
 }
 
 // Buy buys amount of asset in trade pair.
-func (t *traderCsv) Buy(ctx context.Context, amount decimal.Decimal) error {
+func (t *traderCsv) Buy(ctx context.Context, amount decimal.Decimal, clientOrderID string) error {
 	price, ok := <-t.pricesCh
 	if !ok && price.IsZero() {
 		return errors.New("prices channel is closed")
@@ -59,11 +60,16 @@ func (t *traderCsv) Buy(ctx context.Context, amount decimal.Decimal) error {
 
 	t.dealsCount++
 
+	if t.executed == nil {
+		t.executed = make(map[string]decimal.Decimal)
+	}
+	t.executed[clientOrderID] = amount
+
 	return nil
 }
 
 // Sell sells amount of asset in trade pair.
-func (t *traderCsv) Sell(ctx context.Context, amount decimal.Decimal) error {
+func (t *traderCsv) Sell(ctx context.Context, amount decimal.Decimal, clientOrderID string) error {
 	// If we don't have any BTC, we can't sell
 	if t.balance1.LessThanOrEqual(decimal.Zero) {
 		return fmt.Errorf("cannot sell BTC, balance is zero")
@@ -87,7 +93,7 @@ func (t *traderCsv) Sell(ctx context.Context, amount decimal.Decimal) error {
 
 	// Calculate fee (0.1% of the trade amount)
 	tradeFee := usdtAmount.Mul(decimal.NewFromFloat(feePercent))
-	
+
 	// Add the USDT to our balance (minus fee)
 	t.balance2 = t.balance2.Add(usdtAmount)
 
@@ -103,5 +109,22 @@ func (t *traderCsv) Sell(ctx context.Context, amount decimal.Decimal) error {
 	// Increment deal counter
 	t.dealsCount++
 
+	if t.executed == nil {
+		t.executed = make(map[string]decimal.Decimal)
+	}
+	t.executed[clientOrderID] = amountToSell
+
 	return nil
+}
+
+// OrderExecuted reports execution state for deterministic CSV trader (orders are processed synchronously).
+func (t *traderCsv) OrderExecuted(ctx context.Context, clientOrderID string) (bool, decimal.Decimal, error) {
+	if t.executed == nil {
+		return true, decimal.Zero, nil
+	}
+	amount, ok := t.executed[clientOrderID]
+	if !ok {
+		return true, decimal.Zero, nil
+	}
+	return true, amount, nil
 }

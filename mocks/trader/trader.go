@@ -20,13 +20,13 @@ type Trader struct {
 	mock.Mock
 }
 
-// Buy provides a mock function with given fields: ctx, amount
-func (_m *Trader) Buy(ctx context.Context, amount decimal.Decimal) error {
-	ret := _m.Called(ctx, amount)
+// Buy provides a mock function with given fields: ctx, amount, clientOrderID
+func (_m *Trader) Buy(ctx context.Context, amount decimal.Decimal, clientOrderID string) error {
+	ret := _m.Called(ctx, amount, clientOrderID)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, decimal.Decimal) error); ok {
-		r0 = rf(ctx, amount)
+	if rf, ok := ret.Get(0).(func(context.Context, decimal.Decimal, string) error); ok {
+		r0 = rf(ctx, amount, clientOrderID)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -34,18 +34,55 @@ func (_m *Trader) Buy(ctx context.Context, amount decimal.Decimal) error {
 	return r0
 }
 
-// Sell provides a mock function with given fields: ctx, amount
-func (_m *Trader) Sell(ctx context.Context, amount decimal.Decimal) error {
-	ret := _m.Called(ctx, amount)
+// Sell provides a mock function with given fields: ctx, amount, clientOrderID
+func (_m *Trader) Sell(ctx context.Context, amount decimal.Decimal, clientOrderID string) error {
+	ret := _m.Called(ctx, amount, clientOrderID)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, decimal.Decimal) error); ok {
-		r0 = rf(ctx, amount)
+	if rf, ok := ret.Get(0).(func(context.Context, decimal.Decimal, string) error); ok {
+		r0 = rf(ctx, amount, clientOrderID)
 	} else {
 		r0 = ret.Error(0)
 	}
 
 	return r0
+}
+
+// OrderExecuted provides a mock function with given fields: ctx, clientOrderID
+func (_m *Trader) OrderExecuted(ctx context.Context, clientOrderID string) (bool, decimal.Decimal, error) {
+	ret := _m.Called(ctx, clientOrderID)
+
+	var r0 bool
+	var r1 decimal.Decimal
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (bool, decimal.Decimal, error)); ok {
+		return rf(ctx, clientOrderID)
+	}
+	if len(ret) > 0 {
+		if rf, ok := ret.Get(0).(func(context.Context, string) bool); ok {
+			r0 = rf(ctx, clientOrderID)
+		} else {
+			r0 = ret.Bool(0)
+		}
+	}
+	if len(ret) > 1 {
+		if rf, ok := ret.Get(1).(func(context.Context, string) decimal.Decimal); ok {
+			r1 = rf(ctx, clientOrderID)
+		} else {
+			if ret.Get(1) != nil {
+				r1 = ret.Get(1).(decimal.Decimal)
+			}
+		}
+	}
+	if len(ret) > 2 {
+		if rf, ok := ret.Get(2).(func(context.Context, string) error); ok {
+			r2 = rf(ctx, clientOrderID)
+		} else {
+			r2 = ret.Error(2)
+		}
+	}
+
+	return r0, r1, r2
 }
 
 type mockConstructorTestingTNewTrader interface {
