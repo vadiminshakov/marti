@@ -1,3 +1,5 @@
+// Package config provides configuration management for the marti trading bot.
+// It supports both YAML file-based configuration and command-line arguments.
 package config
 
 import (
@@ -13,13 +15,23 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Config represents the trading bot configuration parameters.
+// It contains all necessary settings for running a trading strategy
+// including exchange platform, trading pair, and DCA strategy parameters.
 type Config struct {
-	Platform                string
-	Pair                    entity.Pair
-	Amount                  decimal.Decimal
-	PollPriceInterval       time.Duration
-	MaxDcaTrades            int
-	DcaPercentThresholdBuy  decimal.Decimal
+	// Platform specifies the trading exchange platform (e.g., "binance", "bybit")
+	Platform string
+	// Pair represents the cryptocurrency trading pair (e.g., BTC/USDT)
+	Pair entity.Pair
+	// Amount is the base trading amount for each trade
+	Amount decimal.Decimal
+	// PollPriceInterval defines how often to check price updates
+	PollPriceInterval time.Duration
+	// MaxDcaTrades is the maximum number of DCA trades allowed
+	MaxDcaTrades int
+	// DcaPercentThresholdBuy is the percentage threshold for triggering buy orders
+	DcaPercentThresholdBuy decimal.Decimal
+	// DcaPercentThresholdSell is the percentage threshold for triggering sell orders
 	DcaPercentThresholdSell decimal.Decimal
 }
 
@@ -33,6 +45,10 @@ type ConfigTmp struct {
 	DcaPercentThresholdSellStr string        `yaml:"dca_percent_threshold_sell,omitempty"`
 }
 
+// Get retrieves configuration settings from either YAML file or command-line arguments.
+// If a config file path is provided via the -config flag, it reads from the YAML file.
+// Otherwise, it attempts to parse configuration from command-line flags.
+// Returns a slice of Config objects to support multiple trading configurations.
 func Get() ([]Config, error) {
 	config := flag.String("config", "", "path to yaml config")
 	flag.Parse()
