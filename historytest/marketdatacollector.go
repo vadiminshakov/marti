@@ -1,3 +1,5 @@
+// Package historytest provides utilities for backtesting trading strategies
+// using historical market data from cryptocurrency exchanges.
 package historytest
 
 import (
@@ -12,6 +14,19 @@ import (
 	"github.com/vadiminshakov/marti/internal/entity"
 )
 
+// DataCollectorFactory creates a market data collector function for the specified trading pair.
+// It returns a function that can collect historical kline data from Binance exchange
+// and save it to a CSV file. The collector requires BINANCE_API_KEY and BINANCE_API_SECRET
+// environment variables to be set.
+//
+// Parameters:
+//   - filePath: path where the collected CSV data will be saved
+//   - pair: the trading pair to collect data for
+//
+// Returns a function that accepts:
+//   - fromHoursAgo: how many hours back to start collecting data
+//   - toHoursAgo: how many hours back to stop collecting data
+//   - klinesize: the kline interval (e.g., "1h", "4h", "1d")
 func DataCollectorFactory(filePath string, pair *entity.Pair) (func(fromHoursAgo, toHoursAgo int, klinesize string) error, error) {
 	apikey := os.Getenv("BINANCE_API_KEY")
 	if len(apikey) == 0 {
