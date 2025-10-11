@@ -20,7 +20,7 @@ Marti is a flexible cryptocurrency trading bot framework that implements Dollar 
 ## Installation
 
 ```bash
-go install github.com/vadiminshakov/marti@latest
+go install github.com/vadiminshakov/marti/cmd@latest
 ```
 
 ## Quick Start (Standalone Application)
