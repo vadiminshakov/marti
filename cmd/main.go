@@ -1,3 +1,16 @@
+// Command marti runs the cryptocurrency trading bot with DCA strategy.
+// It supports multiple exchanges (Binance, Bybit) and can be configured
+// via YAML configuration files or command-line arguments.
+//
+// Usage:
+//
+//	marti --config config.yaml
+//	marti (uses CLI arguments)
+//
+// Required environment variables:
+//
+//	For Binance: BINANCE_API_KEY, BINANCE_API_SECRET
+//	For Bybit: BYBIT_API_KEY, BYBIT_API_SECRET
 package main
 
 import (
