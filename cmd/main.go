@@ -15,8 +15,10 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 
 	"github.com/vadiminshakov/marti/config"
 	"github.com/vadiminshakov/marti/internal"
@@ -25,47 +27,71 @@ import (
 )
 
 func main() {
+	logger := zap.Must(zap.NewProduction())
+	defer func() {
+		_ = logger.Sync()
+	}()
+
 	configs, err := config.Get()
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatal("Failed to load configuration", zap.Error(err))
 	}
 
-	for _, config := range configs {
-		var client interface{}
-		switch config.Platform {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var wg sync.WaitGroup
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+
+	go func() {
+		<-sigChan
+		logger.Info("Received shutdown signal, initiating graceful shutdown...")
+		cancel()
+	}()
+
+	for _, cfg := range configs {
+		var client any
+		switch cfg.Platform {
 		case "binance":
 			apiKey := os.Getenv("BINANCE_API_KEY")
 			apiSecret := os.Getenv("BINANCE_API_SECRET")
 			if apiKey == "" || apiSecret == "" {
-				log.Fatal("BINANCE_API_KEY and BINANCE_API_SECRET environment variables must be set")
+				logger.Fatal("Missing Binance credentials", zap.String("platform", cfg.Platform))
 			}
 			client = clients.NewBinanceClient(apiKey, apiSecret)
 		case "bybit":
 			apiKey := os.Getenv("BYBIT_API_KEY")
 			apiSecret := os.Getenv("BYBIT_API_SECRET")
 			if apiKey == "" || apiSecret == "" {
-				log.Fatal("BYBIT_API_KEY and BYBIT_API_SECRET environment variables must be set")
+				logger.Fatal("Missing Bybit credentials", zap.String("platform", cfg.Platform))
 			}
 			client = clients.NewBybitClient(apiKey, apiSecret)
 		default:
-			log.Fatal("unsupported platform")
+			logger.Fatal("Unsupported platform", zap.String("platform", cfg.Platform))
 		}
 
-		bot, err := internal.NewTradingBot(config, client)
+		botLogger := logger.With(
+			zap.String("platform", cfg.Platform),
+			zap.String("pair", cfg.Pair.String()),
+		)
+
+		bot, err := internal.NewTradingBot(botLogger, cfg, client)
 		if err != nil {
-			log.Fatal(err)
+			botLogger.Fatal("Failed to create trading bot", zap.Error(err))
 		}
 
-		logger, _ := zap.NewProduction()
-		defer logger.Sync()
-
-		// Run the trading bot
-		go func() {
-			if err := bot.Run(context.Background(), logger); err != nil {
-				log.Fatal(err)
+		wg.Go(func() {
+			defer bot.Close()
+			if err := bot.Run(ctx, botLogger); err != nil {
+				botLogger.Error("Trading bot failed", zap.Error(err))
 			}
-		}()
+		})
 	}
 
-	select {}
+	wg.Wait()
+
+	signal.Stop(sigChan)
+	logger.Info("All trading bots have shut down gracefully")
 }
