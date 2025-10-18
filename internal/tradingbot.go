@@ -33,16 +33,20 @@ type TradingBot struct {
 	tradingStrategy TradingStrategy
 }
 
-// NewTradingBot creates a new trading bot instance with the specified configuration and exchange client.
+// NewTradingBot creates a new trading bot instance with the specified configuration, exchange client, and logger.
 // It initializes the appropriate trader and pricer components based on the platform specified in the config,
 // and sets up the trading strategy with the provided parameters.
-func NewTradingBot(conf config.Config, client any) (*TradingBot, error) {
+func NewTradingBot(logger *zap.Logger, conf config.Config, client any) (*TradingBot, error) {
 	currentTrader, currentPricer, err := createTraderAndPricer(conf.Platform, conf.Pair, client)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create trader and pricer")
 	}
 
-	tsLogger := zap.L().With(zap.String("pair", conf.Pair.String()))
+	if logger == nil {
+		logger = zap.L()
+	}
+
+	tsLogger := logger.With(zap.String("pair", conf.Pair.String()))
 	tradingStrategy, err := createTradingStrategy(
 		tsLogger,
 		conf.Pair,

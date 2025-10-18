@@ -9,6 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/vadiminshakov/marti/config"
 	"github.com/vadiminshakov/marti/internal/entity"
@@ -57,7 +58,8 @@ func TestNewTradingBot(t *testing.T) {
 			currentConf := defaultConf
 			currentConf.Platform = tt.platform
 
-			bot, err := NewTradingBot(currentConf, tt.client)
+			logger := zap.NewNop()
+			bot, err := NewTradingBot(logger, currentConf, tt.client)
 
 			if tt.expectError {
 				require.Error(t, err)
