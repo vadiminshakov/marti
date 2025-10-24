@@ -18,7 +18,7 @@ import (
 func TestNewTradingBot(t *testing.T) {
 	defaultConf := config.Config{
 		Pair:                    entity.Pair{From: "BTC", To: "USDT"},
-		Amount:                  decimal.NewFromInt(100),
+		AmountPercent:           decimal.NewFromInt(10),
 		PollPriceInterval:       1 * time.Minute,
 		MaxDcaTrades:            10,
 		DcaPercentThresholdBuy:  decimal.NewFromInt(1),
