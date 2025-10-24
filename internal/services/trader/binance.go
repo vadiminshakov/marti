@@ -78,3 +78,22 @@ func (t *BinanceTrader) OrderExecuted(ctx context.Context, clientOrderID string)
 		return false, decimal.Zero, nil
 	}
 }
+
+func (t *BinanceTrader) GetBalance(ctx context.Context, currency string) (decimal.Decimal, error) {
+	account, err := t.client.NewGetAccountService().Do(ctx)
+	if err != nil {
+		return decimal.Zero, errors.Wrap(err, "failed to get binance account balance")
+	}
+
+	for _, balance := range account.Balances {
+		if balance.Asset == currency {
+			free, err := decimal.NewFromString(balance.Free)
+			if err != nil {
+				return decimal.Zero, errors.Wrap(err, "failed to parse balance")
+			}
+			return free, nil
+		}
+	}
+
+	return decimal.Zero, nil
+}

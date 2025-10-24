@@ -125,3 +125,29 @@ func (t *BybitTrader) OrderExecuted(ctx context.Context, clientOrderID string) (
 
 	return false, decimal.Zero, nil
 }
+
+func (t *BybitTrader) GetBalance(ctx context.Context, currency string) (decimal.Decimal, error) {
+	accountType := bybit.AccountTypeV5SPOT
+	resp, err := t.client.V5().Account().GetWalletBalance(accountType, []bybit.Coin{bybit.Coin(currency)})
+	if err != nil {
+		return decimal.Zero, errors.Wrap(err, "failed to get bybit wallet balance")
+	}
+
+	if len(resp.Result.List) == 0 {
+		return decimal.Zero, nil
+	}
+
+	for _, wallet := range resp.Result.List {
+		for _, coin := range wallet.Coin {
+			if string(coin.Coin) == currency {
+				balance, err := decimal.NewFromString(coin.WalletBalance)
+				if err != nil {
+					return decimal.Zero, errors.Wrap(err, "failed to parse balance")
+				}
+				return balance, nil
+			}
+		}
+	}
+
+	return decimal.Zero, nil
+}

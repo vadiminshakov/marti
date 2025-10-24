@@ -85,6 +85,35 @@ func (_m *Trader) OrderExecuted(ctx context.Context, clientOrderID string) (bool
 	return r0, r1, r2
 }
 
+// GetBalance provides a mock function with given fields: ctx, currency
+func (_m *Trader) GetBalance(ctx context.Context, currency string) (decimal.Decimal, error) {
+	ret := _m.Called(ctx, currency)
+
+	var r0 decimal.Decimal
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (decimal.Decimal, error)); ok {
+		return rf(ctx, currency)
+	}
+	if len(ret) > 0 {
+		if rf, ok := ret.Get(0).(func(context.Context, string) decimal.Decimal); ok {
+			r0 = rf(ctx, currency)
+		} else {
+			if ret.Get(0) != nil {
+				r0 = ret.Get(0).(decimal.Decimal)
+			}
+		}
+	}
+	if len(ret) > 1 {
+		if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+			r1 = rf(ctx, currency)
+		} else {
+			r1 = ret.Error(1)
+		}
+	}
+
+	return r0, r1
+}
+
 type mockConstructorTestingTNewTrader interface {
 	mock.TestingT
 	Cleanup(func())
