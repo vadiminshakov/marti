@@ -23,8 +23,8 @@ type Config struct {
 	Platform string
 	// Pair represents the cryptocurrency trading pair (e.g., BTC/USDT)
 	Pair entity.Pair
-	// Amount is the base trading amount for each trade
-	Amount decimal.Decimal
+	// AmountPercent is the percentage of quote currency balance to use for each trade (1-100)
+	AmountPercent decimal.Decimal
 	// PollPriceInterval defines how often to check price updates
 	PollPriceInterval time.Duration
 	// MaxDcaTrades is the maximum number of DCA trades allowed
@@ -64,7 +64,7 @@ func Get() ([]Config, error) {
 	return []Config{
 		{
 			Pair:                    pair,
-			Amount:                  amount,
+			AmountPercent:           amount,
 			PollPriceInterval:       pollPriceInterval,
 			MaxDcaTrades:            3,
 			DcaPercentThresholdBuy:  decimal.NewFromFloat(3.5),
@@ -76,7 +76,7 @@ func Get() ([]Config, error) {
 func getFromCLI() (pair entity.Pair, amount decimal.Decimal,
 	pollPriceInterval time.Duration, _ error) {
 	pairFlag := flag.String("pair", "BTC_USDT", "trade pair, example: BTC_USDT")
-	amountFlag := flag.String("amount", "100", "amount to trade")
+	amountFlag := flag.String("amount", "10", "percentage of quote currency balance to use (1-100)")
 	pi := flag.Duration("pollpriceinterval", 5*time.Minute, "poll market price interval")
 
 	flag.Parse()
@@ -89,6 +89,10 @@ func getFromCLI() (pair entity.Pair, amount decimal.Decimal,
 	amount, err = decimal.NewFromString(*amountFlag)
 	if err != nil {
 		return entity.Pair{}, decimal.Decimal{}, 0, err
+	}
+
+	if amount.LessThan(decimal.NewFromInt(1)) || amount.GreaterThan(decimal.NewFromInt(100)) {
+		return entity.Pair{}, decimal.Decimal{}, 0, fmt.Errorf("amount must be between 1 and 100 percent, got %s", amount.String())
 	}
 
 	pollPriceInterval = *pi
@@ -115,13 +119,18 @@ func getYaml(path string) ([]Config, error) {
 		}
 		amount, err := decimal.NewFromString(c.Amount)
 		if err != nil {
-			return nil, fmt.Errorf("incorrect 'amount' param in yaml config (correct format is 12), error: %w", err)
+			return nil, fmt.Errorf("incorrect 'amount' param in yaml config (must be a number between 1 and 100), error: %w", err)
+		}
+
+		if amount.LessThan(decimal.NewFromInt(1)) || amount.GreaterThan(decimal.NewFromInt(100)) {
+			return nil, fmt.Errorf("amount must be between 1 and 100 percent, got %s", amount.String())
 		}
 
 		// Initialize newConfig correctly for each iteration.
 		newConfig := Config{
+			Platform:          c.Platform,
 			Pair:              pair,
-			Amount:            amount,
+			AmountPercent:     amount,
 			PollPriceInterval: c.PollPriceInterval,
 		}
 

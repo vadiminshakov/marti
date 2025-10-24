@@ -46,11 +46,10 @@ func NewTradingBot(logger *zap.Logger, conf config.Config, client any) (*Trading
 		logger = zap.L()
 	}
 
-	tsLogger := logger.With(zap.String("pair", conf.Pair.String()))
 	tradingStrategy, err := createTradingStrategy(
-		tsLogger,
+		logger,
 		conf.Pair,
-		conf.Amount,
+		conf.AmountPercent,
 		currentPricer,
 		currentTrader,
 		conf.MaxDcaTrades,
@@ -86,27 +85,24 @@ func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
 	ticker := time.NewTicker(b.Config.PollPriceInterval)
 	defer ticker.Stop()
 
-	logger.Info("Starting trading loop", zap.String("pair", b.Config.Pair.String()), zap.Duration("poll_interval", b.Config.PollPriceInterval))
+	logger.Info("Starting trading loop", zap.Duration("poll_interval", b.Config.PollPriceInterval))
 
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Info("Context done, stopping trading bot run loop.", zap.String("pair", b.Config.Pair.String()))
+			logger.Info("Context done, stopping trading bot run loop")
 			return ctx.Err()
 		case <-ticker.C:
-			logger.Debug("Trade service tick", zap.String("pair", b.Config.Pair.String()))
 			tradeEvent, err := b.tradingStrategy.Trade(ctx)
 			if err != nil {
-				if errors.Is(err, strategy.ErrNoData) {
-					logger.Debug("Trading strategy returned no data, continuing", zap.String("pair", b.Config.Pair.String()))
-				} else {
-					logger.Error("Trading strategy failed", zap.String("pair", b.Config.Pair.String()), zap.Error(err))
+				if !errors.Is(err, strategy.ErrNoData) {
+					logger.Error("Trading strategy failed", zap.Error(err))
 				}
 				continue
 			}
 
 			if tradeEvent != nil {
-				logger.Info("Trade event occurred", zap.String("pair", b.Config.Pair.String()), zap.Any("event", tradeEvent))
+				logger.Info("Trade event occurred", zap.Any("event", tradeEvent))
 			}
 		}
 	}
