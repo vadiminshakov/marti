@@ -1,29 +1,29 @@
 # The trading pair. The pair should be in the format COIN1_COIN2.
 - pair: BTC_USDT
   platform: binance
-  # The percentage of available balance to be used for trading. The value should be in the range of 0 to 100.
-  amount: 38
+  # The percentage of available balance to be used for trading. The value should be in the range of 1 to 100.
+  amount: 20
   # The time interval between polling market prices to make trading decision (buy/sell/do nothing).
   pollpriceinterval: 5m
   # The maximum number of DCA trades to be executed.
-  max_dca_trades: 3
+  max_dca_trades: 35
   # The percentage of the price drop required to trigger a buy.
-  dca_percent_threshold_buy: 3.5
+  dca_percent_threshold_buy: 2
   # The percentage of the price rise required to trigger a sell.
-  dca_percent_threshold_sell: 66
+  dca_percent_threshold_sell: 20
 
 - pair: ETH_USDT
   platform: bybit
-  amount: 27
+  amount: 20
   pollpriceinterval: 5m
-  max_dca_trades: 3
-  dca_percent_threshold_buy: 3.5
-  dca_percent_threshold_sell: 66
+  max_dca_trades: 35
+  dca_percent_threshold_buy: 2
+  dca_percent_threshold_sell: 20
 
 - pair: BNB_USDT
   platform: binance
   amount: 20
   pollpriceinterval: 5m
-  max_dca_trades: 3
-  dca_percent_threshold_buy: 3.5
-  dca_percent_threshold_sell: 66
+  max_dca_trades: 35
+  dca_percent_threshold_buy: 2
+  dca_percent_threshold_sell: 20
