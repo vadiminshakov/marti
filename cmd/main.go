@@ -27,7 +27,9 @@ import (
 )
 
 func main() {
-	logger := zap.Must(zap.NewProduction())
+	cfg := zap.NewProductionConfig()
+	cfg.DisableStacktrace = true
+	logger := zap.Must(cfg.Build())
 	defer func() {
 		_ = logger.Sync()
 	}()
@@ -40,8 +42,6 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var wg sync.WaitGroup
-
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 
@@ -50,6 +50,8 @@ func main() {
 		logger.Info("Received shutdown signal, initiating graceful shutdown...")
 		cancel()
 	}()
+
+	var wg sync.WaitGroup
 
 	for _, cfg := range configs {
 		var client any
@@ -68,6 +70,10 @@ func main() {
 				logger.Fatal("Missing Bybit credentials", zap.String("platform", cfg.Platform))
 			}
 			client = clients.NewBybitClient(apiKey, apiSecret)
+		case "simulate":
+			logger.Info("Using simulation mode - no real trades will be executed",
+				zap.String("pair", cfg.Pair.String()))
+			client = clients.NewSimulateClient()
 		default:
 			logger.Fatal("Unsupported platform", zap.String("platform", cfg.Platform))
 		}
@@ -84,6 +90,7 @@ func main() {
 
 		wg.Go(func() {
 			defer bot.Close()
+		
 			if err := bot.Run(ctx, botLogger); err != nil {
 				botLogger.Error("Trading bot failed", zap.Error(err))
 			}

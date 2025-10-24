@@ -8,6 +8,7 @@ import (
 	bybit "github.com/hirokisan/bybit/v2"
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
+	"github.com/vadiminshakov/marti/internal/clients"
 	"github.com/vadiminshakov/marti/internal/entity"
 	"github.com/vadiminshakov/marti/internal/services/pricer"
 	"github.com/vadiminshakov/marti/internal/services/strategy"
@@ -19,6 +20,7 @@ type Trader interface {
 	Buy(ctx context.Context, amount decimal.Decimal, clientOrderID string) error
 	Sell(ctx context.Context, amount decimal.Decimal, clientOrderID string) error
 	OrderExecuted(ctx context.Context, clientOrderID string) (bool, decimal.Decimal, error)
+	GetBalance(ctx context.Context, currency string) (decimal.Decimal, error)
 }
 
 type Pricer interface {
@@ -56,6 +58,22 @@ func createTraderAndPricer(platform string, pair entity.Pair, client any) (Trade
 		pricerInstance := pricer.NewBybitPricer(bybitClient)
 		return traderInstance, pricerInstance, nil
 
+	case "simulate":
+		simulateClient, ok := client.(*clients.SimulateClient)
+		if !ok || simulateClient == nil {
+			return nil, nil, fmt.Errorf("simulate platform expects *clients.SimulateClient, got %T", client)
+		}
+
+		// Use logger from context or create a new one
+		logger := zap.L()
+		traderInstance, err := trader.NewSimulateTrader(pair, logger)
+		if err != nil {
+			return nil, nil, errors.Wrap(err, "failed to create SimulateTrader")
+		}
+
+		pricerInstance := pricer.NewSimulatePricer(simulateClient.GetBinanceClient())
+		return traderInstance, pricerInstance, nil
+
 	default:
 		return nil, nil, fmt.Errorf("unsupported platform: %s", platform)
 	}
@@ -65,7 +83,7 @@ func createTraderAndPricer(platform string, pair entity.Pair, client any) (Trade
 func createTradingStrategy(
 	logger *zap.Logger,
 	pair entity.Pair,
-	amount decimal.Decimal,
+	amountPercent decimal.Decimal,
 	pricer Pricer,
 	trader Trader,
 	maxDcaTrades int,
@@ -73,14 +91,23 @@ func createTradingStrategy(
 	dcaPercentThresholdSell decimal.Decimal,
 ) (TradingStrategy, error) {
 	// currently only DCA strategy is supported, but this can be extended
-	return strategy.NewDCAStrategy(
+	dcaStrategy, err := strategy.NewDCAStrategy(
 		logger,
 		pair,
-		amount,
+		amountPercent,
 		pricer,
 		trader,
 		maxDcaTrades,
 		dcaPercentThresholdBuy,
 		dcaPercentThresholdSell,
 	)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := dcaStrategy.SyncSimulationBalance(); err != nil {
+		return nil, errors.Wrap(err, "failed to sync simulation balance")
+	}
+
+	return dcaStrategy, nil
 }
