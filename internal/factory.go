@@ -8,8 +8,10 @@ import (
 	bybit "github.com/hirokisan/bybit/v2"
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
+	"github.com/vadiminshakov/marti/config"
 	"github.com/vadiminshakov/marti/internal/clients"
 	"github.com/vadiminshakov/marti/internal/entity"
+	"github.com/vadiminshakov/marti/internal/services/marketdata"
 	"github.com/vadiminshakov/marti/internal/services/pricer"
 	"github.com/vadiminshakov/marti/internal/services/strategy"
 	"github.com/vadiminshakov/marti/internal/services/trader"
@@ -79,8 +81,35 @@ func createTraderAndPricer(platform string, pair entity.Pair, client any) (Trade
 	}
 }
 
-// createTradingStrategy creates a trading strategy instance
+// createTradingStrategy creates a trading strategy instance based on configuration
 func createTradingStrategy(
+	logger *zap.Logger,
+	conf config.Config,
+	pricer Pricer,
+	trader Trader,
+	client any,
+) (TradingStrategy, error) {
+	switch conf.StrategyType {
+	case "dca":
+		return createDCAStrategy(
+			logger,
+			conf.Pair,
+			conf.AmountPercent,
+			pricer,
+			trader,
+			conf.MaxDcaTrades,
+			conf.DcaPercentThresholdBuy,
+			conf.DcaPercentThresholdSell,
+		)
+	case "ai":
+		return createAIStrategy(logger, conf, pricer, trader, client)
+	default:
+		return nil, fmt.Errorf("unsupported strategy type: %s", conf.StrategyType)
+	}
+}
+
+// createDCAStrategy creates a DCA trading strategy
+func createDCAStrategy(
 	logger *zap.Logger,
 	pair entity.Pair,
 	amountPercent decimal.Decimal,
@@ -90,7 +119,6 @@ func createTradingStrategy(
 	dcaPercentThresholdBuy decimal.Decimal,
 	dcaPercentThresholdSell decimal.Decimal,
 ) (TradingStrategy, error) {
-	// currently only DCA strategy is supported, but this can be extended
 	dcaStrategy, err := strategy.NewDCAStrategy(
 		logger,
 		pair,
@@ -110,4 +138,64 @@ func createTradingStrategy(
 	}
 
 	return dcaStrategy, nil
+}
+
+// createAIStrategy creates an AI trading strategy
+func createAIStrategy(
+	logger *zap.Logger,
+	conf config.Config,
+	pricer Pricer,
+	trader Trader,
+	client any,
+) (TradingStrategy, error) {
+	// Create LLM client
+	llmClient := clients.NewOpenAICompatibleClient(conf.LLMAPIURL, conf.LLMAPIKey, conf.Model)
+
+	// Create kline provider based on platform
+	var klineProvider marketdata.KlineProvider
+	switch conf.Platform {
+	case "binance":
+		binanceClient, ok := client.(*binance.Client)
+		if !ok {
+			return nil, fmt.Errorf("binance platform expects *binance.Client for AI strategy")
+		}
+		klineProvider = marketdata.NewBinanceKlineProvider(binanceClient)
+	case "bybit":
+		bybitClient, ok := client.(*bybit.Client)
+		if !ok {
+			return nil, fmt.Errorf("bybit platform expects *bybit.Client for AI strategy")
+		}
+		klineProvider = marketdata.NewBybitKlineProvider(bybitClient)
+	case "simulate":
+		simulateClient, ok := client.(*clients.SimulateClient)
+		if !ok {
+			return nil, fmt.Errorf("simulate platform expects *clients.SimulateClient for AI strategy")
+		}
+		klineProvider = marketdata.NewBinanceKlineProvider(simulateClient.GetBinanceClient())
+	default:
+		return nil, fmt.Errorf("unsupported platform for AI strategy: %s", conf.Platform)
+	}
+
+	// Create market data collector
+	marketDataCollector := marketdata.NewMarketDataCollector(
+		klineProvider,
+		conf.Pair,
+		conf.KlineInterval,
+		conf.LookbackPeriods,
+	)
+
+	// Create AI strategy
+	aiStrategy, err := strategy.NewAIStrategy(
+		logger,
+		conf.Pair,
+		llmClient,
+		marketDataCollector,
+		pricer,
+		trader,
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create AI strategy")
+	}
+
+	return aiStrategy, nil
 }

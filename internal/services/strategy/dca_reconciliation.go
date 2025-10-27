@@ -44,6 +44,12 @@ func (d *DCAStrategy) reconcileTradeIntents(ctx context.Context) error {
 
 // handlePendingIntent processes a single pending intent, waiting for its completion and applying changes.
 func (d *DCAStrategy) handlePendingIntent(ctx context.Context, intent *tradeIntentRecord) error {
+	// if trade already processed (applied to series), just mark intent as done
+	// this handles cases where app crashed between AddDCAPurchase and MarkDone
+	if d.isTradeProcessed(intent.ID) {
+		return d.ensureIntentMarkedDone(intent)
+	}
+
 	// wait for order completion with retries (waits indefinitely until executed)
 	executed, filledAmount, err := d.waitForOrderCompletion(ctx, intent, d.orderCheckInterval)
 	if err != nil {
@@ -60,15 +66,14 @@ func (d *DCAStrategy) handlePendingIntent(ctx context.Context, intent *tradeInte
 		return nil
 	}
 
-	if d.isTradeProcessed(intent.ID) {
-		return d.ensureIntentMarkedDone(intent)
-	}
-
 	return d.reconcileExecutedIntent(intent, filledAmount)
 }
 
 // waitForOrderCompletion polls the order status until it's fully executed.
 func (d *DCAStrategy) waitForOrderCompletion(ctx context.Context, intent *tradeIntentRecord, checkInterval time.Duration) (executed bool, filledAmount decimal.Decimal, err error) {
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+
 	for {
 		executed, filledAmount, err = d.trader.OrderExecuted(ctx, intent.ID)
 		if err != nil {
@@ -81,18 +86,14 @@ func (d *DCAStrategy) waitForOrderCompletion(ctx context.Context, intent *tradeI
 		}
 
 		// not fully executed yet - wait and retry indefinitely
-		if !filledAmount.IsZero() {
-			d.l.Debug("order partially filled, waiting for completion",
-				zap.String("intent_id", intent.ID),
-				zap.String("filled_amount", filledAmount.String()),
-				zap.String("requested_amount", intent.Amount.String()))
-		} else {
-			d.l.Debug("order not filled yet, waiting",
-				zap.String("intent_id", intent.ID),
-				zap.String("requested_amount", intent.Amount.String()))
+		select {
+		case <-ctx.Done():
+			d.l.Info("context cancelled while waiting for order completion, stopping reconciliation",
+				zap.String("intent_id", intent.ID))
+			return false, filledAmount, ctx.Err()
+		case <-ticker.C:
+			// continue to next iteration
 		}
-
-		time.Sleep(checkInterval)
 	}
 }
 
@@ -177,24 +178,25 @@ func (d *DCAStrategy) applyExecutedSell(intent *tradeIntentRecord) error {
 		return nil
 	}
 
-	amountToSell := intent.Amount
-	if amountToSell.GreaterThan(d.dcaSeries.TotalAmount) {
-		amountToSell = d.dcaSeries.TotalAmount
+	// intent.Amount is in quote currency (e.g., USDT)
+	amountQuoteCurrency := intent.Amount
+	if amountQuoteCurrency.GreaterThan(d.dcaSeries.TotalAmount) {
+		amountQuoteCurrency = d.dcaSeries.TotalAmount
 	}
 
-	if amountToSell.LessThanOrEqual(decimal.Zero) {
+	if amountQuoteCurrency.LessThanOrEqual(decimal.Zero) {
 		d.markTradeProcessed(intent.ID)
 		return d.saveDCASeries()
 	}
 
-	isFullSell := intent.IsFullSell || amountToSell.Equal(d.dcaSeries.TotalAmount)
+	isFullSell := intent.IsFullSell || amountQuoteCurrency.Equal(d.dcaSeries.TotalAmount)
 
 	if isFullSell {
-		d.l.Info("Full sell executed", zap.String("amountSold", amountToSell.String()))
+		d.l.Info("Full sell executed", zap.String("amountSoldQuote", amountQuoteCurrency.String()))
 		d.resetDCASeries(intent.Price)
 	} else {
-		d.l.Info("Partial sell executed", zap.String("amountSold", amountToSell.String()))
-		d.removeAmountFromPurchases(amountToSell)
+		d.l.Info("Partial sell executed", zap.String("amountSoldQuote", amountQuoteCurrency.String()))
+		d.removeAmountFromPurchases(amountQuoteCurrency)
 
 		// check if series is now empty after partial sell
 		if len(d.dcaSeries.Purchases) == 0 || d.dcaSeries.TotalAmount.LessThanOrEqual(decimal.Zero) {
@@ -202,6 +204,13 @@ func (d *DCAStrategy) applyExecutedSell(intent *tradeIntentRecord) error {
 				zap.String("remainingTotalAmount", d.dcaSeries.TotalAmount.String()))
 			d.resetDCASeries(intent.Price)
 		}
+	}
+
+	// Apply virtual trade if using simulation trader
+	// Convert quote currency to base currency for simulation trader
+	amountBaseCurrency := amountQuoteCurrency.Div(intent.Price)
+	if err := d.applySimulationTrade(intent.Price, amountBaseCurrency, "sell"); err != nil {
+		return err
 	}
 
 	d.markTradeProcessed(intent.ID)

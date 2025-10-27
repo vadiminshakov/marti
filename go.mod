@@ -13,6 +13,8 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
+require github.com/cinar/indicator/v2 v2.1.22 // indirect
+
 require (
 	github.com/bitly/go-simplejson v0.5.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect

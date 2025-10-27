@@ -48,13 +48,10 @@ func NewTradingBot(logger *zap.Logger, conf config.Config, client any) (*Trading
 
 	tradingStrategy, err := createTradingStrategy(
 		logger,
-		conf.Pair,
-		conf.AmountPercent,
+		conf,
 		currentPricer,
 		currentTrader,
-		conf.MaxDcaTrades,
-		conf.DcaPercentThresholdBuy,
-		conf.DcaPercentThresholdSell,
+		client,
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create trading strategy")

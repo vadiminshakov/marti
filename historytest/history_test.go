@@ -43,29 +43,29 @@ func TestProfit(t *testing.T) {
 		{
 			name:                    "1 year - Conservative buy",
 			duration:                8760,
-			maxDcaTrades:            3,
+			maxDcaTrades:            20,
 			dcaPercentThresholdBuy:  2,
-			dcaPercentThresholdSell: 60,
+			dcaPercentThresholdSell: 20,
 		},
 		{
 			name:                    "2 years - Conservative buy",
 			duration:                17520,
-			maxDcaTrades:            3,
+			maxDcaTrades:            40,
 			dcaPercentThresholdBuy:  2,
-			dcaPercentThresholdSell: 60,
+			dcaPercentThresholdSell: 20,
 		},
 		{
 			name:                    "1 year - Aggressive trades",
 			duration:                8760,
-			maxDcaTrades:            20,
-			dcaPercentThresholdBuy:  2,
+			maxDcaTrades:            100,
+			dcaPercentThresholdBuy:  0.5,
 			dcaPercentThresholdSell: 4,
 		},
 		{
 			name:                    "2 years - Aggressive trades",
 			duration:                17520,
-			maxDcaTrades:            20,
-			dcaPercentThresholdBuy:  2,
+			maxDcaTrades:            200,
+			dcaPercentThresholdBuy:  0.5,
 			dcaPercentThresholdSell: 4,
 		},
 	}
@@ -231,10 +231,17 @@ func createStrategyFactory(logger *zap.Logger, pair *entity.Pair, prices chan de
 		dcaPercentThresholdBuyDecimal := decimal.NewFromFloat(dcaPercentThresholdBuy)
 		dcaPercentThresholdSellDecimal := decimal.NewFromFloat(dcaPercentThresholdSell)
 
+		// For backtesting: use 20% to maximize capital utilization
+		// This means: use all available USDT balance for EACH trade
+		// Each buy order will use: current_balance * 20%
+		// This represents aggressive reinvestment strategy, good for backtesting
+		// maxDcaTrades only limits the number of buys in a series
+		amountPercent := decimal.NewFromInt(20)
+
 		dcaStrategy, err := strategy.NewDCAStrategy(
 			logger,
 			*pair,
-			balanceUSDT,
+			amountPercent,
 			pricer,
 			trader,
 			maxDcaTrades,

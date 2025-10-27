@@ -128,3 +128,15 @@ func (t *traderCsv) OrderExecuted(ctx context.Context, clientOrderID string) (bo
 	}
 	return true, amount, nil
 }
+
+// GetBalance returns the current balance for the specified currency.
+func (t *traderCsv) GetBalance(ctx context.Context, currency string) (decimal.Decimal, error) {
+	switch currency {
+	case t.pair.From:
+		return t.balance1, nil
+	case t.pair.To:
+		return t.balance2, nil
+	default:
+		return decimal.Zero, nil
+	}
+}

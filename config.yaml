@@ -1,6 +1,7 @@
 # The trading pair. The pair should be in the format COIN1_COIN2.
 - pair: BTC_USDT
   platform: binance
+  strategy: dca
   # The percentage of available balance to be used for trading. The value should be in the range of 1 to 100.
   amount: 20
   # The time interval between polling market prices to make trading decision (buy/sell/do nothing).
@@ -14,6 +15,7 @@
 
 - pair: ETH_USDT
   platform: bybit
+  strategy: dca
   amount: 20
   pollpriceinterval: 5m
   max_dca_trades: 35
@@ -22,8 +24,48 @@
 
 - pair: BNB_USDT
   platform: binance
+  strategy: dca
   amount: 20
   pollpriceinterval: 5m
   max_dca_trades: 35
   dca_percent_threshold_buy: 2
   dca_percent_threshold_sell: 20
+
+# Traditional DCA strategy simulation test config
+- pair: BTC_USDT
+  platform: simulate
+  strategy: dca
+  amount: 10
+  pollpriceinterval: 2s
+  max_dca_trades: 8
+  dca_percent_threshold_buy: 1
+  dca_percent_threshold_sell: 2
+
+
+# AI Strategy with Binance (SPOT trading only)
+- pair: BTC_USDT
+  platform: binance
+  strategy: ai
+  # LLM API endpoint (OpenRouter, or any OpenAI-compatible API)
+  llm_api_url: "https://openrouter.ai/api/v1/chat/completions"
+  llm_api_key: "sk-your-api-key-here"
+  # Model to use
+  # Examples: "deepseek/deepseek-chat", "openai/gpt-4", "anthropic/claude-3-sonnet"
+  model: "deepseek/deepseek-chat"
+  # Kline interval for market data (1m, 3m, 5m, 15m, 30m, 1h, 4h, etc.)
+  kline_interval: "3m"
+  # Number of historical periods to analyze (minimum 50 for indicators)
+  lookback_periods: 100
+  # How often to check price updates and make decisions
+  pollpriceinterval: 3m
+
+# AI Strategy with Simulate mode (for testing without real trading)
+- pair: ETH_USDT
+  platform: simulate
+  strategy: ai
+  llm_api_url: "https://openrouter.ai/api/v1/chat/completions"
+  llm_api_key: "sk-your-api-key-here"
+  model: "deepseek/deepseek-chat"
+  kline_interval: "5m"
+  lookback_periods: 50
+  pollpriceinterval: 5m

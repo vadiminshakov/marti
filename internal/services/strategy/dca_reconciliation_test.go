@@ -13,9 +13,13 @@ import (
 	traderMock "github.com/vadiminshakov/marti/mocks/trader"
 )
 
+// testBuyAmount is the standard buy amount for tests (10% of 10000 USDT = 1000 USDT)
+var testBuyAmount = decimal.NewFromInt(1000)
+
 func TestDCAStrategy_ReconcileExecutedBuyIntent(t *testing.T) {
 	mockPricer := pricerMock.NewPricer(t)
 	mockTrader := traderMock.NewTrader(t)
+	mockStandardBalances(mockTrader)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
@@ -24,7 +28,7 @@ func TestDCAStrategy_ReconcileExecutedBuyIntent(t *testing.T) {
 		ID:        "intent-buy-1",
 		Status:    tradeIntentStatusPending,
 		Action:    intentActionBuy,
-		Amount:    ts.individualBuyAmount,
+		Amount:    testBuyAmount,
 		Price:     decimal.NewFromInt(48000),
 		Time:      time.Now(),
 		TradePart: 1,
@@ -50,14 +54,15 @@ func TestDCAStrategy_ReconcileExecutedBuyIntent(t *testing.T) {
 func TestDCAStrategy_ReconcileExecutedSellIntentFullReset(t *testing.T) {
 	mockPricer := pricerMock.NewPricer(t)
 	mockTrader := traderMock.NewTrader(t)
+	mockStandardBalances(mockTrader)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
 	// seed series with one purchase
-	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), ts.individualBuyAmount, time.Now(), 1)
+	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), testBuyAmount, time.Now(), 1)
 	require.NoError(t, err)
-	require.Equal(t, ts.individualBuyAmount, ts.dcaSeries.TotalAmount)
+	require.Equal(t, testBuyAmount, ts.dcaSeries.TotalAmount)
 
 	intent := &tradeIntentRecord{
 		ID:         "intent-sell-full",
@@ -87,27 +92,28 @@ func TestDCAStrategy_ReconcilePendingIntentPartialFillThenComplete(t *testing.T)
 	synctest.Test(t, func(t *testing.T) {
 		mockPricer := pricerMock.NewPricer(t)
 		mockTrader := traderMock.NewTrader(t)
+		mockStandardBalances(mockTrader)
 
 		ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 		defer ts.Close()
 
 		ts.orderCheckInterval = time.Millisecond
 
-		err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), ts.individualBuyAmount, time.Now(), 1)
+		err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), testBuyAmount, time.Now(), 1)
 		require.NoError(t, err)
 
 		intent := &tradeIntentRecord{
 			ID:     "intent-partial-done",
 			Status: tradeIntentStatusPending,
 			Action: intentActionSell,
-			Amount: ts.individualBuyAmount,
+			Amount: testBuyAmount,
 			Price:  decimal.NewFromInt(55000),
 			Time:   time.Now(),
 		}
 		ts.journal.intents = append(ts.journal.intents, intent)
 		ts.journal.index[intent.ID] = intent
 
-		partialFill := ts.individualBuyAmount.Div(decimal.NewFromInt(2))
+		partialFill := testBuyAmount.Div(decimal.NewFromInt(2))
 
 		// return partial fill a few times, then complete
 		callCount := 0
@@ -118,7 +124,7 @@ func TestDCAStrategy_ReconcilePendingIntentPartialFillThenComplete(t *testing.T)
 			},
 			func(ctx context.Context, id string) decimal.Decimal {
 				if callCount > 3 {
-					return ts.individualBuyAmount // full amount when executed
+					return testBuyAmount // full amount when executed
 				}
 				return partialFill
 			},
@@ -140,18 +146,19 @@ func TestDCAStrategy_ReconcilePendingIntentPartialFillThenComplete(t *testing.T)
 func TestDCAStrategy_ReconcilePartialSell(t *testing.T) {
 	mockPricer := pricerMock.NewPricer(t)
 	mockTrader := traderMock.NewTrader(t)
+	mockStandardBalances(mockTrader)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
 	// add two purchases to have enough balance
-	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), ts.individualBuyAmount, time.Now(), 1)
+	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), testBuyAmount, time.Now(), 1)
 	require.NoError(t, err)
-	err = ts.AddDCAPurchase("", decimal.NewFromInt(50000), ts.individualBuyAmount, time.Now(), 2)
+	err = ts.AddDCAPurchase("", decimal.NewFromInt(50000), testBuyAmount, time.Now(), 2)
 	require.NoError(t, err)
 
 	initialTotal := ts.dcaSeries.TotalAmount
-	sellAmount := ts.individualBuyAmount // sell only one purchase worth
+	sellAmount := testBuyAmount // sell only one purchase worth
 
 	intent := &tradeIntentRecord{
 		ID:         "intent-partial-sell",
@@ -179,6 +186,7 @@ func TestDCAStrategy_ReconcilePartialSell(t *testing.T) {
 func TestDCAStrategy_ReconcileValidationFailureZeroAmount(t *testing.T) {
 	mockPricer := pricerMock.NewPricer(t)
 	mockTrader := traderMock.NewTrader(t)
+	mockStandardBalances(mockTrader)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
@@ -187,7 +195,7 @@ func TestDCAStrategy_ReconcileValidationFailureZeroAmount(t *testing.T) {
 		ID:     "intent-zero-fill",
 		Status: tradeIntentStatusPending,
 		Action: intentActionBuy,
-		Amount: ts.individualBuyAmount,
+		Amount: testBuyAmount,
 		Price:  decimal.NewFromInt(48000),
 		Time:   time.Now(),
 	}
@@ -207,6 +215,7 @@ func TestDCAStrategy_ReconcileValidationFailureZeroAmount(t *testing.T) {
 func TestDCAStrategy_ReconcileAlreadyProcessedIntent(t *testing.T) {
 	mockPricer := pricerMock.NewPricer(t)
 	mockTrader := traderMock.NewTrader(t)
+	mockStandardBalances(mockTrader)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
@@ -215,7 +224,7 @@ func TestDCAStrategy_ReconcileAlreadyProcessedIntent(t *testing.T) {
 		ID:        "intent-already-processed",
 		Status:    tradeIntentStatusPending,
 		Action:    intentActionBuy,
-		Amount:    ts.individualBuyAmount,
+		Amount:    testBuyAmount,
 		Price:     decimal.NewFromInt(48000),
 		Time:      time.Now(),
 		TradePart: 1,
@@ -227,8 +236,7 @@ func TestDCAStrategy_ReconcileAlreadyProcessedIntent(t *testing.T) {
 	err := ts.AddDCAPurchase(intent.ID, intent.Price, intent.Amount, intent.Time, intent.TradePart)
 	require.NoError(t, err)
 
-	mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(true, intent.Amount, nil)
-
+	// OrderExecuted should NOT be called because isTradeProcessed returns true
 	// reconcile should not double-apply
 	err = ts.reconcileTradeIntents(context.Background())
 	require.NoError(t, err)
@@ -241,11 +249,12 @@ func TestDCAStrategy_ReconcileAlreadyProcessedIntent(t *testing.T) {
 func TestDCAStrategy_ReconcileAmountUpdateOnPartialFill(t *testing.T) {
 	mockPricer := pricerMock.NewPricer(t)
 	mockTrader := traderMock.NewTrader(t)
+	mockStandardBalances(mockTrader)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	requestedAmount := ts.individualBuyAmount
+	requestedAmount := testBuyAmount
 	actualFilledAmount := requestedAmount.Mul(decimal.NewFromFloat(0.8)) // only 80% filled
 
 	intent := &tradeIntentRecord{
@@ -274,6 +283,7 @@ func TestDCAStrategy_ReconcileAmountUpdateOnPartialFill(t *testing.T) {
 func TestDCAStrategy_ReconcileMultiplePendingIntents(t *testing.T) {
 	mockPricer := pricerMock.NewPricer(t)
 	mockTrader := traderMock.NewTrader(t)
+	mockStandardBalances(mockTrader)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
@@ -283,7 +293,7 @@ func TestDCAStrategy_ReconcileMultiplePendingIntents(t *testing.T) {
 		ID:        "intent-buy-1",
 		Status:    tradeIntentStatusPending,
 		Action:    intentActionBuy,
-		Amount:    ts.individualBuyAmount,
+		Amount:    testBuyAmount,
 		Price:     decimal.NewFromInt(48000),
 		Time:      time.Now(),
 		TradePart: 1,
@@ -292,7 +302,7 @@ func TestDCAStrategy_ReconcileMultiplePendingIntents(t *testing.T) {
 		ID:        "intent-buy-2",
 		Status:    tradeIntentStatusPending,
 		Action:    intentActionBuy,
-		Amount:    ts.individualBuyAmount,
+		Amount:    testBuyAmount,
 		Price:     decimal.NewFromInt(47000),
 		Time:      time.Now(),
 		TradePart: 2,
@@ -301,7 +311,7 @@ func TestDCAStrategy_ReconcileMultiplePendingIntents(t *testing.T) {
 		ID:        "intent-buy-3",
 		Status:    tradeIntentStatusPending,
 		Action:    intentActionBuy,
-		Amount:    ts.individualBuyAmount,
+		Amount:    testBuyAmount,
 		Price:     decimal.NewFromInt(46000),
 		Time:      time.Now(),
 		TradePart: 3,
@@ -323,18 +333,19 @@ func TestDCAStrategy_ReconcileMultiplePendingIntents(t *testing.T) {
 	require.Equal(t, tradeIntentStatusDone, ts.journal.index[intent2.ID].Status, "intent 2 should be done")
 	require.Equal(t, tradeIntentStatusDone, ts.journal.index[intent3.ID].Status, "intent 3 should be done")
 	require.Len(t, ts.dcaSeries.Purchases, 3, "should have three purchases")
-	require.True(t, ts.dcaSeries.TotalAmount.Equal(ts.individualBuyAmount.Mul(decimal.NewFromInt(3))), "total should be sum of all purchases")
+	require.True(t, ts.dcaSeries.TotalAmount.Equal(testBuyAmount.Mul(decimal.NewFromInt(3))), "total should be sum of all purchases")
 }
 
 func TestDCAStrategy_ReconcilePartialSellLeadingToZeroBalance(t *testing.T) {
 	mockPricer := pricerMock.NewPricer(t)
 	mockTrader := traderMock.NewTrader(t)
+	mockStandardBalances(mockTrader)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
 	// add one purchase
-	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), ts.individualBuyAmount, time.Now(), 1)
+	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), testBuyAmount, time.Now(), 1)
 	require.NoError(t, err)
 
 	// partial sell intent but amount equals total (edge case: not marked as full sell but sells everything)
@@ -342,7 +353,7 @@ func TestDCAStrategy_ReconcilePartialSellLeadingToZeroBalance(t *testing.T) {
 		ID:         "intent-partial-to-zero",
 		Status:     tradeIntentStatusPending,
 		Action:     intentActionSell,
-		Amount:     ts.individualBuyAmount,
+		Amount:     testBuyAmount,
 		Price:      decimal.NewFromInt(55000),
 		Time:       time.Now(),
 		IsFullSell: false, // intentionally not marked as full sell
