@@ -19,11 +19,13 @@ import (
 	"go.uber.org/zap"
 )
 
-type Trader interface {
+type traderService interface {
 	Buy(ctx context.Context, amount decimal.Decimal, clientOrderID string) error
 	Sell(ctx context.Context, amount decimal.Decimal, clientOrderID string) error
 	OrderExecuted(ctx context.Context, clientOrderID string) (bool, decimal.Decimal, error)
 	GetBalance(ctx context.Context, currency string) (decimal.Decimal, error)
+	GetPosition(ctx context.Context, pair entity.Pair) (*entity.Position, error)
+	UpdatePositionStops(ctx context.Context, pair entity.Pair, takeProfit, stopLoss decimal.Decimal) error
 }
 
 type Pricer interface {
@@ -31,7 +33,7 @@ type Pricer interface {
 }
 
 // createTraderAndPricer creates trader and pricer instances based on platform
-func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.MarketType, leverage int, client any) (Trader, Pricer, error) {
+func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.MarketType, leverage int, client any) (traderService, Pricer, error) {
 	switch platform {
 	case "binance":
 		binanceClient, ok := client.(*binance.Client)
@@ -87,7 +89,7 @@ func createTradingStrategy(
 	logger *zap.Logger,
 	conf config.Config,
 	pricer Pricer,
-	trader Trader,
+	tradeSvc traderService,
 	client any,
 ) (TradingStrategy, error) {
 	switch conf.StrategyType {
@@ -97,13 +99,13 @@ func createTradingStrategy(
 			conf.Pair,
 			conf.AmountPercent,
 			pricer,
-			trader,
+			tradeSvc,
 			conf.MaxDcaTrades,
 			conf.DcaPercentThresholdBuy,
 			conf.DcaPercentThresholdSell,
 		)
 	case "ai":
-		return createAIStrategy(logger, conf, pricer, trader, client)
+		return createAIStrategy(logger, conf, pricer, tradeSvc, client)
 	default:
 		return nil, fmt.Errorf("unsupported strategy type: %s", conf.StrategyType)
 	}
@@ -115,7 +117,7 @@ func createDCAStrategy(
 	pair entity.Pair,
 	amountPercent decimal.Decimal,
 	pricer Pricer,
-	trader Trader,
+	tradeSvc traderService,
 	maxDcaTrades int,
 	dcaPercentThresholdBuy decimal.Decimal,
 	dcaPercentThresholdSell decimal.Decimal,
@@ -125,7 +127,7 @@ func createDCAStrategy(
 		pair,
 		amountPercent,
 		pricer,
-		trader,
+		tradeSvc,
 		maxDcaTrades,
 		dcaPercentThresholdBuy,
 		dcaPercentThresholdSell,
@@ -146,7 +148,7 @@ func createAIStrategy(
 	logger *zap.Logger,
 	conf config.Config,
 	pricer Pricer,
-	trader Trader,
+	tradeSvc traderService,
 	client any,
 ) (TradingStrategy, error) {
 	// Create LLM client
@@ -183,14 +185,19 @@ func createAIStrategy(
 		conf.Pair,
 	)
 
+	if conf.MarketType != entity.MarketTypeMargin {
+		return nil, fmt.Errorf("AI strategy supports only margin market type, got %s", conf.MarketType)
+	}
+
 	// Create AI strategy
 	aiStrategy, err := ai.NewAIStrategy(
 		logger,
 		conf.Pair,
+		conf.MarketType,
 		llmClient,
 		marketDataCollector,
 		pricer,
-		trader,
+		tradeSvc,
 		conf.PrimaryTimeframe,
 		conf.HigherTimeframe,
 		conf.LookbackPeriods,

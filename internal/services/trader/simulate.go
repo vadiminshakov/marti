@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
@@ -29,6 +30,9 @@ type SimulateTrader struct {
 
 	// Track executed orders
 	executedOrders map[string]orderInfo
+
+	// Simulated open position (long-only)
+	position *entity.Position
 }
 
 type orderInfo struct {
@@ -44,8 +48,8 @@ func NewSimulateTrader(pair entity.Pair, logger *zap.Logger) (*SimulateTrader, e
 
 	// Initialize with default virtual balance
 	balances := make(map[string]decimal.Decimal)
-	balances[pair.From] = decimal.Zero               // e.g., BTC: 0
-	balances[pair.To] = decimal.NewFromInt(10000)    // e.g., USDT: 10000
+	balances[pair.From] = decimal.Zero            // e.g., BTC: 0
+	balances[pair.To] = decimal.NewFromInt(10000) // e.g., USDT: 10000
 
 	logger.Info("Initialized simulate trader",
 		zap.String("pair", pair.String()),
@@ -58,6 +62,7 @@ func NewSimulateTrader(pair entity.Pair, logger *zap.Logger) (*SimulateTrader, e
 		logger:         logger,
 		balances:       balances,
 		executedOrders: make(map[string]orderInfo),
+		position:       nil,
 	}, nil
 }
 
@@ -162,6 +167,27 @@ func (t *SimulateTrader) ApplyTrade(price decimal.Decimal, amount decimal.Decima
 		t.balances[t.pair.To] = t.balances[t.pair.To].Sub(quoteSpent)
 		t.balances[t.pair.From] = t.balances[t.pair.From].Add(baseAmount)
 
+		entryTime := time.Now()
+
+		if t.position == nil {
+			pos, err := entity.NewPositionFromExternalSnapshot(baseAmount, price, entryTime)
+			if err != nil {
+				return errors.Wrap(err, "failed to record simulated position")
+			}
+			t.position = pos
+		} else {
+			totalBase := t.position.Amount.Add(baseAmount)
+			if totalBase.GreaterThan(decimal.Zero) {
+				// Weighted average price using total quote spent
+				existingQuote := t.position.EntryPrice.Mul(t.position.Amount)
+				totalQuote := existingQuote.Add(quoteSpent)
+
+				t.position.Amount = totalBase
+				t.position.EntryPrice = totalQuote.Div(totalBase)
+				t.position.EntryTime = entryTime
+			}
+		}
+
 		t.logger.Info("Applied simulated buy trade",
 			zap.String("pair", t.pair.String()),
 			zap.String("price", price.String()),
@@ -185,6 +211,15 @@ func (t *SimulateTrader) ApplyTrade(price decimal.Decimal, amount decimal.Decima
 		t.balances[t.pair.From] = t.balances[t.pair.From].Sub(baseAmount)
 		t.balances[t.pair.To] = t.balances[t.pair.To].Add(quoteReceived)
 
+		if t.position != nil {
+			remaining := t.position.Amount.Sub(baseAmount)
+			if remaining.LessThanOrEqual(decimal.Zero) {
+				t.position = nil
+			} else {
+				t.position.Amount = remaining
+			}
+		}
+
 		t.logger.Info("Applied simulated sell trade",
 			zap.String("pair", t.pair.String()),
 			zap.String("price", price.String()),
@@ -205,4 +240,41 @@ func (t *SimulateTrader) GetBalance(ctx context.Context, currency string) (decim
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.balances[currency], nil
+}
+
+// GetPosition returns the current simulated position (if any).
+func (t *SimulateTrader) GetPosition(ctx context.Context, pair entity.Pair) (*entity.Position, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	if pair != t.pair || t.position == nil {
+		return nil, nil
+	}
+
+	clone := *t.position
+	return &clone, nil
+}
+
+// UpdatePositionStops updates the simulated stop loss / take profit levels.
+func (t *SimulateTrader) UpdatePositionStops(ctx context.Context, pair entity.Pair, takeProfit, stopLoss decimal.Decimal) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if pair != t.pair || t.position == nil {
+		return nil
+	}
+
+	if takeProfit.GreaterThan(decimal.Zero) {
+		t.position.TakeProfit = takeProfit
+	} else {
+		t.position.TakeProfit = decimal.Zero
+	}
+
+	if stopLoss.GreaterThan(decimal.Zero) {
+		t.position.StopLoss = stopLoss
+	} else {
+		t.position.StopLoss = decimal.Zero
+	}
+
+	return nil
 }

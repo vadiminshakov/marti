@@ -200,11 +200,6 @@ func getYaml(path string) ([]Config, error) {
 			return nil, fmt.Errorf("leverage > 1 is not allowed for spot trading (market_type: spot). Use market_type: margin for leverage trading")
 		}
 
-		// Validate: AI strategy does not support leverage parameter
-		if strategyType == "ai" && (c.LeverageStr != "" || leverage > 1) {
-			return nil, fmt.Errorf("leverage parameter is not supported for AI strategy. AI strategy manages position sizing internally. Please remove the 'leverage' parameter from your config")
-		}
-
 		// Initialize newConfig correctly for each iteration
 		newConfig := Config{
 			Platform:          c.Platform,

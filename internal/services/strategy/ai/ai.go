@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
@@ -15,17 +14,21 @@ import (
 	"github.com/vadiminshakov/marti/internal/services/market/analysis"
 	"github.com/vadiminshakov/marti/internal/services/market/collector"
 	"github.com/vadiminshakov/marti/internal/services/promptbuilder"
+	"github.com/vadiminshakov/marti/internal/services/trader"
 	"go.uber.org/zap"
 )
 
 // defaultHigherTimeframeLookback is used when not provided explicitly
 const defaultHigherTimeframeLookback = 60
 
+// tradersvc abstracts the exchange operations required for the AI margin strategy.
 type tradersvc interface {
 	Buy(ctx context.Context, amount decimal.Decimal, clientOrderID string) error
 	Sell(ctx context.Context, amount decimal.Decimal, clientOrderID string) error
 	OrderExecuted(ctx context.Context, clientOrderID string) (executed bool, filledAmount decimal.Decimal, err error)
 	GetBalance(ctx context.Context, currency string) (decimal.Decimal, error)
+	GetPosition(ctx context.Context, pair entity.Pair) (*entity.Position, error)
+	UpdatePositionStops(ctx context.Context, pair entity.Pair, takeProfit, stopLoss decimal.Decimal) error
 }
 
 type pricer interface {
@@ -33,10 +36,10 @@ type pricer interface {
 }
 
 // AIStrategy implements trading strategy using AI/LLM for decision making.
-// The strategy is stateless - position state is derived from exchange balance.
-// This is for SPOT trading only - no leverage or margin.
+// The strategy operates in linear margin mode and derives its position state directly from the exchange.
 type AIStrategy struct {
 	pair             entity.Pair
+	marketType       entity.MarketType
 	llmClient        clients.LLMClient
 	marketData       *collector.MarketDataCollector
 	pricer           pricer
@@ -80,15 +83,20 @@ func (s MarketSnapshot) Price() decimal.Decimal {
 func NewAIStrategy(
 	logger *zap.Logger,
 	pair entity.Pair,
+	marketType entity.MarketType,
 	llmClient clients.LLMClient,
 	marketData *collector.MarketDataCollector,
 	pricer pricer,
-	trader tradersvc,
+	tradeSvc tradersvc,
 	primaryTimeframe string,
 	higherTimeframe string,
 	primaryLookback int,
 	higherLookback int,
 ) (*AIStrategy, error) {
+	if marketType != entity.MarketTypeMargin {
+		return nil, fmt.Errorf("AI strategy requires margin market type, got %s", marketType)
+	}
+
 	marketAnalyzer := analysis.NewMarketAnalyzer(logger)
 	promptBuilder := promptbuilder.NewPromptBuilder(pair, logger)
 
@@ -103,10 +111,11 @@ func NewAIStrategy(
 
 	return &AIStrategy{
 		pair:             pair,
+		marketType:       marketType,
 		llmClient:        llmClient,
 		marketData:       marketData,
 		pricer:           pricer,
-		trader:           trader,
+		trader:           tradeSvc,
 		logger:           logger,
 		marketAnalyzer:   marketAnalyzer,
 		promptBuilder:    promptBuilder,
@@ -122,27 +131,22 @@ func (s *AIStrategy) Initialize(ctx context.Context) error {
 	s.logger.Info("Initializing AI strategy",
 		zap.String("pair", s.pair.String()))
 
-	// check current balances
-	baseBalance, err := s.trader.GetBalance(ctx, s.pair.From)
-	if err != nil {
-		s.logger.Warn("Failed to get base currency balance", zap.Error(err))
+	fields := []zap.Field{
+		zap.String("pair", s.pair.String()),
+		zap.String("mode", s.marketType.String()),
 	}
+
 	quoteBalance, err := s.trader.GetBalance(ctx, s.pair.To)
 	if err != nil {
 		s.logger.Warn("Failed to get quote currency balance", zap.Error(err))
+	} else {
+		fields = append(fields,
+			zap.String(s.pair.To+"_balance", quoteBalance.String()))
 	}
 
-	s.logger.Info("Starting AI trading strategy",
-		zap.String("pair", s.pair.String()),
-		zap.String(s.pair.From+"_balance", baseBalance.String()),
-		zap.String(s.pair.To+"_balance", quoteBalance.String()))
+	s.logger.Info("Starting AI trading strategy", fields...)
 
-	// if we have a base currency balance, we may have an open position from previous session
-	// AI will evaluate it on the next Trade() call and decide what to do
-	if baseBalance.GreaterThan(decimal.Zero) {
-		s.logger.Info("Detected existing position, AI will evaluate on next iteration",
-			zap.String("amount", baseBalance.String()))
-	}
+	s.refreshPosition(ctx)
 
 	return nil
 }
@@ -165,23 +169,25 @@ func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 
 	currentPrice := primaryFrame.Summary.Price
 
-	// get current balances
-	baseBalance, err := s.trader.GetBalance(ctx, s.pair.From)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get base balance")
-	}
 	quoteBalance, err := s.trader.GetBalance(ctx, s.pair.To)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to get quote balance")
+		return nil, errors.Wrap(err, "failed to get margin balance")
 	}
 
-	s.logger.Info("Market analysis",
-		zap.String("price", currentPrice.StringFixed(2)),
-		zap.String(s.pair.From+"_balance", baseBalance.StringFixed(8)),
-		zap.String(s.pair.To+"_balance", quoteBalance.StringFixed(2)))
+	s.refreshPosition(ctx)
 
-	// sync position state with actual balance
-	s.syncPositionWithBalance(baseBalance, currentPrice)
+	logFields := []zap.Field{
+		zap.String("price", currentPrice.StringFixed(2)),
+		zap.String(s.pair.To+"_balance", quoteBalance.StringFixed(2)),
+	}
+
+	if s.currentPosition != nil {
+		logFields = append(logFields,
+			zap.String("position_amount", s.currentPosition.Amount.StringFixed(8)),
+			zap.String("position_entry", s.currentPosition.EntryPrice.StringFixed(2)))
+	}
+
+	s.logger.Info("Market analysis", logFields...)
 
 	// fetch higher timeframe data for multi-timeframe analysis
 	higherTimeframeData, err := s.marketData.FetchTimeframeData(ctx, s.higherTimeframe, s.higherLookback)
@@ -251,49 +257,42 @@ func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 	return s.executeDecision(ctx, decision, snapshot)
 }
 
-// syncPositionWithBalance synchronizes position state with actual exchange balance
-// syncPositionWithBalance derives / reconciles in-memory position state from the live base asset balance.
-// The AI strategy is designed to be stateless: the exchange (or simulated) spot balance is the single
-// source of truth for whether a position is open and for its current size.
-//
-// Rules:
-//  1. baseBalance > 0 AND no currentPosition -> reconstruct a lightweight position via NewPositionFromSnapshot.
-//     The entry price is approximated by currentPrice because the true historical fill price may not be
-//     available after a restart; risk controls (SL/TP/Invalidation) are intentionally left blank.
-//  2. baseBalance > 0 AND currentPosition exists -> update position.Amount if it changed (e.g. fees, partial fills).
-//  3. baseBalance == 0 -> clear currentPosition (position considered closed externally or previously sold).
-//
-// Rationale:
-// - Allows the bot to resume after a crash/restart without having persisted internal state.
-// - Avoids acting on stale position metadata; only size and a best-effort entry price are reconstructed.
-func (s *AIStrategy) syncPositionWithBalance(baseBalance, currentPrice decimal.Decimal) {
-	// if we have balance but no position, reconstruct it
-	if baseBalance.GreaterThan(decimal.Zero) {
-		if s.currentPosition == nil {
-			recovered, err := entity.NewPositionFromExternalSnapshot(baseBalance, currentPrice, time.Now())
-			if err != nil {
-				s.logger.Warn("Failed to reconstruct position from balance", zap.Error(err))
-				return
-			}
-			s.currentPosition = recovered
-			s.logger.Info("Created position record from balance",
-				zap.String("amount", baseBalance.String()),
-				zap.String("approx_entry", currentPrice.String()))
-			return
-		}
+// refreshPosition pulls the latest margin position state from the exchange.
+func (s *AIStrategy) refreshPosition(ctx context.Context) {
+	position, err := s.trader.GetPosition(ctx, s.pair)
+	if err != nil {
+		s.logger.Warn("Failed to refresh margin position from exchange", zap.Error(err))
+		return
+	}
 
-		oldAmount := s.currentPosition.Amount
-		if s.currentPosition.UpdateAmount(baseBalance) {
-			s.logger.Info("Updating position amount from balance",
-				zap.String("old", oldAmount.String()),
-				zap.String("new", baseBalance.String()))
-		}
-	} else {
-		// no balance - clear position
+	if position == nil || position.Amount.LessThanOrEqual(decimal.Zero) {
 		if s.currentPosition != nil {
-			s.logger.Info("Clearing position - no balance detected")
-			s.currentPosition = nil
+			s.logger.Info("Clearing position - exchange reports no open margin position")
 		}
+		s.currentPosition = nil
+		return
+	}
+
+	prev := s.currentPosition
+	s.currentPosition = position
+
+	if prev == nil {
+		s.logger.Info("Tracked margin position initialized from exchange",
+			zap.String("amount", position.Amount.String()),
+			zap.String("entry_price", position.EntryPrice.String()))
+		return
+	}
+
+	if !prev.Amount.Equal(position.Amount) {
+		s.logger.Info("Margin position size updated",
+			zap.String("old", prev.Amount.String()),
+			zap.String("new", position.Amount.String()))
+	}
+
+	if !prev.EntryPrice.Equal(position.EntryPrice) {
+		s.logger.Info("Margin position entry price updated",
+			zap.String("old", prev.EntryPrice.String()),
+			zap.String("new", position.EntryPrice.String()))
 	}
 }
 
@@ -381,13 +380,24 @@ func (s *AIStrategy) executeBuy(
 		return nil, errors.Wrap(err, "failed to execute buy order")
 	}
 
-	// Create position record
-	position, err := entity.NewPosition(amount, snapshot.Price(), time.Now(), decision.Decision.ExitPlan)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create position")
+	if sim, ok := s.trader.(trader.SimulationTrader); ok {
+		if err := sim.ApplyTrade(snapshot.Price(), positionValue, "buy"); err != nil {
+			s.logger.Warn("Failed to apply simulated buy trade",
+				zap.Error(err))
+		}
 	}
 
-	s.currentPosition = position
+	exitPlan := decision.Decision.ExitPlan
+	takeProfit := decimal.NewFromFloat(exitPlan.TakeProfitPrice)
+	stopLoss := decimal.NewFromFloat(exitPlan.StopLossPrice)
+
+	if takeProfit.GreaterThan(decimal.Zero) || stopLoss.GreaterThan(decimal.Zero) {
+		if err := s.trader.UpdatePositionStops(ctx, s.pair, takeProfit, stopLoss); err != nil {
+			s.logger.Warn("Failed to update position stops on exchange", zap.Error(err))
+		}
+	}
+
+	s.refreshPosition(ctx)
 
 	return &entity.TradeEvent{
 		Action: entity.ActionBuy,
@@ -404,32 +414,42 @@ func (s *AIStrategy) executeClose(ctx context.Context, currentPrice decimal.Deci
 		return nil, nil
 	}
 
+	position := s.currentPosition
+
 	orderID := uuid.New().String()
 
 	s.logger.Info("Closing position",
-		zap.String("entry_price", s.currentPosition.EntryPrice.String()),
+		zap.String("entry_price", position.EntryPrice.String()),
 		zap.String("current_price", currentPrice.String()),
-		zap.String("amount", s.currentPosition.Amount.String()),
+		zap.String("amount", position.Amount.String()),
 		zap.String("order_id", orderID))
 
-	if err := s.trader.Sell(ctx, s.currentPosition.Amount, orderID); err != nil {
+	if err := s.trader.Sell(ctx, position.Amount, orderID); err != nil {
 		return nil, errors.Wrap(err, "failed to execute sell order")
 	}
 
+	if sim, ok := s.trader.(trader.SimulationTrader); ok {
+		if err := sim.ApplyTrade(currentPrice, position.Amount, "sell"); err != nil {
+			s.logger.Warn("Failed to apply simulated sell trade",
+				zap.Error(err))
+		}
+	}
+
 	// Calculate P&L
-	pnl := s.currentPosition.PnL(currentPrice)
+	pnl := position.PnL(currentPrice)
 	s.logger.Info("Position closed",
 		zap.String("pnl", pnl.String()))
 
 	tradeEvent := &entity.TradeEvent{
 		Action: entity.ActionSell,
-		Amount: s.currentPosition.Amount,
+		Amount: position.Amount,
 		Pair:   s.pair,
 		Price:  currentPrice,
 	}
 
 	// Clear position
 	s.currentPosition = nil
+	s.refreshPosition(ctx)
 
 	return tradeEvent, nil
 }

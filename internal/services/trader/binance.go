@@ -2,6 +2,8 @@ package trader
 
 import (
 	"context"
+	"sort"
+	"time"
 
 	"github.com/adshao/go-binance/v2"
 	"github.com/adshao/go-binance/v2/common"
@@ -158,4 +160,105 @@ func (t *BinanceTrader) GetBalance(ctx context.Context, currency string) (decima
 	}
 
 	return decimal.Zero, nil
+}
+
+func (t *BinanceTrader) GetPosition(ctx context.Context, pair entity.Pair) (*entity.Position, error) {
+	if t.marketType != entity.MarketTypeMargin {
+		return nil, nil
+	}
+
+	trades, err := t.client.NewListMarginTradesService().
+		Symbol(pair.Symbol()).
+		Do(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to list binance margin trades")
+	}
+
+	if len(trades) == 0 {
+		return nil, nil
+	}
+
+	sort.Slice(trades, func(i, j int) bool {
+		return trades[i].Time < trades[j].Time
+	})
+
+	totalQty := decimal.Zero
+	totalCost := decimal.Zero
+	var entryTime time.Time
+
+	for _, trade := range trades {
+		qty, parseErr := decimal.NewFromString(trade.Quantity)
+		if parseErr != nil {
+			return nil, errors.Wrap(parseErr, "failed to parse trade quantity")
+		}
+
+		price, parseErr := decimal.NewFromString(trade.Price)
+		if parseErr != nil {
+			return nil, errors.Wrap(parseErr, "failed to parse trade price")
+		}
+
+		tradeTime := time.UnixMilli(trade.Time)
+
+		if trade.IsBuyer {
+			if totalQty.LessThanOrEqual(decimal.Zero) {
+				entryTime = tradeTime
+			}
+			totalCost = totalCost.Add(price.Mul(qty))
+			totalQty = totalQty.Add(qty)
+		} else {
+			if totalQty.LessThanOrEqual(decimal.Zero) {
+				continue
+			}
+
+			reducedQty := qty
+			if reducedQty.GreaterThan(totalQty) {
+				reducedQty = totalQty
+			}
+
+			if totalQty.GreaterThan(decimal.Zero) {
+				avgCost := decimal.Zero
+				if !totalCost.Equal(decimal.Zero) {
+					avgCost = totalCost.Div(totalQty)
+				}
+				totalCost = totalCost.Sub(avgCost.Mul(reducedQty))
+			}
+
+			totalQty = totalQty.Sub(reducedQty)
+			if totalQty.LessThanOrEqual(decimal.Zero) {
+				totalQty = decimal.Zero
+				totalCost = decimal.Zero
+				entryTime = time.Time{}
+			}
+		}
+	}
+
+	if totalQty.LessThanOrEqual(decimal.Zero) {
+		return nil, nil
+	}
+
+	if totalCost.LessThanOrEqual(decimal.Zero) {
+		return nil, nil
+	}
+
+	avgPrice := totalCost.Div(totalQty)
+	if avgPrice.LessThanOrEqual(decimal.Zero) {
+		return nil, nil
+	}
+
+	position, err := entity.NewPositionFromExternalSnapshot(totalQty, avgPrice, entryTime)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to construct position snapshot")
+	}
+
+	return position, nil
+}
+
+func (t *BinanceTrader) UpdatePositionStops(ctx context.Context, pair entity.Pair, takeProfit, stopLoss decimal.Decimal) error {
+	if t.marketType != entity.MarketTypeMargin {
+		return nil
+	}
+
+	// Binance cross-margin API does not expose direct per-position stop management.
+	// For now, return an informative error so callers can log and continue.
+	return errors.New("binance margin stop updates are not supported via API")
 }

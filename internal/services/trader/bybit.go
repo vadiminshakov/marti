@@ -3,6 +3,9 @@ package trader
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/hirokisan/bybit/v2"
 	"github.com/pkg/errors"
@@ -88,6 +91,12 @@ func (t *BybitTrader) Sell(ctx context.Context, amount decimal.Decimal, clientOr
 	orderLinkID := clientOrderID
 	category := t.mapMarketTypeToCategory()
 
+	var reduceOnly *bool
+	if t.marketType == entity.MarketTypeMargin {
+		val := true
+		reduceOnly = &val
+	}
+
 	_, err := t.client.V5().Order().CreateOrder(bybit.V5CreateOrderParam{
 		Category:    category,
 		Symbol:      bybit.SymbolV5(t.pair.Symbol()),
@@ -96,6 +105,7 @@ func (t *BybitTrader) Sell(ctx context.Context, amount decimal.Decimal, clientOr
 		Qty:         amount.String(),
 		OrderLinkID: &orderLinkID,
 		IsLeverage:  nil,
+		ReduceOnly:  reduceOnly,
 	})
 	if err != nil {
 		return errors.Wrap(err, "failed to create sell order")
@@ -205,4 +215,129 @@ func (t *BybitTrader) GetBalance(ctx context.Context, currency string) (decimal.
 	}
 
 	return decimal.Zero, nil
+}
+
+func (t *BybitTrader) GetPosition(_ context.Context, pair entity.Pair) (*entity.Position, error) {
+	if t.marketType != entity.MarketTypeMargin {
+		return nil, nil
+	}
+
+	symbol := bybit.SymbolV5(pair.Symbol())
+	resp, err := t.client.V5().Position().GetPositionInfo(bybit.V5GetPositionInfoParam{
+		Category: bybit.CategoryV5Linear,
+		Symbol:   &symbol,
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to fetch bybit position info")
+	}
+
+	if len(resp.Result.List) == 0 {
+		return nil, nil
+	}
+
+	parseDecimal := func(value string) (decimal.Decimal, error) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return decimal.Zero, nil
+		}
+		d, err := decimal.NewFromString(value)
+		if err != nil {
+			return decimal.Zero, err
+		}
+		return d, nil
+	}
+
+	var latest *entity.Position
+
+	for _, item := range resp.Result.List {
+		if item.Side != bybit.SideBuy {
+			continue
+		}
+
+		size, err := parseDecimal(item.Size)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to parse bybit position size")
+		}
+
+		if size.LessThanOrEqual(decimal.Zero) {
+			continue
+		}
+
+		entryPrice, err := parseDecimal(item.AvgPrice)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to parse bybit average price")
+		}
+
+		takeProfit, err := parseDecimal(item.TakeProfit)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to parse bybit take profit")
+		}
+
+		stopLoss, err := parseDecimal(item.StopLoss)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to parse bybit stop loss")
+		}
+
+		entryTime := time.Now()
+		parseTime := func(raw string) time.Time {
+			raw = strings.TrimSpace(raw)
+			if raw == "" {
+				return entryTime
+			}
+			ms, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil || ms <= 0 {
+				return entryTime
+			}
+			return time.UnixMilli(ms)
+		}
+
+		if item.UpdatedTime != "" {
+			entryTime = parseTime(item.UpdatedTime)
+		} else if item.CreatedTime != "" {
+			entryTime = parseTime(item.CreatedTime)
+		}
+
+		latest = &entity.Position{
+			EntryPrice: entryPrice,
+			Amount:     size,
+			StopLoss:   stopLoss,
+			TakeProfit: takeProfit,
+			EntryTime:  entryTime,
+		}
+	}
+
+	return latest, nil
+}
+
+func (t *BybitTrader) UpdatePositionStops(_ context.Context, pair entity.Pair, takeProfit, stopLoss decimal.Decimal) error {
+	if t.marketType != entity.MarketTypeMargin {
+		return nil
+	}
+
+	if takeProfit.LessThanOrEqual(decimal.Zero) && stopLoss.LessThanOrEqual(decimal.Zero) {
+		return nil
+	}
+
+	param := bybit.V5SetTradingStopParam{
+		Category:    bybit.CategoryV5Linear,
+		Symbol:      bybit.SymbolV5(pair.Symbol()),
+		PositionIdx: bybit.PositionIdxOneWay,
+	}
+
+	if takeProfit.GreaterThan(decimal.Zero) {
+		tp := takeProfit.String()
+		param.TakeProfit = &tp
+	}
+
+	if stopLoss.GreaterThan(decimal.Zero) {
+		sl := stopLoss.String()
+		param.StopLoss = &sl
+	}
+
+	_, err := t.client.V5().Position().SetTradingStop(param)
+	if err != nil {
+		return errors.Wrap(err, "failed to update bybit position stops")
+	}
+
+	return nil
 }
