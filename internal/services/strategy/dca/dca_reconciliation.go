@@ -8,7 +8,7 @@
 //   - Validating and marking intents as done or failed
 //
 // This logic is separated from the main trading logic (dca.go) to improve code organization.
-package strategy
+package dca
 
 import (
 	"context"

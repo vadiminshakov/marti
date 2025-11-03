@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/vadiminshakov/marti/internal"
 	"github.com/vadiminshakov/marti/internal/entity"
-	"github.com/vadiminshakov/marti/internal/services/strategy"
+	"github.com/vadiminshakov/marti/internal/services/strategy/dca"
 	"go.uber.org/zap"
 )
 
@@ -41,28 +41,28 @@ func TestProfit(t *testing.T) {
 		dcaPercentThresholdSell float64
 	}{
 		{
-			name:                    "1 year - Conservative buy",
+			name:                    "1 year - Conservative",
 			duration:                8760,
 			maxDcaTrades:            20,
 			dcaPercentThresholdBuy:  2,
 			dcaPercentThresholdSell: 20,
 		},
 		{
-			name:                    "2 years - Conservative buy",
+			name:                    "2 years - Conservative",
 			duration:                17520,
 			maxDcaTrades:            40,
 			dcaPercentThresholdBuy:  2,
 			dcaPercentThresholdSell: 20,
 		},
 		{
-			name:                    "1 year - Aggressive trades",
+			name:                    "1 year - Aggressive",
 			duration:                8760,
 			maxDcaTrades:            100,
 			dcaPercentThresholdBuy:  0.5,
 			dcaPercentThresholdSell: 4,
 		},
 		{
-			name:                    "2 years - Aggressive trades",
+			name:                    "2 years - Aggressive",
 			duration:                17520,
 			maxDcaTrades:            200,
 			dcaPercentThresholdBuy:  0.5,
@@ -238,7 +238,7 @@ func createStrategyFactory(logger *zap.Logger, pair *entity.Pair, prices chan de
 		// maxDcaTrades only limits the number of buys in a series
 		amountPercent := decimal.NewFromInt(20)
 
-		dcaStrategy, err := strategy.NewDCAStrategy(
+		dcaStrategy, err := dca.NewDCAStrategy(
 			logger,
 			*pair,
 			amountPercent,

@@ -9,7 +9,6 @@ import (
 	"github.com/vadiminshakov/marti/config"
 
 	"github.com/vadiminshakov/marti/internal/entity"
-	"github.com/vadiminshakov/marti/internal/services/strategy"
 	"go.uber.org/zap"
 )
 
@@ -37,7 +36,7 @@ type TradingBot struct {
 // It initializes the appropriate trader and pricer components based on the platform specified in the config,
 // and sets up the trading strategy with the provided parameters.
 func NewTradingBot(logger *zap.Logger, conf config.Config, client any) (*TradingBot, error) {
-	currentTrader, currentPricer, err := createTraderAndPricer(conf.Platform, conf.Pair, client)
+	currentTrader, currentPricer, err := createTraderAndPricer(conf.Platform, conf.Pair, conf.MarketType, conf.Leverage, client)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create trader and pricer")
 	}
@@ -92,9 +91,7 @@ func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
 		case <-ticker.C:
 			tradeEvent, err := b.tradingStrategy.Trade(ctx)
 			if err != nil {
-				if !errors.Is(err, strategy.ErrNoData) {
-					logger.Error("Trading strategy failed", zap.Error(err))
-				}
+				logger.Error("Trading strategy failed", zap.Error(err))
 				continue
 			}
 

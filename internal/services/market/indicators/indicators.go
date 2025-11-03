@@ -7,9 +7,9 @@ import (
 	"fmt"
 
 	"github.com/cinar/indicator/v2/helper"
+	"github.com/cinar/indicator/v2/momentum"
 	"github.com/cinar/indicator/v2/trend"
 	"github.com/cinar/indicator/v2/volatility"
-	"github.com/cinar/indicator/v2/momentum"
 	"github.com/shopspring/decimal"
 )
 

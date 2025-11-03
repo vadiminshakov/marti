@@ -2,6 +2,11 @@
 - pair: BTC_USDT
   platform: binance
   strategy: dca
+  # Market type: "spot" for spot trading or "margin" for margin/futures trading (default: spot)
+  market_type: spot
+  # Leverage multiplier for margin trading, 1-20 (default: 1)
+  # NOTE: leverage > 1 can ONLY be used with market_type: margin, NOT with spot
+  leverage: 1
   # The percentage of available balance to be used for trading. The value should be in the range of 1 to 100.
   amount: 20
   # The time interval between polling market prices to make trading decision (buy/sell/do nothing).
@@ -16,6 +21,8 @@
 - pair: ETH_USDT
   platform: bybit
   strategy: dca
+  market_type: spot
+  leverage: 1
   amount: 20
   pollpriceinterval: 5m
   max_dca_trades: 35
@@ -25,6 +32,8 @@
 - pair: BNB_USDT
   platform: binance
   strategy: dca
+  market_type: spot
+  leverage: 1
   amount: 20
   pollpriceinterval: 5m
   max_dca_trades: 35
@@ -35,6 +44,8 @@
 - pair: BTC_USDT
   platform: simulate
   strategy: dca
+  market_type: spot
+  leverage: 1
   amount: 10
   pollpriceinterval: 2s
   max_dca_trades: 8
@@ -43,9 +54,13 @@
 
 
 # AI Strategy with Binance (SPOT trading only)
+# NOTE: The 'leverage' parameter should NOT be specified for AI strategy.
+# AI strategy manages position sizing internally and does not use the leverage parameter.
+# Including leverage in AI strategy config will result in a validation error.
 - pair: BTC_USDT
   platform: binance
   strategy: ai
+  market_type: spot
   # LLM API endpoint (OpenRouter, or any OpenAI-compatible API)
   llm_api_url: "https://openrouter.ai/api/v1/chat/completions"
   llm_api_key: "sk-your-api-key-here"
@@ -54,18 +69,25 @@
   model: "deepseek/deepseek-chat"
   # Kline interval for market data (1m, 3m, 5m, 15m, 30m, 1h, 4h, etc.)
   kline_interval: "3m"
+  # Higher timeframe for multi-timeframe analysis (optional, defaults to "15m")
+  # Should be a higher interval than kline_interval for trend confirmation
+  higher_timeframe: "15m"
   # Number of historical periods to analyze (minimum 50 for indicators)
   lookback_periods: 100
   # How often to check price updates and make decisions
   pollpriceinterval: 3m
 
 # AI Strategy with Simulate mode (for testing without real trading)
+# NOTE: The 'leverage' parameter should NOT be specified for AI strategy.
+# AI strategy manages position sizing internally and does not use the leverage parameter.
 - pair: ETH_USDT
   platform: simulate
   strategy: ai
+  market_type: spot
   llm_api_url: "https://openrouter.ai/api/v1/chat/completions"
   llm_api_key: "sk-your-api-key-here"
   model: "deepseek/deepseek-chat"
   kline_interval: "5m"
+  higher_timeframe: "15m"
   lookback_periods: 50
   pollpriceinterval: 5m

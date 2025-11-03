@@ -1,4 +1,4 @@
-// Package strategy implements DCA (Dollar-Cost Averaging) trading strategy.
+// Package dca implements DCA (Dollar-Cost Averaging) trading strategy.
 //
 // This file contains the core trading logic:
 //   - DCA strategy implementation (Trade method)
@@ -7,7 +7,7 @@
 //   - DCA series management (purchases tracking, statistics)
 //
 // For reconciliation/recovery logic after restarts, see dca_reconciliation.go
-package strategy
+package dca
 
 import (
 	"context"
@@ -24,10 +24,6 @@ import (
 	"github.com/vadiminshakov/marti/internal/entity"
 	"github.com/vadiminshakov/marti/internal/services/trader"
 	"go.uber.org/zap"
-)
-
-var (
-	ErrNoData = errors.New("no data found")
 )
 
 const (
@@ -282,8 +278,8 @@ func (d *DCAStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 		return tradeEvent, err
 	}
 
-	if err := d.ensureHasPurchases(); err != nil {
-		return nil, err
+	if len(d.dcaSeries.Purchases) == 0 {
+		return nil, nil
 	}
 
 	if tradeEvent, err := d.checkDCABuy(ctx, price); tradeEvent != nil || err != nil {
@@ -337,14 +333,6 @@ func (d *DCAStrategy) checkWaitingForDip(ctx context.Context, price decimal.Deci
 		zap.String("price", price.String()),
 		zap.String("amount", tradeEvent.Amount.String()))
 	return tradeEvent, true, nil
-}
-
-// ensureHasPurchases checks if there are any purchases in the series
-func (d *DCAStrategy) ensureHasPurchases() error {
-	if len(d.dcaSeries.Purchases) == 0 {
-		return ErrNoData
-	}
-	return nil
 }
 
 // checkDCABuy checks if we should perform a DCA buy

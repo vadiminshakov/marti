@@ -30,6 +30,15 @@ type Config struct {
 	AmountPercent decimal.Decimal
 	// PollPriceInterval defines how often to check price updates
 	PollPriceInterval time.Duration
+	// MarketType specifies the market type for trading ("spot" or "margin")
+	MarketType entity.MarketType
+	// Leverage specifies the leverage multiplier for margin trading (1-20)
+	// NOTE: leverage > 1 can ONLY be used with MarketTypeMargin, NOT with MarketTypeSpot
+	// NOTE: Leverage parameter is NOT supported for AI strategy. AI strategy manages position sizing internally.
+	// Config validation will reject:
+	// - spot trading with leverage > 1
+	// - AI strategy with leverage parameter specified
+	Leverage int
 
 	// DCA Strategy parameters
 	// MaxDcaTrades is the maximum number of DCA trades allowed
@@ -48,6 +57,9 @@ type Config struct {
 	Model string
 	// KlineInterval defines the interval for kline data (e.g., "1m", "3m", "5m", "1h")
 	KlineInterval string
+	// HigherTimeframe defines the higher timeframe interval for multi-timeframe analysis (e.g., "15m" when primary is "3m")
+	// If not specified, defaults to "15m" for 3m primary timeframe
+	HigherTimeframe string
 	// LookbackPeriods defines how many historical periods to analyze
 	LookbackPeriods int
 	// MaxLeverage is the maximum leverage allowed for AI strategy trades
@@ -55,24 +67,27 @@ type Config struct {
 }
 
 type ConfigTmp struct {
-	Pair                       string        `yaml:"pair"`
-	Platform                   string        `yaml:"platform"`
-	Strategy                   string        `yaml:"strategy,omitempty"`
-	Amount                     string        `yaml:"amount,omitempty"`
-	PollPriceInterval          time.Duration `yaml:"pollpriceinterval"`
+	Pair              string        `yaml:"pair"`
+	Platform          string        `yaml:"platform"`
+	Strategy          string        `yaml:"strategy,omitempty"`
+	Amount            string        `yaml:"amount,omitempty"`
+	PollPriceInterval time.Duration `yaml:"pollpriceinterval"`
+	MarketTypeStr     string        `yaml:"market_type,omitempty"`
+	LeverageStr       string        `yaml:"leverage,omitempty"`
 
 	// DCA strategy fields
-	MaxDcaTradesStr            string        `yaml:"max_dca_trades,omitempty"`
-	DcaPercentThresholdBuyStr  string        `yaml:"dca_percent_threshold_buy,omitempty"`
-	DcaPercentThresholdSellStr string        `yaml:"dca_percent_threshold_sell,omitempty"`
+	MaxDcaTradesStr            string `yaml:"max_dca_trades,omitempty"`
+	DcaPercentThresholdBuyStr  string `yaml:"dca_percent_threshold_buy,omitempty"`
+	DcaPercentThresholdSellStr string `yaml:"dca_percent_threshold_sell,omitempty"`
 
 	// AI strategy fields
-	LLMAPIURL                  string        `yaml:"llm_api_url,omitempty"`
-	LLMAPIKey                  string        `yaml:"llm_api_key,omitempty"`
-	Model                      string        `yaml:"model,omitempty"`
-	KlineInterval              string        `yaml:"kline_interval,omitempty"`
-	LookbackPeriodsStr         string        `yaml:"lookback_periods,omitempty"`
-	MaxLeverageStr             string        `yaml:"max_leverage,omitempty"`
+	LLMAPIURL          string `yaml:"llm_api_url,omitempty"`
+	LLMAPIKey          string `yaml:"llm_api_key,omitempty"`
+	Model              string `yaml:"model,omitempty"`
+	KlineInterval      string `yaml:"kline_interval,omitempty"`
+	HigherTimeframe    string `yaml:"higher_timeframe,omitempty"`
+	LookbackPeriodsStr string `yaml:"lookback_periods,omitempty"`
+	MaxLeverageStr     string `yaml:"max_leverage,omitempty"`
 }
 
 // Get retrieves configuration settings from either YAML file or command-line arguments.
@@ -154,12 +169,46 @@ func getYaml(path string) ([]Config, error) {
 			strategyType = "dca"
 		}
 
+		// Parse market_type (default to "spot")
+		marketType := entity.MarketType(c.MarketTypeStr)
+		if c.MarketTypeStr == "" {
+			marketType = entity.MarketTypeSpot
+		}
+		if !marketType.IsValid() {
+			return nil, fmt.Errorf("invalid market_type '%s' in yaml config (must be 'spot' or 'margin')", c.MarketTypeStr)
+		}
+
+		// Parse leverage (default to 1)
+		leverage := 1
+		if c.LeverageStr != "" {
+			var err error
+			leverage, err = strconv.Atoi(c.LeverageStr)
+			if err != nil {
+				return nil, fmt.Errorf("incorrect 'leverage' param in yaml config (must be an integer), error: %w", err)
+			}
+			if leverage < 1 || leverage > 20 {
+				return nil, fmt.Errorf("leverage must be between 1 and 20, got %d", leverage)
+			}
+		}
+
+		// Validate: spot trading cannot use leverage > 1
+		if marketType == entity.MarketTypeSpot && leverage > 1 {
+			return nil, fmt.Errorf("leverage > 1 is not allowed for spot trading (market_type: spot). Use market_type: margin for leverage trading")
+		}
+
+		// Validate: AI strategy does not support leverage parameter
+		if strategyType == "ai" && (c.LeverageStr != "" || leverage > 1) {
+			return nil, fmt.Errorf("leverage parameter is not supported for AI strategy. AI strategy manages position sizing internally. Please remove the 'leverage' parameter from your config")
+		}
+
 		// Initialize newConfig correctly for each iteration
 		newConfig := Config{
 			Platform:          c.Platform,
 			Pair:              pair,
 			StrategyType:      strategyType,
 			PollPriceInterval: c.PollPriceInterval,
+			MarketType:        marketType,
+			Leverage:          leverage,
 		}
 
 		// Parse common or DCA-specific fields
@@ -232,6 +281,13 @@ func getYaml(path string) ([]Config, error) {
 				newConfig.KlineInterval = "3m" // Default interval
 			} else {
 				newConfig.KlineInterval = c.KlineInterval
+			}
+
+			// Parse HigherTimeframe (defaults to "15m" for multi-timeframe analysis)
+			if c.HigherTimeframe == "" {
+				newConfig.HigherTimeframe = "15m" // Default higher timeframe
+			} else {
+				newConfig.HigherTimeframe = c.HigherTimeframe
 			}
 
 			// Parse LookbackPeriods

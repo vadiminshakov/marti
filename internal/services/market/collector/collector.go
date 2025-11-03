@@ -1,6 +1,6 @@
-// Package marketdata provides utilities for collecting and managing market data
+// Package collector provides utilities for collecting and managing market data
 // such as klines (candlestick data) from cryptocurrency exchanges.
-package marketdata
+package collector
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/internal/entity"
-	"github.com/vadiminshakov/marti/internal/services/indicators"
+	"github.com/vadiminshakov/marti/internal/services/market/indicators"
 )
 
 // KlineData represents a single candlestick data point
@@ -111,7 +111,6 @@ func (p *BybitKlineProvider) GetKlines(ctx context.Context, pair entity.Pair, in
 	return nil, fmt.Errorf("Bybit kline provider for AI strategy is not yet implemented - please use Binance or Simulate platform for AI strategy")
 }
 
-
 // MarketDataCollector manages market data collection and indicator calculation
 type MarketDataCollector struct {
 	provider KlineProvider
@@ -177,4 +176,98 @@ func (c *MarketDataCollector) GetCurrentPrice(ctx context.Context) (decimal.Deci
 	}
 
 	return klines[0].Close, nil
+}
+
+// TimeframeSnapshot contains summary data from a higher timeframe
+type TimeframeSnapshot struct {
+	Timeframe string
+	Price     decimal.Decimal
+	EMA20     decimal.Decimal
+	EMA50     decimal.Decimal
+	RSI14     decimal.Decimal
+	Trend     string // "bullish", "bearish", "neutral"
+}
+
+// GetMultiTimeframeData fetches and summarizes data from a higher timeframe
+// It calculates key indicators and determines trend direction for multi-timeframe analysis
+func (c *MarketDataCollector) GetMultiTimeframeData(ctx context.Context, higherInterval string) (*TimeframeSnapshot, error) {
+	// Create a context with timeout for API calls
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// Fetch enough klines to calculate indicators (need at least 50 for EMA50)
+	klines, err := c.provider.GetKlines(ctxWithTimeout, c.pair, higherInterval, 60)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to fetch higher timeframe klines")
+	}
+
+	if len(klines) < 50 {
+		return nil, errors.New("insufficient kline data for higher timeframe analysis (need at least 50)")
+	}
+
+	// Convert klines to PriceData format for indicator calculation
+	priceData := make([]indicators.PriceData, len(klines))
+	for i, k := range klines {
+		priceData[i] = indicators.PriceData{
+			Open:  k.Open,
+			High:  k.High,
+			Low:   k.Low,
+			Close: k.Close,
+		}
+	}
+
+	// Extract close prices for EMA calculation
+	closes := make([]decimal.Decimal, len(klines))
+	for i, k := range klines {
+		closes[i] = k.Close
+	}
+
+	// Calculate EMA20
+	ema20Values, err := indicators.CalculateEMA(closes, 20)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to calculate EMA20 for higher timeframe")
+	}
+
+	// Calculate EMA50
+	ema50Values, err := indicators.CalculateEMA(closes, 50)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to calculate EMA50 for higher timeframe")
+	}
+
+	// Calculate RSI14
+	rsi14Values, err := indicators.CalculateRSI(closes, 14)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to calculate RSI14 for higher timeframe")
+	}
+
+	// Get the most recent values
+	currentPrice := klines[len(klines)-1].Close
+	ema20 := ema20Values[len(ema20Values)-1]
+	ema50 := ema50Values[len(ema50Values)-1]
+	rsi14 := rsi14Values[len(rsi14Values)-1]
+
+	// Determine trend direction from EMA alignment
+	trend := determineTrendDirection(currentPrice, ema20, ema50)
+
+	return &TimeframeSnapshot{
+		Timeframe: higherInterval,
+		Price:     currentPrice,
+		EMA20:     ema20,
+		EMA50:     ema50,
+		RSI14:     rsi14,
+		Trend:     trend,
+	}, nil
+}
+
+// determineTrendDirection determines trend based on price and EMA alignment
+// Bullish: Price > EMA20 > EMA50
+// Bearish: Price < EMA20 < EMA50
+// Neutral: Otherwise
+func determineTrendDirection(price, ema20, ema50 decimal.Decimal) string {
+	if price.GreaterThan(ema20) && ema20.GreaterThan(ema50) {
+		return "bullish"
+	} else if price.LessThan(ema20) && ema20.LessThan(ema50) {
+		return "bearish"
+	}
+	return "neutral"
 }

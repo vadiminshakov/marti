@@ -1,21 +1,35 @@
-// Package strategy implements AI-based trading strategy using LLM for decision making.
-package strategy
+// Package ai implements AI-based trading strategy using LLM for decision making.
+package ai
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/internal/clients"
 	"github.com/vadiminshakov/marti/internal/entity"
-	"github.com/vadiminshakov/marti/internal/services/indicators"
-	"github.com/vadiminshakov/marti/internal/services/marketdata"
+	"github.com/vadiminshakov/marti/internal/services/market/analysis"
+	"github.com/vadiminshakov/marti/internal/services/market/collector"
+	"github.com/vadiminshakov/marti/internal/services/market/indicators"
+	"github.com/vadiminshakov/marti/internal/services/promptbuilder"
 	"go.uber.org/zap"
 )
+
+type tradersvc interface {
+	Buy(ctx context.Context, amount decimal.Decimal, clientOrderID string) error
+	Sell(ctx context.Context, amount decimal.Decimal, clientOrderID string) error
+	OrderExecuted(ctx context.Context, clientOrderID string) (executed bool, filledAmount decimal.Decimal, err error)
+	GetBalance(ctx context.Context, currency string) (decimal.Decimal, error)
+}
+
+type pricer interface {
+	GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error)
+}
 
 // AIStrategy implements trading strategy using AI/LLM for decision making.
 // The strategy is stateless - position state is derived from exchange balance.
@@ -23,11 +37,14 @@ import (
 type AIStrategy struct {
 	pair            entity.Pair
 	llmClient       clients.LLMClient
-	marketData      *marketdata.MarketDataCollector
+	marketData      *collector.MarketDataCollector
 	pricer          pricer
 	trader          tradersvc
 	logger          *zap.Logger
 	currentPosition *Position
+	marketAnalyzer  *analysis.MarketAnalyzer
+	promptBuilder   *promptbuilder.PromptBuilder
+	higherTimeframe string
 }
 
 // Position represents an open trading position tracked in memory.
@@ -38,6 +55,7 @@ type Position struct {
 	StopLoss     decimal.Decimal
 	TakeProfit   decimal.Decimal
 	Invalidation string
+	EntryTime    time.Time
 }
 
 // TradingDecision represents the AI's trading decision
@@ -48,7 +66,6 @@ type TradingDecision struct {
 // DecisionDetails contains the details of the trading decision
 type DecisionDetails struct {
 	Action      string   `json:"action"`
-	Confidence  float64  `json:"confidence"`
 	RiskPercent float64  `json:"risk_percent"`
 	Reasoning   string   `json:"reasoning"`
 	ExitPlan    ExitPlan `json:"exit_plan"`
@@ -66,17 +83,25 @@ func NewAIStrategy(
 	logger *zap.Logger,
 	pair entity.Pair,
 	llmClient clients.LLMClient,
-	marketData *marketdata.MarketDataCollector,
+	marketData *collector.MarketDataCollector,
 	pricer pricer,
 	trader tradersvc,
 ) (*AIStrategy, error) {
+	marketAnalyzer := analysis.NewMarketAnalyzer(logger)
+	promptBuilder := promptbuilder.NewPromptBuilder(pair, logger)
+
+	higherTimeframe := "4h"
+
 	return &AIStrategy{
-		pair:       pair,
-		llmClient:  llmClient,
-		marketData: marketData,
-		pricer:     pricer,
-		trader:     trader,
-		logger:     logger,
+		pair:            pair,
+		llmClient:       llmClient,
+		marketData:      marketData,
+		pricer:          pricer,
+		trader:          trader,
+		logger:          logger,
+		marketAnalyzer:  marketAnalyzer,
+		promptBuilder:   promptBuilder,
+		higherTimeframe: higherTimeframe,
 	}, nil
 }
 
@@ -85,7 +110,7 @@ func (s *AIStrategy) Initialize(ctx context.Context) error {
 	s.logger.Info("Initializing AI strategy",
 		zap.String("pair", s.pair.String()))
 
-	// Check current balances
+	// check current balances
 	baseBalance, err := s.trader.GetBalance(ctx, s.pair.From)
 	if err != nil {
 		s.logger.Warn("Failed to get base currency balance", zap.Error(err))
@@ -100,7 +125,7 @@ func (s *AIStrategy) Initialize(ctx context.Context) error {
 		zap.String(s.pair.From+"_balance", baseBalance.String()),
 		zap.String(s.pair.To+"_balance", quoteBalance.String()))
 
-	// If we have a base currency balance, we may have an open position from previous session
+	// if we have a base currency balance, we may have an open position from previous session
 	// AI will evaluate it on the next Trade() call and decide what to do
 	if baseBalance.GreaterThan(decimal.Zero) {
 		s.logger.Info("Detected existing position, AI will evaluate on next iteration",
@@ -112,7 +137,7 @@ func (s *AIStrategy) Initialize(ctx context.Context) error {
 
 // Trade executes the AI trading logic
 func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
-	// Collect market data and indicators
+	// collect market data and indicators
 	klines, indicatorData, err := s.marketData.GetMarketData(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get market data")
@@ -124,7 +149,7 @@ func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 
 	currentPrice := klines[len(klines)-1].Close
 
-	// Get current balances
+	// get current balances
 	baseBalance, err := s.trader.GetBalance(ctx, s.pair.From)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get base balance")
@@ -139,23 +164,38 @@ func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 		zap.String(s.pair.From+"_balance", baseBalance.StringFixed(8)),
 		zap.String(s.pair.To+"_balance", quoteBalance.StringFixed(2)))
 
-	// Sync position state with actual balance
+	// sync position state with actual balance
 	s.syncPositionWithBalance(baseBalance, currentPrice)
 
-	// Build prompt for LLM
-	userPrompt := s.buildPrompt(klines, indicatorData, quoteBalance)
+	// fetch higher timeframe data for multi-timeframe analysis
+	higherTimeframeSnapshot, err := s.marketData.GetMultiTimeframeData(ctx, s.higherTimeframe)
+	if err != nil {
+		s.logger.Warn("Failed to get higher timeframe data, continuing without it",
+			zap.Error(err),
+			zap.String("timeframe", s.higherTimeframe))
+		higherTimeframeSnapshot = nil
+	}
 
-	// Get decision from LLM
-	response, err := s.llmClient.Chat(ctx, systemPrompt, userPrompt)
+	// analyze volume patterns
+	volumeAnalysis := s.marketAnalyzer.AnalyzeVolume(klines)
+
+	// build prompt for LLM using PromptBuilder
+	userPrompt := s.buildPrompt(klines, indicatorData, quoteBalance, volumeAnalysis, higherTimeframeSnapshot)
+
+	// get decision from LLM
+	response, err := s.llmClient.Chat(ctx, promptbuilder.SystemPrompt, userPrompt)
 	if err != nil {
 		s.logger.Error("Failed to get AI response", zap.Error(err))
 		return nil, errors.Wrap(err, "failed to get AI decision")
 	}
 
-	// Parse decision
+	// parse and validate decision
+	// note: parseDecision now returns a default "hold" decision on validation failures
+	// instead of returning an error, so we always get a valid decision
 	decision, err := s.parseDecision(response)
 	if err != nil {
-		s.logger.Error("Failed to parse AI decision",
+		// this should rarely happen now, but keep for safety
+		s.logger.Error("Critical error in parseDecision",
 			zap.Error(err),
 			zap.String("response", response))
 		return nil, errors.Wrap(err, "failed to parse AI decision")
@@ -163,10 +203,10 @@ func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 
 	s.logger.Info("📊 AI Decision",
 		zap.String("action", strings.ToUpper(decision.Decision.Action)),
-		zap.Float64("confidence", decision.Decision.Confidence),
+		zap.Float64("risk_percent", decision.Decision.RiskPercent),
 		zap.String("reasoning", decision.Decision.Reasoning))
 
-	// Execute decision
+	// execute decision
 	return s.executeDecision(ctx, decision, currentPrice, quoteBalance)
 }
 
@@ -179,6 +219,7 @@ func (s *AIStrategy) syncPositionWithBalance(baseBalance, currentPrice decimal.D
 			s.currentPosition = &Position{
 				EntryPrice: currentPrice, // Approximate - we don't know actual entry
 				Amount:     baseBalance,
+				EntryTime:  time.Now(), // Approximate - we don't know actual entry time
 			}
 			s.logger.Info("Created position record from balance",
 				zap.String("amount", baseBalance.String()),
@@ -201,119 +242,55 @@ func (s *AIStrategy) syncPositionWithBalance(baseBalance, currentPrice decimal.D
 	}
 }
 
-// buildPrompt constructs the prompt for the LLM
+// buildPrompt constructs the prompt for the LLM using PromptBuilder
 func (s *AIStrategy) buildPrompt(
-	klines []marketdata.KlineData,
+	klines []collector.KlineData,
 	indicatorData []indicators.IndicatorData,
 	balance decimal.Decimal,
+	volumeAnalysis analysis.VolumeAnalysis,
+	higherTimeframeSnapshot *collector.TimeframeSnapshot,
 ) string {
-	var sb strings.Builder
-
-	// Get latest data points
-	latestKline := klines[len(klines)-1]
-	latestIndicators := indicatorData[len(indicatorData)-1]
-
-	sb.WriteString(fmt.Sprintf("# Market Analysis for %s\n\n", s.pair.String()))
-	sb.WriteString("## Current Market State\n\n")
-
-	// Current price and indicators
-	sb.WriteString(fmt.Sprintf("**Current Price:** %s\n", latestKline.Close.String()))
-	sb.WriteString(fmt.Sprintf("**EMA20:** %s\n", latestIndicators.EMA20.StringFixed(2)))
-	sb.WriteString(fmt.Sprintf("**EMA50:** %s\n", latestIndicators.EMA50.StringFixed(2)))
-	sb.WriteString(fmt.Sprintf("**MACD:** %s\n", latestIndicators.MACD.StringFixed(2)))
-	sb.WriteString(fmt.Sprintf("**RSI (7-period):** %s\n", latestIndicators.RSI7.StringFixed(2)))
-	sb.WriteString(fmt.Sprintf("**RSI (14-period):** %s\n", latestIndicators.RSI14.StringFixed(2)))
-	sb.WriteString(fmt.Sprintf("**ATR (3-period):** %s\n", latestIndicators.ATR3.StringFixed(2)))
-	sb.WriteString(fmt.Sprintf("**ATR (14-period):** %s\n", latestIndicators.ATR14.StringFixed(2)))
-	sb.WriteString("\n")
-
-	// Recent price action (last 10 candles)
-	sb.WriteString("## Recent Price Action (oldest → newest)\n\n")
-	startIdx := len(klines) - 10
-	if startIdx < 0 {
-		startIdx = 0
+	// Convert higher timeframe snapshot to promptbuilder format
+	var htfSnapshot *promptbuilder.TimeframeSnapshot
+	if higherTimeframeSnapshot != nil {
+		htfSnapshot = &promptbuilder.TimeframeSnapshot{
+			Timeframe: higherTimeframeSnapshot.Timeframe,
+			Price:     higherTimeframeSnapshot.Price,
+			EMA20:     higherTimeframeSnapshot.EMA20,
+			EMA50:     higherTimeframeSnapshot.EMA50,
+			RSI14:     higherTimeframeSnapshot.RSI14,
+			Trend:     higherTimeframeSnapshot.Trend,
+		}
 	}
 
-	sb.WriteString("Close prices: [")
-	for i := startIdx; i < len(klines); i++ {
-		if i > startIdx {
-			sb.WriteString(", ")
-		}
-		sb.WriteString(klines[i].Close.StringFixed(2))
-	}
-	sb.WriteString("]\n\n")
-
-	// Recent indicators (last 10 periods)
-	if len(indicatorData) >= 10 {
-		startIdx = len(indicatorData) - 10
-
-		sb.WriteString("EMA20: [")
-		for i := startIdx; i < len(indicatorData); i++ {
-			if i > startIdx {
-				sb.WriteString(", ")
-			}
-			sb.WriteString(indicatorData[i].EMA20.StringFixed(2))
-		}
-		sb.WriteString("]\n")
-
-		sb.WriteString("MACD: [")
-		for i := startIdx; i < len(indicatorData); i++ {
-			if i > startIdx {
-				sb.WriteString(", ")
-			}
-			sb.WriteString(indicatorData[i].MACD.StringFixed(2))
-		}
-		sb.WriteString("]\n")
-
-		sb.WriteString("RSI (7-period): [")
-		for i := startIdx; i < len(indicatorData); i++ {
-			if i > startIdx {
-				sb.WriteString(", ")
-			}
-			sb.WriteString(indicatorData[i].RSI7.StringFixed(2))
-		}
-		sb.WriteString("]\n\n")
-	}
-
-	// Account information
-	sb.WriteString("## Account Information\n\n")
-	sb.WriteString(fmt.Sprintf("**Available Balance (%s):** %s\n", s.pair.To, balance.StringFixed(2)))
-
+	// Convert current position to promptbuilder format
+	var pbPosition *promptbuilder.Position
 	if s.currentPosition != nil {
-		sb.WriteString("\n**Current Position:**\n")
-		sb.WriteString(fmt.Sprintf("- Entry Price: %s\n", s.currentPosition.EntryPrice.String()))
-		sb.WriteString(fmt.Sprintf("- Amount: %s\n", s.currentPosition.Amount.String()))
-		if !s.currentPosition.StopLoss.IsZero() {
-			sb.WriteString(fmt.Sprintf("- Stop Loss: %s\n", s.currentPosition.StopLoss.String()))
+		pbPosition = &promptbuilder.Position{
+			EntryPrice:   s.currentPosition.EntryPrice,
+			Amount:       s.currentPosition.Amount,
+			StopLoss:     s.currentPosition.StopLoss,
+			TakeProfit:   s.currentPosition.TakeProfit,
+			Invalidation: s.currentPosition.Invalidation,
+			EntryTime:    s.currentPosition.EntryTime,
 		}
-		if !s.currentPosition.TakeProfit.IsZero() {
-			sb.WriteString(fmt.Sprintf("- Take Profit: %s\n", s.currentPosition.TakeProfit.String()))
-		}
-		if s.currentPosition.Invalidation != "" {
-			sb.WriteString(fmt.Sprintf("- Invalidation: %s\n", s.currentPosition.Invalidation))
-		}
-
-		// Calculate unrealized P&L
-		currentPrice := latestKline.Close
-		pnl := currentPrice.Sub(s.currentPosition.EntryPrice).Mul(s.currentPosition.Amount)
-		pnlPercent := pnl.Div(s.currentPosition.EntryPrice.Mul(s.currentPosition.Amount)).Mul(decimal.NewFromInt(100))
-		sb.WriteString(fmt.Sprintf("- Unrealized P&L: %s (%s%%)\n", pnl.StringFixed(2), pnlPercent.StringFixed(2)))
-	} else {
-		sb.WriteString("\n**Current Position:** None\n")
 	}
 
-	sb.WriteString("\n## Instructions\n\n")
-	sb.WriteString("Based on the market data above, provide your trading decision in JSON format.\n")
-	if s.currentPosition != nil {
-		sb.WriteString("You currently have an open position. Decide whether to hold or close it.\n")
-	} else {
-		sb.WriteString("You have no open position. Decide whether to buy, or hold (wait).\n")
+	// Create market context
+	ctx := promptbuilder.MarketContext{
+		Klines:          klines,
+		Indicators:      indicatorData,
+		VolumeAnalysis:  volumeAnalysis,
+		HigherTimeframe: htfSnapshot,
+		CurrentPosition: pbPosition,
+		Balance:         balance,
 	}
 
-	return sb.String()
+	// Use PromptBuilder to generate the prompt
+	return s.promptBuilder.BuildUserPrompt(ctx)
 }
 
-// parseDecision parses the LLM response into a TradingDecision
+// parseDecision parses the LLM response into a TradingDecision with comprehensive validation
 func (s *AIStrategy) parseDecision(response string) (*TradingDecision, error) {
 	// Clean up response - remove markdown code blocks if present
 	response = strings.TrimSpace(response)
@@ -322,26 +299,143 @@ func (s *AIStrategy) parseDecision(response string) (*TradingDecision, error) {
 	response = strings.TrimSuffix(response, "```")
 	response = strings.TrimSpace(response)
 
+	// Validate JSON structure before unmarshaling
+	if !json.Valid([]byte(response)) {
+		s.logger.Error("Invalid JSON structure in LLM response",
+			zap.String("response", response))
+		return s.createDefaultHoldDecision("Invalid JSON structure"), nil
+	}
+
 	var decision TradingDecision
 	if err := json.Unmarshal([]byte(response), &decision); err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal JSON response")
+		s.logger.Error("Failed to unmarshal JSON response",
+			zap.Error(err),
+			zap.String("response", response))
+		return s.createDefaultHoldDecision("JSON unmarshal error"), nil
 	}
 
-	// Validate decision
+	// Verify all required fields are present
+	if err := s.validateRequiredFields(&decision); err != nil {
+		s.logger.Error("Missing required fields in LLM response",
+			zap.Error(err),
+			zap.String("response", response))
+		return s.createDefaultHoldDecision(fmt.Sprintf("Missing required fields: %v", err)), nil
+	}
+
+	// Validate action is one of allowed values
 	validActions := map[string]bool{"buy": true, "sell": true, "hold": true, "close": true}
 	if !validActions[decision.Decision.Action] {
-		return nil, fmt.Errorf("invalid action: %s", decision.Decision.Action)
+		s.logger.Error("Invalid action in LLM response",
+			zap.String("action", decision.Decision.Action),
+			zap.String("response", response))
+		return s.createDefaultHoldDecision(fmt.Sprintf("Invalid action: %s", decision.Decision.Action)), nil
 	}
 
-	if decision.Decision.Confidence < 0 || decision.Decision.Confidence > 1 {
-		return nil, fmt.Errorf("invalid confidence: %f", decision.Decision.Confidence)
-	}
-
+	// Validate risk_percent range (0.0-15.0)
 	if decision.Decision.RiskPercent < 0 || decision.Decision.RiskPercent > 15 {
-		return nil, fmt.Errorf("invalid risk_percent: %f (must be 0-15)", decision.Decision.RiskPercent)
+		s.logger.Error("Risk percent out of valid range",
+			zap.Float64("risk_percent", decision.Decision.RiskPercent),
+			zap.String("response", response))
+		return s.createDefaultHoldDecision(fmt.Sprintf("Invalid risk_percent: %f (must be 0.0-15.0)", decision.Decision.RiskPercent)), nil
 	}
+
+	// Validate action consistency with position state
+	if err := s.validateActionConsistency(&decision); err != nil {
+		s.logger.Warn("Action inconsistent with position state",
+			zap.Error(err),
+			zap.String("action", decision.Decision.Action),
+			zap.Bool("has_position", s.currentPosition != nil))
+		return s.createDefaultHoldDecision(fmt.Sprintf("Action consistency error: %v", err)), nil
+	}
+
+	// Validate exit_plan is provided for "buy" actions
+	if decision.Decision.Action == "buy" {
+		if err := s.validateExitPlan(&decision); err != nil {
+			s.logger.Error("Invalid or missing exit plan for buy action",
+				zap.Error(err),
+				zap.String("response", response))
+			return s.createDefaultHoldDecision(fmt.Sprintf("Exit plan validation error: %v", err)), nil
+		}
+	}
+
+	s.logger.Info("Decision validation passed",
+		zap.String("action", decision.Decision.Action),
+		zap.Float64("risk_percent", decision.Decision.RiskPercent))
 
 	return &decision, nil
+}
+
+// validateRequiredFields checks that all required fields are present in the decision
+func (s *AIStrategy) validateRequiredFields(decision *TradingDecision) error {
+	if decision.Decision.Action == "" {
+		return errors.New("action field is required")
+	}
+	if decision.Decision.Reasoning == "" {
+		return errors.New("reasoning field is required")
+	}
+	// Confidence and RiskPercent are float64, so they always have a value (default 0)
+	// We validate their ranges separately
+	return nil
+}
+
+// validateActionConsistency validates that the action is consistent with current position state
+func (s *AIStrategy) validateActionConsistency(decision *TradingDecision) error {
+	action := decision.Decision.Action
+
+	// Reject "buy" action if position already exists
+	if action == "buy" && s.currentPosition != nil {
+		return errors.New("cannot buy when position already exists")
+	}
+
+	// Reject "close" action if no position exists
+	if action == "close" && s.currentPosition == nil {
+		return errors.New("cannot close when no position exists")
+	}
+
+	return nil
+}
+
+// validateExitPlan validates that exit plan is properly defined for buy actions
+func (s *AIStrategy) validateExitPlan(decision *TradingDecision) error {
+	exitPlan := decision.Decision.ExitPlan
+
+	if exitPlan.StopLossPrice <= 0 {
+		return errors.New("stop_loss_price must be greater than 0")
+	}
+
+	if exitPlan.TakeProfitPrice <= 0 {
+		return errors.New("take_profit_price must be greater than 0")
+	}
+
+	if exitPlan.InvalidationCondition == "" {
+		return errors.New("invalidation_condition is required")
+	}
+
+	// Validate that stop loss is below take profit (for long positions)
+	if exitPlan.StopLossPrice >= exitPlan.TakeProfitPrice {
+		return errors.New("stop_loss_price must be less than take_profit_price")
+	}
+
+	return nil
+}
+
+// createDefaultHoldDecision creates a default "hold" decision when validation fails
+func (s *AIStrategy) createDefaultHoldDecision(reason string) *TradingDecision {
+	s.logger.Info("Defaulting to HOLD action due to validation failure",
+		zap.String("reason", reason))
+
+	return &TradingDecision{
+		Decision: DecisionDetails{
+			Action:      "hold",
+			RiskPercent: 0.0,
+			Reasoning:   fmt.Sprintf("Validation failed: %s. Defaulting to hold for safety.", reason),
+			ExitPlan: ExitPlan{
+				StopLossPrice:         0.0,
+				TakeProfitPrice:       0.0,
+				InvalidationCondition: "",
+			},
+		},
+	}
 }
 
 // executeDecision executes the trading decision
@@ -392,7 +486,6 @@ func (s *AIStrategy) executeBuy(
 		zap.String("price", currentPrice.String()),
 		zap.String("position_value", positionValue.StringFixed(2)),
 		zap.Float64("risk_percent", decision.Decision.RiskPercent),
-		zap.Float64("confidence", decision.Decision.Confidence),
 		zap.String("reasoning", decision.Decision.Reasoning),
 		zap.String("order_id", orderID))
 
@@ -407,6 +500,7 @@ func (s *AIStrategy) executeBuy(
 		StopLoss:     decimal.NewFromFloat(decision.Decision.ExitPlan.StopLossPrice),
 		TakeProfit:   decimal.NewFromFloat(decision.Decision.ExitPlan.TakeProfitPrice),
 		Invalidation: decision.Decision.ExitPlan.InvalidationCondition,
+		EntryTime:    time.Now(),
 	}
 
 	return &entity.TradeEvent{

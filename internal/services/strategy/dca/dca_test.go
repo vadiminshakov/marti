@@ -1,4 +1,4 @@
-package strategy
+package dca
 
 import (
 	"context"
@@ -147,8 +147,7 @@ func TestDCAStrategy_Trade_NoExistingPurchases(t *testing.T) {
 
 	ctx := context.Background()
 	tradeEvent, err := ts.Trade(ctx)
-	require.Error(t, err, "expected ErrNoData when no existing purchases")
-	require.True(t, errors.Is(err, ErrNoData), "expected ErrNoData")
+	require.NoError(t, err, "expected no error when no existing purchases")
 	require.Nil(t, tradeEvent, "expected nil TradeEvent when no existing purchases")
 }
 

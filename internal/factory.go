@@ -11,9 +11,10 @@ import (
 	"github.com/vadiminshakov/marti/config"
 	"github.com/vadiminshakov/marti/internal/clients"
 	"github.com/vadiminshakov/marti/internal/entity"
-	"github.com/vadiminshakov/marti/internal/services/marketdata"
+	"github.com/vadiminshakov/marti/internal/services/market/collector"
 	"github.com/vadiminshakov/marti/internal/services/pricer"
-	"github.com/vadiminshakov/marti/internal/services/strategy"
+	"github.com/vadiminshakov/marti/internal/services/strategy/ai"
+	"github.com/vadiminshakov/marti/internal/services/strategy/dca"
 	"github.com/vadiminshakov/marti/internal/services/trader"
 	"go.uber.org/zap"
 )
@@ -30,7 +31,7 @@ type Pricer interface {
 }
 
 // createTraderAndPricer creates trader and pricer instances based on platform
-func createTraderAndPricer(platform string, pair entity.Pair, client any) (Trader, Pricer, error) {
+func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.MarketType, leverage int, client any) (Trader, Pricer, error) {
 	switch platform {
 	case "binance":
 		binanceClient, ok := client.(*binance.Client)
@@ -38,7 +39,7 @@ func createTraderAndPricer(platform string, pair entity.Pair, client any) (Trade
 			return nil, nil, fmt.Errorf("binance platform expects *binance.Client, got %T", client)
 		}
 
-		traderInstance, err := trader.NewBinanceTrader(binanceClient, pair)
+		traderInstance, err := trader.NewBinanceTrader(binanceClient, pair, marketType, leverage)
 		if err != nil {
 			return nil, nil, errors.Wrap(err, "failed to create BinanceTrader")
 		}
@@ -52,7 +53,7 @@ func createTraderAndPricer(platform string, pair entity.Pair, client any) (Trade
 			return nil, nil, fmt.Errorf("bybit platform expects *bybit.Client, got %T", client)
 		}
 
-		traderInstance, err := trader.NewBybitTrader(bybitClient, pair)
+		traderInstance, err := trader.NewBybitTrader(bybitClient, pair, marketType, leverage)
 		if err != nil {
 			return nil, nil, errors.Wrap(err, "failed to create BybitTrader")
 		}
@@ -119,7 +120,7 @@ func createDCAStrategy(
 	dcaPercentThresholdBuy decimal.Decimal,
 	dcaPercentThresholdSell decimal.Decimal,
 ) (TradingStrategy, error) {
-	dcaStrategy, err := strategy.NewDCAStrategy(
+	dcaStrategy, err := dca.NewDCAStrategy(
 		logger,
 		pair,
 		amountPercent,
@@ -152,32 +153,32 @@ func createAIStrategy(
 	llmClient := clients.NewOpenAICompatibleClient(conf.LLMAPIURL, conf.LLMAPIKey, conf.Model)
 
 	// Create kline provider based on platform
-	var klineProvider marketdata.KlineProvider
+	var klineProvider collector.KlineProvider
 	switch conf.Platform {
 	case "binance":
 		binanceClient, ok := client.(*binance.Client)
 		if !ok {
 			return nil, fmt.Errorf("binance platform expects *binance.Client for AI strategy")
 		}
-		klineProvider = marketdata.NewBinanceKlineProvider(binanceClient)
+		klineProvider = collector.NewBinanceKlineProvider(binanceClient)
 	case "bybit":
 		bybitClient, ok := client.(*bybit.Client)
 		if !ok {
 			return nil, fmt.Errorf("bybit platform expects *bybit.Client for AI strategy")
 		}
-		klineProvider = marketdata.NewBybitKlineProvider(bybitClient)
+		klineProvider = collector.NewBybitKlineProvider(bybitClient)
 	case "simulate":
 		simulateClient, ok := client.(*clients.SimulateClient)
 		if !ok {
 			return nil, fmt.Errorf("simulate platform expects *clients.SimulateClient for AI strategy")
 		}
-		klineProvider = marketdata.NewBinanceKlineProvider(simulateClient.GetBinanceClient())
+		klineProvider = collector.NewBinanceKlineProvider(simulateClient.GetBinanceClient())
 	default:
 		return nil, fmt.Errorf("unsupported platform for AI strategy: %s", conf.Platform)
 	}
 
 	// Create market data collector
-	marketDataCollector := marketdata.NewMarketDataCollector(
+	marketDataCollector := collector.NewMarketDataCollector(
 		klineProvider,
 		conf.Pair,
 		conf.KlineInterval,
@@ -185,7 +186,7 @@ func createAIStrategy(
 	)
 
 	// Create AI strategy
-	aiStrategy, err := strategy.NewAIStrategy(
+	aiStrategy, err := ai.NewAIStrategy(
 		logger,
 		conf.Pair,
 		llmClient,
