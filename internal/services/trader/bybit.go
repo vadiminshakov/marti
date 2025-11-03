@@ -309,7 +309,7 @@ func (t *BybitTrader) GetPosition(_ context.Context, pair entity.Pair) (*entity.
 	return latest, nil
 }
 
-func (t *BybitTrader) UpdatePositionStops(_ context.Context, pair entity.Pair, takeProfit, stopLoss decimal.Decimal) error {
+func (t *BybitTrader) SetPositionStops(_ context.Context, pair entity.Pair, takeProfit, stopLoss decimal.Decimal) error {
 	if t.marketType != entity.MarketTypeMargin {
 		return nil
 	}

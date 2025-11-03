@@ -255,8 +255,8 @@ func (t *SimulateTrader) GetPosition(ctx context.Context, pair entity.Pair) (*en
 	return &clone, nil
 }
 
-// UpdatePositionStops updates the simulated stop loss / take profit levels.
-func (t *SimulateTrader) UpdatePositionStops(ctx context.Context, pair entity.Pair, takeProfit, stopLoss decimal.Decimal) error {
+// SetPositionStops sets the simulated stop loss / take profit levels.
+func (t *SimulateTrader) SetPositionStops(ctx context.Context, pair entity.Pair, takeProfit, stopLoss decimal.Decimal) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 

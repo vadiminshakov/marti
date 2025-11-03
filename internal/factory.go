@@ -25,7 +25,7 @@ type traderService interface {
 	OrderExecuted(ctx context.Context, clientOrderID string) (bool, decimal.Decimal, error)
 	GetBalance(ctx context.Context, currency string) (decimal.Decimal, error)
 	GetPosition(ctx context.Context, pair entity.Pair) (*entity.Position, error)
-	UpdatePositionStops(ctx context.Context, pair entity.Pair, takeProfit, stopLoss decimal.Decimal) error
+	SetPositionStops(ctx context.Context, pair entity.Pair, takeProfit, stopLoss decimal.Decimal) error
 }
 
 type Pricer interface {

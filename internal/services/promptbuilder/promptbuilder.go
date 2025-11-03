@@ -80,15 +80,13 @@ Respond with ONLY valid JSON. No markdown, no code blocks, no additional text.
 **Required JSON structure:**
 
 {
-  "decision": {
-    "action": "buy|hold|close",
-    "risk_percent": 0.0,
-    "reasoning": "explain your analysis and decision",
-    "exit_plan": {
-      "stop_loss_price": 0.0,
-      "take_profit_price": 0.0,
-      "invalidation_condition": "specific measurable condition"
-    }
+  "action": "buy|hold|close",
+  "risk_percent": 0.0,
+  "reasoning": "explain your analysis and decision",
+  "exit_plan": {
+    "stop_loss_price": 0.0,
+    "take_profit_price": 0.0,
+    "invalidation_condition": "specific measurable condition"
   }
 }
 

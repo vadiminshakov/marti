@@ -260,7 +260,7 @@ func (t *BinanceTrader) GetPosition(ctx context.Context, pair entity.Pair) (*ent
 	return position, nil
 }
 
-func (t *BinanceTrader) UpdatePositionStops(ctx context.Context, pair entity.Pair, takeProfit, stopLoss decimal.Decimal) error {
+func (t *BinanceTrader) SetPositionStops(ctx context.Context, pair entity.Pair, takeProfit, stopLoss decimal.Decimal) error {
 	if t.marketType != entity.MarketTypeMargin {
 		return nil
 	}

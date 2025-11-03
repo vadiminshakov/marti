@@ -8,13 +8,8 @@ import (
 	"github.com/pkg/errors"
 )
 
-// TradingDecision represents the AI's trading decision.
-type TradingDecision struct {
-	Decision DecisionDetails `json:"decision"`
-}
-
-// DecisionDetails contains the details of the trading decision.
-type DecisionDetails struct {
+// Decision represents the AI's trading decision.
+type Decision struct {
 	Action      string   `json:"action"`
 	RiskPercent float64  `json:"risk_percent"`
 	Reasoning   string   `json:"reasoning"`
@@ -28,106 +23,42 @@ type ExitPlan struct {
 	InvalidationCondition string  `json:"invalidation_condition"`
 }
 
-// DecisionSeverity represents diagnostic level for decision parsing.
-type DecisionSeverity string
-
-const (
-	DecisionSeverityInfo  DecisionSeverity = "info"
-	DecisionSeverityWarn  DecisionSeverity = "warn"
-	DecisionSeverityError DecisionSeverity = "error"
-)
-
-// DecisionParseOutcome captures the result of parsing the AI decision payload.
-type DecisionParseOutcome struct {
-	Decision  *TradingDecision
-	Defaulted bool
-	Reason    string
-	Severity  DecisionSeverity
-}
-
-// ParseTradingDecision builds a validated trading decision from raw LLM response.
-func ParseTradingDecision(raw string, hasPosition bool) (*DecisionParseOutcome, error) {
+// NewDecision builds a validated trading decision from raw LLM response.
+func NewDecision(raw string, hasPosition bool) (*Decision, error) {
 	response := sanitizeDecisionPayload(raw)
 
 	if !json.Valid([]byte(response)) {
-		reason := "Invalid JSON structure"
-		return &DecisionParseOutcome{
-			Decision:  createDefaultHoldDecision(reason),
-			Defaulted: true,
-			Reason:    reason,
-			Severity:  DecisionSeverityError,
-		}, nil
+		return nil, errors.New("invalid JSON structure")
 	}
 
-	var decision TradingDecision
+	var decision Decision
 	if err := json.Unmarshal([]byte(response), &decision); err != nil {
-		reason := "JSON unmarshal error"
-		return &DecisionParseOutcome{
-			Decision:  createDefaultHoldDecision(reason),
-			Defaulted: true,
-			Reason:    reason,
-			Severity:  DecisionSeverityError,
-		}, nil
+		return nil, errors.Wrap(err, "JSON unmarshal error")
 	}
 
 	if err := validateDecisionRequiredFields(&decision); err != nil {
-		reason := fmt.Sprintf("Missing required fields: %v", err)
-		return &DecisionParseOutcome{
-			Decision:  createDefaultHoldDecision(reason),
-			Defaulted: true,
-			Reason:    reason,
-			Severity:  DecisionSeverityError,
-		}, nil
+		return nil, errors.Wrap(err, "missing required fields")
 	}
 
 	if err := validateDecisionAction(&decision); err != nil {
-		reason := err.Error()
-		return &DecisionParseOutcome{
-			Decision:  createDefaultHoldDecision(reason),
-			Defaulted: true,
-			Reason:    reason,
-			Severity:  DecisionSeverityError,
-		}, nil
+		return nil, err
 	}
 
 	if err := validateDecisionRiskPercent(&decision); err != nil {
-		reason := err.Error()
-		return &DecisionParseOutcome{
-			Decision:  createDefaultHoldDecision(reason),
-			Defaulted: true,
-			Reason:    reason,
-			Severity:  DecisionSeverityError,
-		}, nil
+		return nil, err
 	}
 
 	if err := validateDecisionActionConsistency(&decision, hasPosition); err != nil {
-		reason := fmt.Sprintf("Action consistency error: %v", err)
-		return &DecisionParseOutcome{
-			Decision:  createDefaultHoldDecision(reason),
-			Defaulted: true,
-			Reason:    reason,
-			Severity:  DecisionSeverityWarn,
-		}, nil
+		return nil, errors.Wrap(err, "action consistency error")
 	}
 
-	if decision.Decision.Action == "buy" {
+	if decision.Action == "buy" {
 		if err := validateDecisionExitPlan(&decision); err != nil {
-			reason := fmt.Sprintf("Exit plan validation error: %v", err)
-			return &DecisionParseOutcome{
-				Decision:  createDefaultHoldDecision(reason),
-				Defaulted: true,
-				Reason:    reason,
-				Severity:  DecisionSeverityError,
-			}, nil
+			return nil, errors.Wrap(err, "exit plan validation error")
 		}
 	}
 
-	return &DecisionParseOutcome{
-		Decision:  &decision,
-		Defaulted: false,
-		Reason:    "Decision validation passed",
-		Severity:  DecisionSeverityInfo,
-	}, nil
+	return &decision, nil
 }
 
 func sanitizeDecisionPayload(raw string) string {
@@ -138,33 +69,33 @@ func sanitizeDecisionPayload(raw string) string {
 	return strings.TrimSpace(response)
 }
 
-func validateDecisionRequiredFields(decision *TradingDecision) error {
-	if decision.Decision.Action == "" {
+func validateDecisionRequiredFields(decision *Decision) error {
+	if decision.Action == "" {
 		return errors.New("action field is required")
 	}
-	if decision.Decision.Reasoning == "" {
+	if decision.Reasoning == "" {
 		return errors.New("reasoning field is required")
 	}
 	return nil
 }
 
-func validateDecisionAction(decision *TradingDecision) error {
+func validateDecisionAction(decision *Decision) error {
 	validActions := map[string]bool{"buy": true, "sell": true, "hold": true, "close": true}
-	if !validActions[decision.Decision.Action] {
-		return fmt.Errorf("Invalid action: %s", decision.Decision.Action)
+	if !validActions[decision.Action] {
+		return fmt.Errorf("Invalid action: %s", decision.Action)
 	}
 	return nil
 }
 
-func validateDecisionRiskPercent(decision *TradingDecision) error {
-	if decision.Decision.RiskPercent < 0 || decision.Decision.RiskPercent > 15 {
-		return fmt.Errorf("Invalid risk_percent: %f (must be 0.0-15.0)", decision.Decision.RiskPercent)
+func validateDecisionRiskPercent(decision *Decision) error {
+	if decision.RiskPercent < 0 || decision.RiskPercent > 15 {
+		return fmt.Errorf("Invalid risk_percent: %f (must be 0.0-15.0)", decision.RiskPercent)
 	}
 	return nil
 }
 
-func validateDecisionActionConsistency(decision *TradingDecision, hasPosition bool) error {
-	action := decision.Decision.Action
+func validateDecisionActionConsistency(decision *Decision, hasPosition bool) error {
+	action := decision.Action
 
 	if action == "buy" && hasPosition {
 		return errors.New("cannot buy when position already exists")
@@ -177,8 +108,8 @@ func validateDecisionActionConsistency(decision *TradingDecision, hasPosition bo
 	return nil
 }
 
-func validateDecisionExitPlan(decision *TradingDecision) error {
-	exitPlan := decision.Decision.ExitPlan
+func validateDecisionExitPlan(decision *Decision) error {
+	exitPlan := decision.ExitPlan
 
 	if exitPlan.StopLossPrice <= 0 {
 		return errors.New("stop_loss_price must be greater than 0")
@@ -197,19 +128,4 @@ func validateDecisionExitPlan(decision *TradingDecision) error {
 	}
 
 	return nil
-}
-
-func createDefaultHoldDecision(reason string) *TradingDecision {
-	return &TradingDecision{
-		Decision: DecisionDetails{
-			Action:      "hold",
-			RiskPercent: 0.0,
-			Reasoning:   fmt.Sprintf("Validation failed: %s. Defaulting to hold for safety.", reason),
-			ExitPlan: ExitPlan{
-				StopLossPrice:         0.0,
-				TakeProfitPrice:       0.0,
-				InvalidationCondition: "",
-			},
-		},
-	}
 }

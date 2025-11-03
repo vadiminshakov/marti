@@ -28,7 +28,7 @@ type tradersvc interface {
 	OrderExecuted(ctx context.Context, clientOrderID string) (executed bool, filledAmount decimal.Decimal, err error)
 	GetBalance(ctx context.Context, currency string) (decimal.Decimal, error)
 	GetPosition(ctx context.Context, pair entity.Pair) (*entity.Position, error)
-	UpdatePositionStops(ctx context.Context, pair entity.Pair, takeProfit, stopLoss decimal.Decimal) error
+	SetPositionStops(ctx context.Context, pair entity.Pair, takeProfit, stopLoss decimal.Decimal) error
 }
 
 type pricer interface {
@@ -218,40 +218,24 @@ func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 		return nil, errors.Wrap(err, "failed to get AI decision")
 	}
 
-	// parse and validate decision; default "hold" is produced on validation failures
-	outcome, err := entity.ParseTradingDecision(response, s.currentPosition != nil)
+	// parse and validate decision
+	decision, err := entity.NewDecision(response, s.currentPosition != nil)
 	if err != nil {
 		// this should rarely happen now, but keep for safety
-		s.logger.Error("Critical error in parseDecision",
+		s.logger.Error("Decision validation failed",
 			zap.Error(err),
 			zap.String("response", response))
 		return nil, errors.Wrap(err, "failed to parse AI decision")
 	}
 
-	if outcome.Defaulted {
-		fields := []zap.Field{zap.String("reason", outcome.Reason)}
-		switch outcome.Severity {
-		case entity.DecisionSeverityWarn:
-			s.logger.Warn("Decision validation warning; defaulting to HOLD", fields...)
-		case entity.DecisionSeverityError:
-			s.logger.Error("Decision validation failed; defaulting to HOLD", fields...)
-		default:
-			s.logger.Info("Decision validation info; defaulting to HOLD", fields...)
-		}
-	}
-
-	decision := outcome.Decision
-
-	if !outcome.Defaulted {
-		s.logger.Info("Decision validation passed",
-			zap.String("action", decision.Decision.Action),
-			zap.Float64("risk_percent", decision.Decision.RiskPercent))
-	}
+	s.logger.Info("Decision validation passed",
+		zap.String("action", decision.Action),
+		zap.Float64("risk_percent", decision.RiskPercent))
 
 	s.logger.Info("📊 AI Decision",
-		zap.String("action", strings.ToUpper(decision.Decision.Action)),
-		zap.Float64("risk_percent", decision.Decision.RiskPercent),
-		zap.String("reasoning", decision.Decision.Reasoning))
+		zap.String("action", strings.ToUpper(decision.Action)),
+		zap.Float64("risk_percent", decision.RiskPercent),
+		zap.String("reasoning", decision.Reasoning))
 
 	// execute decision
 	return s.executeDecision(ctx, decision, snapshot)
@@ -327,10 +311,10 @@ func (s *AIStrategy) buildPrompt(snapshot MarketSnapshot) string {
 // executeDecision executes the trading decision
 func (s *AIStrategy) executeDecision(
 	ctx context.Context,
-	decision *entity.TradingDecision,
+	decision *entity.Decision,
 	snapshot MarketSnapshot,
 ) (*entity.TradeEvent, error) {
-	switch decision.Decision.Action {
+	switch decision.Action {
 	case "buy":
 		return s.executeBuy(ctx, decision, snapshot)
 	case "close":
@@ -341,14 +325,14 @@ func (s *AIStrategy) executeDecision(
 		s.logger.Warn("Short selling not yet supported, treating as HOLD")
 		return nil, nil
 	default:
-		return nil, fmt.Errorf("unknown action: %s", decision.Decision.Action)
+		return nil, fmt.Errorf("unknown action: %s", decision.Action)
 	}
 }
 
 // executeBuy executes a buy order
 func (s *AIStrategy) executeBuy(
 	ctx context.Context,
-	decision *entity.TradingDecision,
+	decision *entity.Decision,
 	snapshot MarketSnapshot,
 ) (*entity.TradeEvent, error) {
 	if s.currentPosition != nil {
@@ -357,11 +341,11 @@ func (s *AIStrategy) executeBuy(
 	}
 
 	// Calculate position size based on risk percent
-	budget := entity.NewRiskBudget(decision.Decision.RiskPercent)
+	budget := entity.NewRiskBudget(decision.RiskPercent)
 	positionValue, amount := budget.Allocate(snapshot.QuoteBalance, snapshot.Price())
 	if amount.LessThanOrEqual(decimal.Zero) {
 		s.logger.Warn("Calculated position amount is zero; skipping buy execution",
-			zap.Float64("risk_percent", decision.Decision.RiskPercent),
+			zap.Float64("risk_percent", decision.RiskPercent),
 			zap.String("quote_balance", snapshot.QuoteBalance.String()))
 		return nil, nil
 	}
@@ -372,8 +356,8 @@ func (s *AIStrategy) executeBuy(
 		zap.String("amount", amount.String()),
 		zap.String("price", snapshot.Price().String()),
 		zap.String("position_value", positionValue.StringFixed(2)),
-		zap.Float64("risk_percent", decision.Decision.RiskPercent),
-		zap.String("reasoning", decision.Decision.Reasoning),
+		zap.Float64("risk_percent", decision.RiskPercent),
+		zap.String("reasoning", decision.Reasoning),
 		zap.String("order_id", orderID))
 
 	if err := s.trader.Buy(ctx, amount, orderID); err != nil {
@@ -387,12 +371,12 @@ func (s *AIStrategy) executeBuy(
 		}
 	}
 
-	exitPlan := decision.Decision.ExitPlan
+	exitPlan := decision.ExitPlan
 	takeProfit := decimal.NewFromFloat(exitPlan.TakeProfitPrice)
 	stopLoss := decimal.NewFromFloat(exitPlan.StopLossPrice)
 
 	if takeProfit.GreaterThan(decimal.Zero) || stopLoss.GreaterThan(decimal.Zero) {
-		if err := s.trader.UpdatePositionStops(ctx, s.pair, takeProfit, stopLoss); err != nil {
+		if err := s.trader.SetPositionStops(ctx, s.pair, takeProfit, stopLoss); err != nil {
 			s.logger.Warn("Failed to update position stops on exchange", zap.Error(err))
 		}
 	}
