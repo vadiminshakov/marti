@@ -11,25 +11,8 @@ import (
 	"github.com/cinar/indicator/v2/trend"
 	"github.com/cinar/indicator/v2/volatility"
 	"github.com/shopspring/decimal"
+	"github.com/vadiminshakov/marti/internal/entity"
 )
-
-// IndicatorData holds calculated technical indicators for a specific time period
-type IndicatorData struct {
-	// EMA20 is the 20-period Exponential Moving Average
-	EMA20 decimal.Decimal
-	// EMA50 is the 50-period Exponential Moving Average
-	EMA50 decimal.Decimal
-	// MACD is the MACD indicator value
-	MACD decimal.Decimal
-	// RSI7 is the 7-period Relative Strength Index
-	RSI7 decimal.Decimal
-	// RSI14 is the 14-period Relative Strength Index
-	RSI14 decimal.Decimal
-	// ATR3 is the 3-period Average True Range
-	ATR3 decimal.Decimal
-	// ATR14 is the 14-period Average True Range
-	ATR14 decimal.Decimal
-}
 
 // PriceData represents OHLC (Open, High, Low, Close) price data
 type PriceData struct {
@@ -150,8 +133,8 @@ func CalculateATR(priceData []PriceData, period int) ([]decimal.Decimal, error) 
 }
 
 // CalculateAllIndicators calculates all technical indicators for the given price data
-// Returns a slice of IndicatorData, one for each data point where all indicators can be calculated
-func CalculateAllIndicators(priceData []PriceData) ([]IndicatorData, error) {
+// Returns a slice of TechnicalIndicators, one for each data point where all indicators can be calculated
+func CalculateAllIndicators(priceData []PriceData) ([]entity.TechnicalIndicators, error) {
 	if len(priceData) < 50 {
 		return nil, fmt.Errorf("not enough data points: need at least 50, got %d", len(priceData))
 	}
@@ -227,10 +210,10 @@ func CalculateAllIndicators(priceData []PriceData) ([]IndicatorData, error) {
 	offsetATR3 := len(atr3) - minLen
 	offsetATR14 := len(atr14) - minLen
 
-	result := make([]IndicatorData, minLen)
+	result := make([]entity.TechnicalIndicators, minLen)
 
 	for i := 0; i < minLen; i++ {
-		result[i] = IndicatorData{
+		result[i] = entity.TechnicalIndicators{
 			EMA20: ema20[offsetEMA20+i],
 			EMA50: ema50[offsetEMA50+i],
 			MACD:  macd[offsetMACD+i],

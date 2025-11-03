@@ -55,13 +55,15 @@ type Config struct {
 	LLMAPIKey string
 	// Model specifies which LLM model to use (e.g., "deepseek/deepseek-chat", "openai/gpt-4")
 	Model string
-	// KlineInterval defines the interval for kline data (e.g., "1m", "3m", "5m", "1h")
-	KlineInterval string
+	// PrimaryTimeframe defines the primary timeframe interval for market data (e.g., "1m", "3m", "5m", "1h")
+	PrimaryTimeframe string
 	// HigherTimeframe defines the higher timeframe interval for multi-timeframe analysis (e.g., "15m" when primary is "3m")
 	// If not specified, defaults to "15m" for 3m primary timeframe
 	HigherTimeframe string
 	// LookbackPeriods defines how many historical periods to analyze
 	LookbackPeriods int
+	// HigherLookbackPeriods defines how many historical periods to fetch/analyze for the higher timeframe
+	HigherLookbackPeriods int
 	// MaxLeverage is the maximum leverage allowed for AI strategy trades
 	MaxLeverage int
 }
@@ -81,13 +83,15 @@ type ConfigTmp struct {
 	DcaPercentThresholdSellStr string `yaml:"dca_percent_threshold_sell,omitempty"`
 
 	// AI strategy fields
-	LLMAPIURL          string `yaml:"llm_api_url,omitempty"`
-	LLMAPIKey          string `yaml:"llm_api_key,omitempty"`
-	Model              string `yaml:"model,omitempty"`
-	KlineInterval      string `yaml:"kline_interval,omitempty"`
-	HigherTimeframe    string `yaml:"higher_timeframe,omitempty"`
-	LookbackPeriodsStr string `yaml:"lookback_periods,omitempty"`
-	MaxLeverageStr     string `yaml:"max_leverage,omitempty"`
+	LLMAPIURL                 string `yaml:"llm_api_url,omitempty"`
+	LLMAPIKey                 string `yaml:"llm_api_key,omitempty"`
+	Model                     string `yaml:"model,omitempty"`
+	PrimaryTimeframe          string `yaml:"primary_timeframe,omitempty"`
+	HigherTimeframe           string `yaml:"higher_timeframe,omitempty"`
+	PrimaryLookbackPeriodsStr string `yaml:"primary_lookback_periods,omitempty"`
+	LookbackPeriodsStr        string `yaml:"lookback_periods,omitempty"` // legacy alias
+	HigherLookbackPeriodsStr  string `yaml:"higher_lookback_periods,omitempty"`
+	MaxLeverageStr            string `yaml:"max_leverage,omitempty"`
 }
 
 // Get retrieves configuration settings from either YAML file or command-line arguments.
@@ -277,10 +281,10 @@ func getYaml(path string) ([]Config, error) {
 				newConfig.Model = c.Model
 			}
 
-			if c.KlineInterval == "" {
-				newConfig.KlineInterval = "3m" // Default interval
+			if c.PrimaryTimeframe == "" {
+				newConfig.PrimaryTimeframe = "3m" // Default interval
 			} else {
-				newConfig.KlineInterval = c.KlineInterval
+				newConfig.PrimaryTimeframe = c.PrimaryTimeframe
 			}
 
 			// Parse HigherTimeframe (defaults to "15m" for multi-timeframe analysis)
@@ -290,18 +294,37 @@ func getYaml(path string) ([]Config, error) {
 				newConfig.HigherTimeframe = c.HigherTimeframe
 			}
 
-			// Parse LookbackPeriods
-			if c.LookbackPeriodsStr == "" {
+			// Resolve primary lookback value (new name: primary_lookback_periods; old name: lookback_periods)
+			primaryLookbackRaw := c.PrimaryLookbackPeriodsStr
+			// fallback to legacy field if new one not set
+			if primaryLookbackRaw == "" {
+				primaryLookbackRaw = c.LookbackPeriodsStr
+			}
+			if primaryLookbackRaw == "" {
 				newConfig.LookbackPeriods = 50 // Default: enough for indicators
 			} else {
-				lookback, err := strconv.Atoi(c.LookbackPeriodsStr)
+				lookback, err := strconv.Atoi(primaryLookbackRaw)
 				if err != nil {
-					return nil, fmt.Errorf("incorrect 'lookback_periods' param in yaml config (must be an integer), error: %w", err)
+					return nil, fmt.Errorf("incorrect 'primary_lookback_periods' (or legacy 'lookback_periods') param in yaml config (must be an integer), error: %w", err)
 				}
 				if lookback < 50 {
-					return nil, fmt.Errorf("lookback_periods must be at least 50 for indicator calculation, got %d", lookback)
+					return nil, fmt.Errorf("primary_lookback_periods must be at least 50 for indicator calculation, got %d", lookback)
 				}
 				newConfig.LookbackPeriods = lookback
+			}
+
+			// Parse HigherLookbackPeriods (applies to higher timeframe fetch)
+			if c.HigherLookbackPeriodsStr == "" {
+				newConfig.HigherLookbackPeriods = 60 // Default: aligns with previous constant
+			} else {
+				hLookback, err := strconv.Atoi(c.HigherLookbackPeriodsStr)
+				if err != nil {
+					return nil, fmt.Errorf("incorrect 'higher_lookback_periods' param in yaml config (must be an integer), error: %w", err)
+				}
+				if hLookback < 20 { // minimal sensible amount for higher timeframe summary + indicators
+					return nil, fmt.Errorf("higher_lookback_periods must be at least 20, got %d", hLookback)
+				}
+				newConfig.HigherLookbackPeriods = hLookback
 			}
 
 			// Parse MaxLeverage

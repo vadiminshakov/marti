@@ -11,8 +11,6 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/internal/entity"
 	"github.com/vadiminshakov/marti/internal/services/market/analysis"
-	"github.com/vadiminshakov/marti/internal/services/market/collector"
-	"github.com/vadiminshakov/marti/internal/services/market/indicators"
 	"go.uber.org/zap"
 )
 
@@ -162,16 +160,6 @@ func NewPromptBuilder(pair entity.Pair, logger *zap.Logger) *PromptBuilder {
 	}
 }
 
-// TimeframeSnapshot contains summary data from a higher timeframe
-type TimeframeSnapshot struct {
-	Timeframe string
-	Price     decimal.Decimal
-	EMA20     decimal.Decimal
-	EMA50     decimal.Decimal
-	RSI14     decimal.Decimal
-	Trend     string // "bullish", "bearish", "neutral"
-}
-
 // Position represents an open trading position
 type Position struct {
 	EntryPrice   decimal.Decimal
@@ -184,13 +172,9 @@ type Position struct {
 
 // MarketContext contains all data needed for prompt building
 type MarketContext struct {
-	// Primary timeframe data
-	Klines         []collector.KlineData
-	Indicators     []indicators.IndicatorData
-	VolumeAnalysis analysis.VolumeAnalysis
-
-	// Multi-timeframe data (optional)
-	HigherTimeframe *TimeframeSnapshot
+	Primary         *entity.Timeframe
+	VolumeAnalysis  analysis.VolumeAnalysis
+	HigherTimeframe *entity.Timeframe
 
 	// Position data
 	CurrentPosition *Position
@@ -204,24 +188,27 @@ func (pb *PromptBuilder) BuildUserPrompt(ctx MarketContext) string {
 	sb.WriteString(fmt.Sprintf("# Market Analysis for %s\n\n", pb.pair.String()))
 
 	// Multi-timeframe overview
-	if ctx.HigherTimeframe != nil {
-		sb.WriteString(pb.formatMultiTimeframe(ctx))
+	if overview := pb.formatMultiTimeframe(ctx); overview != "" {
+		sb.WriteString(overview)
 	}
 
 	// Recent market data (last 20 candles)
-	sb.WriteString(pb.formatRecentData(ctx.Klines, ctx.Indicators, 20))
+	sb.WriteString(pb.formatRecentData(ctx.Primary, 20))
 
 	// Historical context (older candles)
-	if len(ctx.Klines) > 20 {
-		sb.WriteString(pb.formatHistoricalSummary(ctx.Klines, ctx.Indicators))
-	}
+	sb.WriteString(pb.formatHistoricalSummary(ctx.Primary))
 
 	// Volume analysis
 	sb.WriteString(pb.formatVolumeAnalysis(ctx.VolumeAnalysis))
 
 	// Position information
 	if ctx.CurrentPosition != nil {
-		currentPrice := ctx.Klines[len(ctx.Klines)-1].Close
+		currentPrice := decimal.Zero
+		if ctx.Primary != nil {
+			if price, ok := ctx.Primary.LatestPrice(); ok {
+				currentPrice = price
+			}
+		}
 		sb.WriteString(pb.formatPosition(ctx.CurrentPosition, currentPrice))
 	} else {
 		sb.WriteString("## Current Position\n\n")
@@ -246,32 +233,22 @@ func (pb *PromptBuilder) BuildUserPrompt(ctx MarketContext) string {
 
 // formatRecentData formats the last N candles with full OHLCV data and indicators
 // in a compact table format to save tokens while maintaining readability
-func (pb *PromptBuilder) formatRecentData(
-	klines []collector.KlineData,
-	indicatorData []indicators.IndicatorData,
-	limit int,
-) string {
+func (pb *PromptBuilder) formatRecentData(primary *entity.Timeframe, limit int) string {
 	var sb strings.Builder
 
 	sb.WriteString("## Recent Market Data (Last 20 Candles)\n\n")
 
-	if len(klines) == 0 {
+	if primary == nil || len(primary.Candles) == 0 {
 		sb.WriteString("No data available\n\n")
 		return sb.String()
 	}
+
+	klines := primary.Candles
 
 	// Calculate start index for last N candles
 	startIdx := len(klines) - limit
 	if startIdx < 0 {
 		startIdx = 0
-	}
-
-	// Calculate corresponding indicator start index
-	// Indicators array may be shorter due to warmup periods
-	indicatorOffset := len(klines) - len(indicatorData)
-	indicatorStartIdx := startIdx - indicatorOffset
-	if indicatorStartIdx < 0 {
-		indicatorStartIdx = 0
 	}
 
 	// Table header
@@ -285,12 +262,7 @@ func (pb *PromptBuilder) formatRecentData(
 		timeStr := k.OpenTime.Format("15:04")
 
 		// Get corresponding indicator data if available
-		indIdx := i - indicatorOffset
-		var ind indicators.IndicatorData
-		hasIndicators := indIdx >= 0 && indIdx < len(indicatorData)
-		if hasIndicators {
-			ind = indicatorData[indIdx]
-		}
+		ind, hasIndicators := primary.IndicatorForCandle(i)
 
 		// Format row with 2 decimal places for prices, appropriate precision for indicators
 		sb.WriteString(fmt.Sprintf("%-8s | %8.2f | %8.2f | %8.2f | %8.2f | %8.2f",
@@ -331,26 +303,22 @@ func toFloat(d decimal.Decimal) float64 {
 
 // formatHistoricalSummary formats older candles (21-100) with only close prices
 // and key indicators in compact array format to minimize token usage
-func (pb *PromptBuilder) formatHistoricalSummary(
-	klines []collector.KlineData,
-	indicatorData []indicators.IndicatorData,
-) string {
+func (pb *PromptBuilder) formatHistoricalSummary(primary *entity.Timeframe) string {
 	var sb strings.Builder
 
-	sb.WriteString("## Historical Context (Older Candles)\n\n")
-
-	if len(klines) <= 20 {
+	if primary == nil || len(primary.Candles) <= 20 {
 		return ""
 	}
+
+	klines := primary.Candles
+
+	sb.WriteString("## Historical Context (Older Candles)\n\n")
 
 	// Get historical data (everything except the last 20)
 	endIdx := len(klines) - 20
 	if endIdx <= 0 {
 		return ""
 	}
-
-	// Calculate indicator offset
-	indicatorOffset := len(klines) - len(indicatorData)
 
 	// Close prices
 	sb.WriteString("**Close Prices:** [")
@@ -363,16 +331,15 @@ func (pb *PromptBuilder) formatHistoricalSummary(
 	sb.WriteString("]\n\n")
 
 	// EMA20 (if available)
-	if len(indicatorData) > 0 {
+	if len(primary.Indicators) > 0 {
 		sb.WriteString("**EMA20:** [")
 		first := true
 		for i := 0; i < endIdx; i++ {
-			indIdx := i - indicatorOffset
-			if indIdx >= 0 && indIdx < len(indicatorData) {
+			if ind, ok := primary.IndicatorForCandle(i); ok {
 				if !first {
 					sb.WriteString(",")
 				}
-				sb.WriteString(fmt.Sprintf("%.2f", toFloat(indicatorData[indIdx].EMA20)))
+				sb.WriteString(fmt.Sprintf("%.2f", toFloat(ind.EMA20)))
 				first = false
 			}
 		}
@@ -382,12 +349,11 @@ func (pb *PromptBuilder) formatHistoricalSummary(
 		sb.WriteString("**RSI14:** [")
 		first = true
 		for i := 0; i < endIdx; i++ {
-			indIdx := i - indicatorOffset
-			if indIdx >= 0 && indIdx < len(indicatorData) {
+			if ind, ok := primary.IndicatorForCandle(i); ok {
 				if !first {
 					sb.WriteString(",")
 				}
-				sb.WriteString(fmt.Sprintf("%.1f", toFloat(indicatorData[indIdx].RSI14)))
+				sb.WriteString(fmt.Sprintf("%.1f", toFloat(ind.RSI14)))
 				first = false
 			}
 		}
@@ -452,47 +418,52 @@ func (pb *PromptBuilder) formatVolumeAnalysis(volume analysis.VolumeAnalysis) st
 func (pb *PromptBuilder) formatMultiTimeframe(ctx MarketContext) string {
 	var sb strings.Builder
 
+	hasPrimary := ctx.Primary != nil && ctx.Primary.Summary != nil
+	hasHigher := ctx.HigherTimeframe != nil && ctx.HigherTimeframe.Summary != nil
+
+	if !hasPrimary && !hasHigher {
+		return ""
+	}
+
 	sb.WriteString("## Multi-Timeframe Overview\n\n")
 
 	// Primary timeframe (current)
-	if len(ctx.Klines) > 0 && len(ctx.Indicators) > 0 {
-		latestKline := ctx.Klines[len(ctx.Klines)-1]
-		latestInd := ctx.Indicators[len(ctx.Indicators)-1]
-
-		primaryTrend := determineTrend(latestKline.Close, latestInd.EMA20, latestInd.EMA50)
+	if hasPrimary {
+		primarySummary := ctx.Primary.Summary
 
 		sb.WriteString("**Primary Timeframe:**\n")
 		sb.WriteString(fmt.Sprintf("- Price: %s | EMA20: %s | EMA50: %s | RSI14: %.1f\n",
-			latestKline.Close.StringFixed(2),
-			latestInd.EMA20.StringFixed(2),
-			latestInd.EMA50.StringFixed(2),
-			toFloat(latestInd.RSI14),
+			primarySummary.Price.StringFixed(2),
+			primarySummary.EMA20.StringFixed(2),
+			primarySummary.EMA50.StringFixed(2),
+			toFloat(primarySummary.RSI14),
 		))
-		sb.WriteString(fmt.Sprintf("- Trend: %s\n", primaryTrend))
+		sb.WriteString(fmt.Sprintf("- Trend: %s\n", primarySummary.Trend.Title()))
 	}
 
 	// Higher timeframe
-	if ctx.HigherTimeframe != nil {
-		htf := ctx.HigherTimeframe
-		sb.WriteString(fmt.Sprintf("\n**Higher Timeframe (%s):**\n", htf.Timeframe))
+	if hasHigher {
+		htf := ctx.HigherTimeframe.Summary
+		sb.WriteString(fmt.Sprintf("\n**Higher Timeframe (%s):**\n", htf.Interval))
 		sb.WriteString(fmt.Sprintf("- Price: %s | EMA20: %s | EMA50: %s | RSI14: %.1f\n",
 			htf.Price.StringFixed(2),
 			htf.EMA20.StringFixed(2),
 			htf.EMA50.StringFixed(2),
 			toFloat(htf.RSI14),
 		))
-		sb.WriteString(fmt.Sprintf("- Trend: %s\n", htf.Trend))
+		sb.WriteString(fmt.Sprintf("- Trend: %s\n", htf.Trend.Title()))
 
 		// Check trend alignment
-		if len(ctx.Klines) > 0 && len(ctx.Indicators) > 0 {
-			latestKline := ctx.Klines[len(ctx.Klines)-1]
-			latestInd := ctx.Indicators[len(ctx.Indicators)-1]
-			primaryTrend := determineTrend(latestKline.Close, latestInd.EMA20, latestInd.EMA50)
+		if hasPrimary {
+			primaryTrend := ctx.Primary.Summary.Trend
 
-			if primaryTrend == htf.Trend && primaryTrend != "Neutral" {
-				sb.WriteString(fmt.Sprintf("\n✅ **Timeframes Aligned:** Both timeframes show %s trend\n", primaryTrend))
+			if primaryTrend == htf.Trend && primaryTrend != entity.TrendDirectionNeutral {
+				sb.WriteString(fmt.Sprintf("\n✅ **Timeframes Aligned:** Both timeframes show %s trend\n", primaryTrend.Title()))
 			} else if primaryTrend != htf.Trend {
-				sb.WriteString(fmt.Sprintf("\n⚠️ **Timeframe Divergence:** Primary is %s, Higher is %s\n", primaryTrend, htf.Trend))
+				sb.WriteString(fmt.Sprintf("\n⚠️ **Timeframe Divergence:** Primary is %s, Higher is %s\n",
+					primaryTrend.Title(),
+					htf.Trend.Title(),
+				))
 			}
 		}
 	}
@@ -500,16 +471,6 @@ func (pb *PromptBuilder) formatMultiTimeframe(ctx MarketContext) string {
 	sb.WriteString("\n")
 
 	return sb.String()
-}
-
-// determineTrend determines trend direction based on price and EMA alignment
-func determineTrend(price, ema20, ema50 decimal.Decimal) string {
-	if price.GreaterThan(ema20) && ema20.GreaterThan(ema50) {
-		return "Bullish"
-	} else if price.LessThan(ema20) && ema20.LessThan(ema50) {
-		return "Bearish"
-	}
-	return "Neutral"
 }
 
 // formatPosition formats open position information including entry price,

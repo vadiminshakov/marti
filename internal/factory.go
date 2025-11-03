@@ -181,8 +181,6 @@ func createAIStrategy(
 	marketDataCollector := collector.NewMarketDataCollector(
 		klineProvider,
 		conf.Pair,
-		conf.KlineInterval,
-		conf.LookbackPeriods,
 	)
 
 	// Create AI strategy
@@ -193,6 +191,10 @@ func createAIStrategy(
 		marketDataCollector,
 		pricer,
 		trader,
+		conf.PrimaryTimeframe,
+		conf.HigherTimeframe,
+		conf.LookbackPeriods,
+		conf.HigherLookbackPeriods,
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create AI strategy")

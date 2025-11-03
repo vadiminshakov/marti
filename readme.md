@@ -66,10 +66,40 @@ Create a `config.yaml` file:
   llm_api_url: "https://openrouter.ai/api/v1/chat/completions"
   llm_api_key: "sk-your-api-key-here"
   model: "deepseek/deepseek-chat"    # LLM model to use
-  kline_interval: "3m"               # Primary timeframe for analysis
+  primary_timeframe: "3m"            # Primary timeframe for analysis
   higher_timeframe: "15m"            # Higher timeframe for trend confirmation
   lookback_periods: 100              # Historical candles to analyze (min 50)
   pollpriceinterval: 3m              # Decision-making interval
+```
+
+### Simulation Mode Examples
+
+You can use `platform: simulate` to run strategies without hitting a real exchange API (helpful for local testing/backtesting):
+
+```yaml
+# DCA (simulate)
+- pair: BTC_USDT
+  platform: simulate
+  strategy: dca
+  amount: 10
+  pollpriceinterval: 2s
+  max_dca_trades: 8
+  dca_percent_threshold_buy: 2
+  dca_percent_threshold_sell: 3
+
+# AI (simulate)
+- pair: SOL_USDT
+  platform: simulate
+  strategy: ai
+  market_type: spot
+  llm_api_url: "https://openrouter.ai/api/v1/chat/completions"
+  llm_api_key: "sk-your-api-key-here"    # Placeholder, set your own key
+  model: "deepseek/deepseek-chat"
+  primary_timeframe: "15m"
+  higher_timeframe: "1d"
+  primary_lookback_periods: 80            # >= 50 required
+  higher_lookback_periods: 120
+  pollpriceinterval: 15s
 ```
 
 ## AI Trading Strategy

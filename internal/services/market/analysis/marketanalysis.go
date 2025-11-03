@@ -3,7 +3,7 @@ package analysis
 
 import (
 	"github.com/shopspring/decimal"
-	"github.com/vadiminshakov/marti/internal/services/market/collector"
+	"github.com/vadiminshakov/marti/internal/entity"
 	"go.uber.org/zap"
 )
 
@@ -28,7 +28,7 @@ type VolumeAnalysis struct {
 }
 
 // AnalyzeVolume calculates volume metrics and identifies spikes
-func (m *MarketAnalyzer) AnalyzeVolume(klines []collector.KlineData) VolumeAnalysis {
+func (m *MarketAnalyzer) AnalyzeVolume(klines []entity.MarketCandle) VolumeAnalysis {
 	if len(klines) == 0 {
 		m.logger.Warn("no kline data for volume analysis")
 		return VolumeAnalysis{
