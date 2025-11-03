@@ -2,7 +2,9 @@ package trader
 
 import (
 	"context"
+	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/adshao/go-binance/v2"
@@ -18,6 +20,11 @@ type BinanceTrader struct {
 	marketType entity.MarketType
 	leverage   int
 }
+
+const (
+	binanceStopLossClientPrefix   = "marti-sl-"
+	binanceTakeProfitClientPrefix = "marti-tp-"
+)
 
 func NewBinanceTrader(client *binance.Client, pair entity.Pair, marketType entity.MarketType, leverage int) (*BinanceTrader, error) {
 	return &BinanceTrader{
@@ -258,7 +265,92 @@ func (t *BinanceTrader) UpdatePositionStops(ctx context.Context, pair entity.Pai
 		return nil
 	}
 
-	// Binance cross-margin API does not expose direct per-position stop management.
-	// For now, return an informative error so callers can log and continue.
-	return errors.New("binance margin stop updates are not supported via API")
+	position, err := t.GetPosition(ctx, pair)
+	if err != nil {
+		return errors.Wrap(err, "failed to fetch binance margin position for stop updates")
+	}
+	if position == nil || position.Amount.LessThanOrEqual(decimal.Zero) {
+		return nil
+	}
+
+	quantity := position.Amount.RoundFloor(4)
+	if quantity.LessThanOrEqual(decimal.Zero) {
+		return nil
+	}
+
+	openOrders, err := t.client.NewListMarginOpenOrdersService().
+		Symbol(pair.Symbol()).
+		Do(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to list existing binance margin orders")
+	}
+
+	if err := t.cancelBinanceProtectiveOrders(ctx, pair, openOrders); err != nil {
+		return err
+	}
+
+	if takeProfit.GreaterThan(decimal.Zero) {
+		if err := t.placeBinanceProtectiveOrder(ctx, pair, quantity, takeProfit, binance.OrderTypeTakeProfit, binanceTakeProfitClientPrefix); err != nil {
+			return err
+		}
+	}
+
+	if stopLoss.GreaterThan(decimal.Zero) {
+		if err := t.placeBinanceProtectiveOrder(ctx, pair, quantity, stopLoss, binance.OrderTypeStopLoss, binanceStopLossClientPrefix); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (t *BinanceTrader) cancelBinanceProtectiveOrders(ctx context.Context, pair entity.Pair, orders []*binance.Order) error {
+	for _, order := range orders {
+		if order == nil {
+			continue
+		}
+		if !strings.HasPrefix(order.ClientOrderID, binanceStopLossClientPrefix) &&
+			!strings.HasPrefix(order.ClientOrderID, binanceTakeProfitClientPrefix) {
+			continue
+		}
+
+		_, err := t.client.NewCancelMarginOrderService().
+			Symbol(pair.Symbol()).
+			OrigClientOrderID(order.ClientOrderID).
+			Do(ctx)
+		if err != nil {
+			if apiErr, ok := err.(*common.APIError); ok {
+				if apiErr.Code == -2011 || apiErr.Code == -2013 {
+					continue
+				}
+			}
+			return errors.Wrapf(err, "failed to cancel binance protective order %s", order.ClientOrderID)
+		}
+	}
+	return nil
+}
+
+func (t *BinanceTrader) placeBinanceProtectiveOrder(
+	ctx context.Context,
+	pair entity.Pair,
+	quantity decimal.Decimal,
+	price decimal.Decimal,
+	orderType binance.OrderType,
+	clientIDPrefix string,
+) error {
+	clientOrderID := fmt.Sprintf("%s%d", clientIDPrefix, time.Now().UnixNano())
+
+	_, err := t.client.NewCreateMarginOrderService().
+		Symbol(pair.Symbol()).
+		Side(binance.SideTypeSell).
+		Type(orderType).
+		Quantity(quantity.String()).
+		StopPrice(price.String()).
+		NewClientOrderID(clientOrderID).
+		Do(ctx)
+	if err != nil {
+		return errors.Wrapf(err, "failed to place binance %s order", orderType)
+	}
+
+	return nil
 }
