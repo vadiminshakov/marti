@@ -9,10 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
-	"github.com/vadiminshakov/marti/internal/clients"
 	"github.com/vadiminshakov/marti/internal/entity"
-	"github.com/vadiminshakov/marti/internal/services/market/analysis"
-	"github.com/vadiminshakov/marti/internal/services/market/collector"
 	"github.com/vadiminshakov/marti/internal/services/promptbuilder"
 	"github.com/vadiminshakov/marti/internal/services/trader"
 	"go.uber.org/zap"
@@ -35,18 +32,25 @@ type pricer interface {
 	GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error)
 }
 
+type llmClient interface {
+	Chat(ctx context.Context, systemPrompt, userPrompt string) (string, error)
+}
+
+type marketDataCollector interface {
+	FetchTimeframeData(ctx context.Context, interval string, lookback int) (*entity.Timeframe, error)
+}
+
 // AIStrategy implements trading strategy using AI/LLM for decision making.
 // The strategy operates in linear margin mode and derives its position state directly from the exchange.
 type AIStrategy struct {
 	pair             entity.Pair
 	marketType       entity.MarketType
-	llmClient        clients.LLMClient
-	marketData       *collector.MarketDataCollector
+	llmClient        llmClient
+	marketData       marketDataCollector
 	pricer           pricer
 	trader           tradersvc
 	logger           *zap.Logger
 	currentPosition  *entity.Position
-	marketAnalyzer   *analysis.MarketAnalyzer
 	promptBuilder    *promptbuilder.PromptBuilder
 	primaryTimeframe string
 	primaryLookback  int
@@ -60,8 +64,8 @@ func NewAIStrategy(
 	logger *zap.Logger,
 	pair entity.Pair,
 	marketType entity.MarketType,
-	llmClient clients.LLMClient,
-	marketData *collector.MarketDataCollector,
+	llmClient llmClient,
+	marketData marketDataCollector,
 	pricer pricer,
 	tradeSvc tradersvc,
 	primaryTimeframe string,
@@ -73,7 +77,6 @@ func NewAIStrategy(
 		return nil, fmt.Errorf("AI strategy requires margin market type, got %s", marketType)
 	}
 
-	marketAnalyzer := analysis.NewMarketAnalyzer(logger)
 	promptBuilder := promptbuilder.NewPromptBuilder(pair, logger)
 
 	if higherTimeframe == "" {
@@ -81,7 +84,6 @@ func NewAIStrategy(
 	}
 
 	if higherLookback == 0 {
-		// fall back to default to preserve previous behavior
 		higherLookback = defaultHigherTimeframeLookback
 	}
 
@@ -93,7 +95,6 @@ func NewAIStrategy(
 		pricer:           pricer,
 		trader:           tradeSvc,
 		logger:           logger,
-		marketAnalyzer:   marketAnalyzer,
 		promptBuilder:    promptBuilder,
 		primaryTimeframe: primaryTimeframe,
 		primaryLookback:  primaryLookback,
@@ -175,7 +176,7 @@ func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 	}
 
 	// analyze volume patterns
-	volumeAnalysis := s.marketAnalyzer.AnalyzeVolume(primaryFrame.Candles)
+	volumeAnalysis := entity.NewVolumeAnalysis(primaryFrame.Candles)
 
 	snapshot := entity.MarketSnapshot{
 		PrimaryTimeFrame: primaryFrame,
@@ -197,7 +198,6 @@ func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 	// parse and validate decision
 	decision, err := entity.NewDecision(response, s.currentPosition != nil)
 	if err != nil {
-		// this should rarely happen now, but keep for safety
 		s.logger.Error("Decision validation failed",
 			zap.Error(err),
 			zap.String("response", response))
