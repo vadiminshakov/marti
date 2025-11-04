@@ -10,7 +10,6 @@ import (
 
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/internal/entity"
-	"github.com/vadiminshakov/marti/internal/services/market/analysis"
 	"go.uber.org/zap"
 )
 
@@ -171,7 +170,7 @@ type Position struct {
 // MarketContext contains all data needed for prompt building
 type MarketContext struct {
 	Primary         *entity.Timeframe
-	VolumeAnalysis  analysis.VolumeAnalysis
+	VolumeAnalysis  entity.VolumeAnalysis
 	HigherTimeframe *entity.Timeframe
 
 	// Position data
@@ -363,7 +362,7 @@ func (pb *PromptBuilder) formatHistoricalSummary(primary *entity.Timeframe) stri
 
 // formatVolumeAnalysis formats volume metrics including current volume,
 // average volume, relative volume, and highlights volume spikes
-func (pb *PromptBuilder) formatVolumeAnalysis(volume analysis.VolumeAnalysis) string {
+func (pb *PromptBuilder) formatVolumeAnalysis(volume entity.VolumeAnalysis) string {
 	var sb strings.Builder
 
 	sb.WriteString("## Volume Analysis\n\n")

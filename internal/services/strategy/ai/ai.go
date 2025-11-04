@@ -54,30 +54,6 @@ type AIStrategy struct {
 	higherLookback   int
 }
 
-// MarketSnapshot aggregates relevant market data for a single trading decision cycle.
-type MarketSnapshot struct {
-	PrimaryTimeFrame *entity.Timeframe
-	HigherTimeFrame  *entity.Timeframe
-	QuoteBalance     decimal.Decimal
-	VolumeAnalysis   analysis.VolumeAnalysis
-}
-
-// Price returns the latest close price of the primary timeframe if available.
-func (s MarketSnapshot) Price() decimal.Decimal {
-	if s.PrimaryTimeFrame == nil {
-		return decimal.Zero
-	}
-
-	if s.PrimaryTimeFrame.Summary != nil {
-		return s.PrimaryTimeFrame.Summary.Price
-	}
-
-	if price, ok := s.PrimaryTimeFrame.LatestPrice(); ok {
-		return price
-	}
-
-	return decimal.Zero
-}
 
 // NewAIStrategy creates a new AI trading strategy instance
 func NewAIStrategy(
@@ -201,7 +177,7 @@ func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 	// analyze volume patterns
 	volumeAnalysis := s.marketAnalyzer.AnalyzeVolume(primaryFrame.Candles)
 
-	snapshot := MarketSnapshot{
+	snapshot := entity.MarketSnapshot{
 		PrimaryTimeFrame: primaryFrame,
 		QuoteBalance:     quoteBalance,
 		VolumeAnalysis:   volumeAnalysis,
@@ -281,7 +257,7 @@ func (s *AIStrategy) refreshPosition(ctx context.Context) {
 }
 
 // buildPrompt constructs the prompt for the LLM using PromptBuilder
-func (s *AIStrategy) buildPrompt(snapshot MarketSnapshot) string {
+func (s *AIStrategy) buildPrompt(snapshot entity.MarketSnapshot) string {
 	// Convert current position to promptbuilder format
 	var pbPosition *promptbuilder.Position
 	if s.currentPosition != nil {
@@ -312,7 +288,7 @@ func (s *AIStrategy) buildPrompt(snapshot MarketSnapshot) string {
 func (s *AIStrategy) executeDecision(
 	ctx context.Context,
 	decision *entity.Decision,
-	snapshot MarketSnapshot,
+	snapshot entity.MarketSnapshot,
 ) (*entity.TradeEvent, error) {
 	switch decision.Action {
 	case "buy":
@@ -333,7 +309,7 @@ func (s *AIStrategy) executeDecision(
 func (s *AIStrategy) executeBuy(
 	ctx context.Context,
 	decision *entity.Decision,
-	snapshot MarketSnapshot,
+	snapshot entity.MarketSnapshot,
 ) (*entity.TradeEvent, error) {
 	if s.currentPosition != nil {
 		s.logger.Warn("Cannot open new position while one is already open")

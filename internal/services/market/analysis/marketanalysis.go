@@ -19,19 +19,11 @@ func NewMarketAnalyzer(logger *zap.Logger) *MarketAnalyzer {
 	}
 }
 
-// VolumeAnalysis contains volume metrics
-type VolumeAnalysis struct {
-	CurrentVolume  decimal.Decimal
-	AverageVolume  decimal.Decimal // 20-period average
-	RelativeVolume decimal.Decimal // Current / Average
-	VolumeSpikes   []int           // Indices where volume > 1.5x average
-}
-
 // AnalyzeVolume calculates volume metrics and identifies spikes
-func (m *MarketAnalyzer) AnalyzeVolume(klines []entity.MarketCandle) VolumeAnalysis {
+func (m *MarketAnalyzer) AnalyzeVolume(klines []entity.MarketCandle) entity.VolumeAnalysis {
 	if len(klines) == 0 {
 		m.logger.Warn("no kline data for volume analysis")
-		return VolumeAnalysis{
+		return entity.VolumeAnalysis{
 			CurrentVolume:  decimal.Zero,
 			AverageVolume:  decimal.Zero,
 			RelativeVolume: decimal.Zero,
@@ -70,7 +62,7 @@ func (m *MarketAnalyzer) AnalyzeVolume(klines []entity.MarketCandle) VolumeAnaly
 		}
 	}
 
-	return VolumeAnalysis{
+	return entity.VolumeAnalysis{
 		CurrentVolume:  currentVolume,
 		AverageVolume:  avgVolume,
 		RelativeVolume: relativeVolume,
