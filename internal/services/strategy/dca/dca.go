@@ -175,14 +175,10 @@ func (d *DCAStrategy) saveDCASeries() error {
 
 // calculateIndividualBuyAmount calculates buy amount based on current quote currency balance
 func (d *DCAStrategy) calculateIndividualBuyAmount(ctx context.Context) (decimal.Decimal, error) {
-	// get current balance in quote currency (e.g., USDT)
 	quoteBalance, err := d.trader.GetBalance(ctx, d.pair.To)
 	if err != nil {
 		return decimal.Decimal{}, errors.Wrapf(err, "failed to get %s balance", d.pair.To)
 	}
-
-	// calculate buy amount as percentage of current balance
-	// amountPercent is the percentage to use for each individual buy
 	individualAmount := quoteBalance.Mul(d.amountPercent).Div(decimal.NewFromInt(percentageMultiplier))
 
 	return individualAmount, nil
@@ -242,7 +238,6 @@ func (d *DCAStrategy) AddDCAPurchase(intentID string, price, amount decimal.Deci
 	d.tradePart = decimal.NewFromInt(int64(len(d.dcaSeries.Purchases)))
 
 	d.markTradeProcessed(intentID)
-
 
 	return d.saveDCASeries()
 }
@@ -699,4 +694,3 @@ func (d *DCAStrategy) Initialize(ctx context.Context) error {
 
 	return nil
 }
-

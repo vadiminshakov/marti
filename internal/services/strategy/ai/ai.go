@@ -206,7 +206,7 @@ func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 		zap.String("action", decision.Action),
 		zap.Float64("risk_percent", decision.RiskPercent))
 
-	s.logger.Info("📊 AI Decision",
+	s.logger.Info("AI decision",
 		zap.String("action", strings.ToUpper(decision.Action)),
 		zap.Float64("risk_percent", decision.RiskPercent),
 		zap.String("reasoning", decision.Reasoning))
@@ -325,7 +325,6 @@ func (s *AIStrategy) executeBuy(
 		return nil, errors.Wrap(err, "failed to execute buy order")
 	}
 
-
 	exitPlan := decision.ExitPlan
 	takeProfit := decimal.NewFromFloat(exitPlan.TakeProfitPrice)
 	stopLoss := decimal.NewFromFloat(exitPlan.StopLossPrice)
@@ -366,7 +365,6 @@ func (s *AIStrategy) executeClose(ctx context.Context, currentPrice decimal.Deci
 	if err := s.trader.Sell(ctx, position.Amount, orderID); err != nil {
 		return nil, errors.Wrap(err, "failed to execute sell order")
 	}
-
 
 	// Calculate P&L
 	pnl := position.PnL(currentPrice)

@@ -30,6 +30,6 @@ func (p *SimulatePricer) GetPrice(ctx context.Context, pair entity.Pair) (decima
 	if len(prices) == 0 {
 		return decimal.Decimal{}, fmt.Errorf("binance API returned empty prices for %s", pair.String())
 	}
-	
+
 	return decimal.NewFromString(prices[0].Price)
 }
