@@ -25,8 +25,12 @@ func TestDCAStrategy_WithSimulationTrader(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 
+	// pricer for simulation
+	price := decimal.NewFromInt(50000)
+	pr := &mockSimulatePricer{price: price}
+
 	// create simulation trader
-	simTrader, err := trader.NewSimulateTrader(pair, logger)
+	simTrader, err := trader.NewSimulateTrader(pair, logger, pr)
 	require.NoError(t, err)
 
 	// verify initial balances
@@ -37,10 +41,11 @@ func TestDCAStrategy_WithSimulationTrader(t *testing.T) {
 	assert.True(t, initialBTC.Equal(decimal.Zero))
 	assert.True(t, initialUSDT.Equal(decimal.NewFromInt(10000)))
 
-	// simulate a buy trade with 5000 USDT
-	price := decimal.NewFromInt(50000)
+	// simulate a buy trade with 5000 USDT -> 0.1 BTC at 50000
 	usdtAmount := decimal.NewFromInt(5000)
-	err = simTrader.ApplyTrade(price, usdtAmount, "buy")
+	baseAmount := usdtAmount.Div(price) // 0.1 BTC
+
+	err = simTrader.Buy(context.Background(), baseAmount, "order-1")
 	require.NoError(t, err)
 
 	// verify balance updated
@@ -49,8 +54,8 @@ func TestDCAStrategy_WithSimulationTrader(t *testing.T) {
 	usdtBalance, err := simTrader.GetBalance(context.Background(), "USDT")
 	require.NoError(t, err)
 
-	expectedBTC := usdtAmount.Div(price) // 5000 / 50000 = 0.1
-	expectedUSDT := decimal.NewFromInt(10000).Sub(usdtAmount) // 10000 - 5000 = 5000
+	expectedBTC := baseAmount // 0.1
+	expectedUSDT := decimal.NewFromInt(10000).Sub(baseAmount.Mul(price)) // 10000 - 0.1*50000 = 5000
 
 	assert.True(t, btcBalance.Equal(expectedBTC), "BTC balance should be %s, got %s", expectedBTC, btcBalance)
 	assert.True(t, usdtBalance.Equal(expectedUSDT), "USDT balance should be %s, got %s", expectedUSDT, usdtBalance)
@@ -60,27 +65,33 @@ func TestDCAStrategy_SimulationApplyTrade(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 
-	simTrader, err := trader.NewSimulateTrader(pair, logger)
+	// pricer for simulation
+	pr := &mockSimulatePricer{}
+
+	simTrader, err := trader.NewSimulateTrader(pair, logger, pr)
 	require.NoError(t, err)
 
-	// test buy with 5000 USDT
+	// test buy with 5000 USDT (0.1 BTC at 50000)
 	buyPrice := decimal.NewFromInt(50000)
+	pr.price = buyPrice
 	buyUSDT := decimal.NewFromInt(5000)
-	err = simTrader.ApplyTrade(buyPrice, buyUSDT, "buy")
+	buyBase := buyUSDT.Div(buyPrice) // 0.1
+	err = simTrader.Buy(context.Background(), buyBase, "order-buy")
 	require.NoError(t, err)
 
 	btcAfterBuy, err := simTrader.GetBalance(context.Background(), "BTC")
 	require.NoError(t, err)
 	usdtAfterBuy, err := simTrader.GetBalance(context.Background(), "USDT")
 	require.NoError(t, err)
-	expectedBTC := buyUSDT.Div(buyPrice) // 5000 / 50000 = 0.1
+	expectedBTC := buyBase // 0.1
 	assert.True(t, btcAfterBuy.Equal(expectedBTC))
 	assert.True(t, usdtAfterBuy.Equal(decimal.NewFromInt(5000))) // 10000 - 5000
 
-	// test sell
+	// test sell 0.05 BTC at 60000
 	sellPrice := decimal.NewFromInt(60000)
+	pr.price = sellPrice
 	sellAmount := decimal.NewFromFloat(0.05)
-	err = simTrader.ApplyTrade(sellPrice, sellAmount, "sell")
+	err = simTrader.Sell(context.Background(), sellAmount, "order-sell")
 	require.NoError(t, err)
 
 	btcAfterSell, err := simTrader.GetBalance(context.Background(), "BTC")

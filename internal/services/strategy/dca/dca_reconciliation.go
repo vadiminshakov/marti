@@ -1,18 +1,12 @@
-// This file contains reconciliation logic for the DCA strategy.
+// Package dca implements DCA (Dollar-Cost Averaging) trading strategy.
 //
-// Reconciliation is the process of recovering and bringing trade intents to a consistent state
-// after application restarts or crashes. It handles:
-//   - Processing pending trade intents
-//   - Waiting for order completion
-//   - Applying executed trades to the DCA series
-//   - Validating and marking intents as done or failed
-//
-// This logic is separated from the main trading logic (dca.go) to improve code organization.
+// This file contains reconciliation/recovery logic for the DCA strategy.
+// It handles pending trade intents from WAL and ensures the strategy state is consistent
+// after restarts or crashes.
 package dca
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/pkg/errors"
@@ -20,156 +14,124 @@ import (
 	"go.uber.org/zap"
 )
 
-// reconcileTradeIntents processes all pending trade intents and brings them to a consistent state.
-// This is called during initialization to recover from crashes or restarts.
+// reconcileTradeIntents processes any pending trade intents from WAL.
+// This is called during Initialize to ensure the strategy state is consistent.
 func (d *DCAStrategy) reconcileTradeIntents(ctx context.Context) error {
 	if d.journal == nil {
 		return nil
 	}
 
-	for _, intent := range d.journal.Intents() {
-		switch intent.Status {
-		case tradeIntentStatusDone, tradeIntentStatusFailed:
-			continue
-		case tradeIntentStatusPending:
-			if err := d.handlePendingIntent(ctx, intent); err != nil {
-				return err
-			}
-		default:
-			d.l.Warn("encountered trade intent with unknown status", zap.String("status", intent.Status), zap.String("intent_id", intent.ID))
+	intents := d.journal.Intents()
+	pending := make([]*tradeIntentRecord, 0, len(intents))
+	for _, it := range intents {
+		if it != nil && it.Status == tradeIntentStatusPending {
+			pending = append(pending, it)
 		}
 	}
-	return nil
-}
-
-// handlePendingIntent processes a single pending intent, waiting for its completion and applying changes.
-func (d *DCAStrategy) handlePendingIntent(ctx context.Context, intent *tradeIntentRecord) error {
-	// if trade already processed (applied to series), just mark intent as done
-	// this handles cases where app crashed between AddDCAPurchase and MarkDone
-	if d.isTradeProcessed(intent.ID) {
-		return d.ensureIntentMarkedDone(intent)
-	}
-
-	// wait for order completion with retries (waits indefinitely until executed)
-	executed, filledAmount, err := d.waitForOrderCompletion(ctx, intent, d.orderCheckInterval)
-	if err != nil {
-		d.l.Error("failed to verify pending trade intent status", zap.Error(err), zap.String("intent_id", intent.ID))
-		return err
-	}
-
-	if err := d.validateExecutedOrder(intent, executed, filledAmount); err != nil {
-		return err
-	}
-
-	// check if validation marked intent as failed
-	if intent.Status == tradeIntentStatusFailed {
+	if len(pending) == 0 {
 		return nil
 	}
 
-	return d.reconcileExecutedIntent(intent, filledAmount)
+	d.l.Info("Reconciling pending trade intents",
+		zap.Int("count", len(pending)))
+
+	for _, intent := range pending {
+		if err := d.processPendingIntent(ctx, intent); err != nil {
+			d.l.Error("Failed to process pending intent",
+				zap.Error(err),
+				zap.String("intent_id", intent.ID))
+			// Continue processing other intents even if one fails
+			continue
+		}
+	}
+
+	return nil
 }
 
-// waitForOrderCompletion polls the order status until it's fully executed.
-func (d *DCAStrategy) waitForOrderCompletion(ctx context.Context, intent *tradeIntentRecord, checkInterval time.Duration) (executed bool, filledAmount decimal.Decimal, err error) {
-	ticker := time.NewTicker(checkInterval)
-	defer ticker.Stop()
+// processPendingIntent processes a single pending trade intent with polling until completion.
+func (d *DCAStrategy) processPendingIntent(ctx context.Context, intent *tradeIntentRecord) error {
+	// If already applied to series, ensure journal reflects done and return
+	if d.isTradeProcessed(intent.ID) {
+		_ = d.journal.MarkDone(intent)
+		return nil
+	}
+
+	// Defensive default for polling interval
+	if d.orderCheckInterval <= 0 {
+		d.orderCheckInterval = defaultOrderCheckInterval
+	}
 
 	for {
-		executed, filledAmount, err = d.trader.OrderExecuted(ctx, intent.ID)
+		executed, filledAmount, err := d.trader.OrderExecuted(ctx, intent.ID)
 		if err != nil {
-			return false, decimal.Zero, err
+			return errors.Wrapf(err, "failed to check order execution for intent %s", intent.ID)
 		}
 
-		// order fully executed
-		if executed {
-			return true, filledAmount, nil
+		// Track partial fill progress by updating the intent amount in journal
+		if filledAmount.GreaterThan(decimal.Zero) && !filledAmount.Equal(intent.Amount) {
+			_ = d.journal.UpdateAmount(intent, filledAmount)
+			intent.Amount = filledAmount
 		}
 
-		// not fully executed yet - wait and retry indefinitely
-		select {
-		case <-ctx.Done():
-			d.l.Info("context cancelled while waiting for order completion, stopping reconciliation",
-				zap.String("intent_id", intent.ID))
-			return false, filledAmount, ctx.Err()
-		case <-ticker.C:
-			// continue to next iteration
+		if !executed {
+			// Not yet completed — wait and retry
+			time.Sleep(d.orderCheckInterval)
+			continue
 		}
-	}
-}
 
-// validateExecutedOrder validates the execution result of an order.
-func (d *DCAStrategy) validateExecutedOrder(intent *tradeIntentRecord, executed bool, filledAmount decimal.Decimal) error {
-	// since waitForOrderCompletion waits indefinitely, executed should always be true here
-	if !executed {
-		// this should never happen, but handle defensively
-		d.l.Error("unexpected: order not executed after waiting",
+		d.l.Info("Order executed, applying to DCA series",
 			zap.String("intent_id", intent.ID),
-			zap.String("action", string(intent.Action)))
-		d.markIntentFailed(intent, errors.New("order not executed after waiting"))
-		return nil
-	}
+			zap.String("action", string(intent.Action)),
+			zap.String("filled_amount", filledAmount.String()))
 
-	// executed but with zero amount - should not happen, but handle defensively
-	if filledAmount.LessThanOrEqual(decimal.Zero) {
-		d.l.Warn("executed intent reported zero filled amount; marking as failed",
-			zap.String("intent_id", intent.ID),
-			zap.String("action", string(intent.Action)))
-		d.markIntentFailed(intent, errors.New("filled amount reported as zero"))
-		return nil
-	}
+		switch intent.Action {
+		case intentActionBuy:
+			// Executed buy with zero amount is invalid → mark failed
+			if filledAmount.LessThanOrEqual(decimal.Zero) {
+				if err := d.journal.MarkFailed(intent, errors.New("zero filled amount")); err != nil {
+					return err
+				}
+				return nil
+			}
+			if err := d.applyExecutedBuy(intent); err != nil {
+				return errors.Wrapf(err, "failed to apply executed buy for intent %s", intent.ID)
+			}
+		case intentActionSell:
+			if err := d.applyExecutedSell(intent); err != nil {
+				return errors.Wrapf(err, "failed to apply executed sell for intent %s", intent.ID)
+			}
+		default:
+			return errors.Errorf("unknown intent action: %s", intent.Action)
+		}
 
-	return nil
-}
-
-// ensureIntentMarkedDone ensures that an already processed intent is marked as done.
-func (d *DCAStrategy) ensureIntentMarkedDone(intent *tradeIntentRecord) error {
-	if intent.Status != tradeIntentStatusDone {
+		// Mark intent done after applying to series
 		if err := d.journal.MarkDone(intent); err != nil {
-			d.l.Error("failed to persist completed trade intent", zap.Error(err), zap.String("intent_id", intent.ID))
-			return err
+			return errors.Wrapf(err, "failed to mark intent as done: %s", intent.ID)
 		}
+		return nil
 	}
-	return nil
 }
 
-// reconcileExecutedIntent applies an executed intent and marks it as done.
-func (d *DCAStrategy) reconcileExecutedIntent(intent *tradeIntentRecord, filledAmount decimal.Decimal) error {
-	// update amount if it differs
-	if !filledAmount.Equal(intent.Amount) {
-		if err := d.journal.UpdateAmount(intent, filledAmount); err != nil {
-			d.l.Error("failed to persist actual filled amount for intent",
-				zap.Error(err),
-				zap.String("intent_id", intent.ID),
-				zap.String("old_amount", intent.Amount.String()),
-				zap.String("filled_amount", filledAmount.String()))
-			return err
-		}
+// applyExecutedBuy applies a buy intent to the DCA series.
+func (d *DCAStrategy) applyExecutedBuy(intent *tradeIntentRecord) error {
+	if d.isTradeProcessed(intent.ID) {
+		return nil
 	}
 
-	// apply and mark done
-	if err := d.applyExecutedIntent(intent); err != nil {
-		d.l.Error("failed to apply executed trade intent", zap.Error(err), zap.String("intent_id", intent.ID))
-		return err
-	}
+	// intent.Amount is in quote currency (e.g., USDT)
+	amountQuoteCurrency := intent.Amount
 
-	if err := d.journal.MarkDone(intent); err != nil {
-		d.l.Error("failed to persist completed trade intent status", zap.Error(err), zap.String("intent_id", intent.ID))
-		return err
+	d.l.Info("Applying executed buy to DCA series",
+		zap.String("intent_id", intent.ID),
+		zap.String("price", intent.Price.String()),
+		zap.String("amount", amountQuoteCurrency.String()),
+		zap.Int("trade_part", intent.TradePart))
+
+	if err := d.AddDCAPurchase(intent.ID, intent.Price, amountQuoteCurrency, intent.Time, intent.TradePart); err != nil {
+		return errors.Wrap(err, "failed to add DCA purchase")
 	}
 
 	return nil
-}
-
-// applyExecutedIntent applies the changes from an executed intent to the DCA series.
-func (d *DCAStrategy) applyExecutedIntent(intent *tradeIntentRecord) error {
-	switch intent.Action {
-	case intentActionBuy:
-		return d.AddDCAPurchase(intent.ID, intent.Price, intent.Amount, intent.Time, intent.TradePart)
-	case intentActionSell:
-		return d.applyExecutedSell(intent)
-	default:
-		return fmt.Errorf("unknown trade intent action: %s", intent.Action)
-	}
 }
 
 // applyExecutedSell applies a sell intent to the DCA series.
@@ -206,12 +168,6 @@ func (d *DCAStrategy) applyExecutedSell(intent *tradeIntentRecord) error {
 		}
 	}
 
-	// Apply virtual trade if using simulation trader
-	// Convert quote currency to base currency for simulation trader
-	amountBaseCurrency := amountQuoteCurrency.Div(intent.Price)
-	if err := d.applySimulationTrade(intent.Price, amountBaseCurrency, "sell"); err != nil {
-		return err
-	}
 
 	d.markTradeProcessed(intent.ID)
 	return d.saveDCASeries()

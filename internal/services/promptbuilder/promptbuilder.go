@@ -141,7 +141,9 @@ Do not force trades. "hold" is a valid decision when conditions are unclear.
 4. Be specific in your reasoning
 5. When in doubt, use "hold"
 
-You are managing real capital. Make rational, data-driven decisions.`
+You should strive to capture as much profit as possible as quickly as you can, using current market conditions.
+Don’t hold back from taking a trade if any short-term (5+ minutes) strategy looks profitable to you.
+You can also use longer-term trades if you see an opportunity. You choose the strategy yourself. The main goal is to extract profit as efficiently as possible.`
 
 // PromptBuilder constructs optimized prompts for the LLM
 type PromptBuilder struct {
@@ -157,24 +159,12 @@ func NewPromptBuilder(pair entity.Pair, logger *zap.Logger) *PromptBuilder {
 	}
 }
 
-// Position represents an open trading position
-type Position struct {
-	EntryPrice   decimal.Decimal
-	Amount       decimal.Decimal
-	StopLoss     decimal.Decimal
-	TakeProfit   decimal.Decimal
-	Invalidation string
-	EntryTime    time.Time
-}
-
 // MarketContext contains all data needed for prompt building
 type MarketContext struct {
 	Primary         *entity.Timeframe
 	VolumeAnalysis  entity.VolumeAnalysis
 	HigherTimeframe *entity.Timeframe
-
-	// Position data
-	CurrentPosition *Position
+	CurrentPosition *entity.Position
 	Balance         decimal.Decimal
 }
 
@@ -472,7 +462,7 @@ func (pb *PromptBuilder) formatMultiTimeframe(ctx MarketContext) string {
 
 // formatPosition formats open position information including entry price,
 // current P&L, time held, distance to stop-loss and take-profit, and risk-reward ratio
-func (pb *PromptBuilder) formatPosition(position *Position, currentPrice decimal.Decimal) string {
+func (pb *PromptBuilder) formatPosition(position *entity.Position, currentPrice decimal.Decimal) string {
 	var sb strings.Builder
 
 	sb.WriteString("## Current Position\n\n")
@@ -484,9 +474,11 @@ func (pb *PromptBuilder) formatPosition(position *Position, currentPrice decimal
 	sb.WriteString(fmt.Sprintf("**Current Price:** %s\n", currentPrice.StringFixed(2)))
 
 	// Calculate P&L
-	priceDiff := currentPrice.Sub(position.EntryPrice)
-	pnl := priceDiff.Mul(position.Amount)
-	pnlPercent := priceDiff.Div(position.EntryPrice).Mul(decimal.NewFromInt(100))
+	pnl := position.PnL(currentPrice)
+	pnlPercent := decimal.Zero
+	if !position.EntryPrice.IsZero() {
+		pnlPercent = currentPrice.Sub(position.EntryPrice).Div(position.EntryPrice).Mul(decimal.NewFromInt(100))
+	}
 
 	pnlSign := ""
 	if pnl.GreaterThan(decimal.Zero) {

@@ -71,12 +71,11 @@ func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.
 
 		// Use logger from context or create a new one
 		logger := zap.L()
-		traderInstance, err := trader.NewSimulateTrader(pair, logger)
+		pricerInstance := pricer.NewSimulatePricer(simulateClient.GetBinanceClient())
+		traderInstance, err := trader.NewSimulateTrader(pair, logger, pricerInstance)
 		if err != nil {
 			return nil, nil, errors.Wrap(err, "failed to create SimulateTrader")
 		}
-
-		pricerInstance := pricer.NewSimulatePricer(simulateClient.GetBinanceClient())
 		return traderInstance, pricerInstance, nil
 
 	default:
@@ -136,9 +135,6 @@ func createDCAStrategy(
 		return nil, err
 	}
 
-	if err := dcaStrategy.SyncSimulationBalance(); err != nil {
-		return nil, errors.Wrap(err, "failed to sync simulation balance")
-	}
 
 	return dcaStrategy, nil
 }

@@ -12,7 +12,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// SimulateTrader — простой спот симулятор.
+// Pricer defines an interface for getting the price of a trading pair.
+type Pricer interface {
+	GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error)
+}
+
+// SimulateTrader is a simple spot/margin simulator.
 type SimulateTrader struct {
 	mu       sync.RWMutex
 	pair     entity.Pair
@@ -20,6 +25,7 @@ type SimulateTrader struct {
 	wallet   map[string]decimal.Decimal
 	orders   map[string]orderInfo
 	position *entity.Position
+	pricer   Pricer
 }
 
 type orderInfo struct {
@@ -27,31 +33,96 @@ type orderInfo struct {
 	side   string
 }
 
-func NewSimulateTrader(pair entity.Pair, logger *zap.Logger) (*SimulateTrader, error) {
+// NewSimulateTrader creates a new SimulateTrader.
+func NewSimulateTrader(pair entity.Pair, logger *zap.Logger, pricer Pricer) (*SimulateTrader, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
+	if pricer == nil {
+		return nil, errors.New("pricer is required for SimulateTrader")
+	}
 	wallet := map[string]decimal.Decimal{pair.From: decimal.Zero, pair.To: decimal.NewFromInt(10000)}
 	logger.Info("simulate init", zap.String("pair", pair.String()), zap.String("base", wallet[pair.From].String()), zap.String("quote", wallet[pair.To].String()))
-	return &SimulateTrader{pair: pair, logger: logger, wallet: wallet, orders: make(map[string]orderInfo)}, nil
+	return &SimulateTrader{pair: pair, logger: logger, wallet: wallet, orders: make(map[string]orderInfo), pricer: pricer}, nil
 }
 
+// Buy simulates a market buy order, fetching the price from its pricer.
+// The 'amount' is expected to be in the base currency (e.g., BTC for BTC/USDT).
 func (t *SimulateTrader) Buy(ctx context.Context, amount decimal.Decimal, id string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	price, err := t.pricer.GetPrice(ctx, t.pair)
+	if err != nil {
+		return errors.Wrap(err, "failed to get price for simulated buy")
+	}
+
+	quoteAmount := amount.Mul(price)
+
+	if t.wallet[t.pair.To].LessThan(quoteAmount) {
+		return errors.Errorf("insufficient %s balance: have %s need %s", t.pair.To, t.wallet[t.pair.To].String(), quoteAmount.String())
+	}
+
+	t.wallet[t.pair.To] = t.wallet[t.pair.To].Sub(quoteAmount)
+	t.wallet[t.pair.From] = t.wallet[t.pair.From].Add(amount)
+
+	if t.position == nil {
+		pos, err := entity.NewPositionFromExternalSnapshot(amount, price, time.Now())
+		if err != nil {
+			return errors.Wrap(err, "create position")
+		}
+		t.position = pos
+	} else {
+		totalBase := t.position.Amount.Add(amount)
+		if totalBase.GreaterThan(decimal.Zero) {
+			existingNotional := t.position.EntryPrice.Mul(t.position.Amount)
+			addedNotional := amount.Mul(price)
+			t.position.Amount = totalBase
+			t.position.EntryPrice = existingNotional.Add(addedNotional).Div(totalBase)
+		}
+	}
+
 	t.orders[id] = orderInfo{amount: amount, side: "buy"}
-	t.logger.Info("order buy", zap.String("id", id), zap.String("amount", amount.String()))
+	t.logger.Info("Simulated buy executed",
+		zap.String("id", id),
+		zap.String("amount", amount.String()),
+		zap.String("price", price.String()))
 	return nil
 }
 
+// Sell simulates a market sell order, fetching the price from its pricer.
+// The 'amount' is expected to be in the base currency (e.g., BTC for BTC/USDT).
 func (t *SimulateTrader) Sell(ctx context.Context, amount decimal.Decimal, id string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	price, err := t.pricer.GetPrice(ctx, t.pair)
+	if err != nil {
+		return errors.Wrap(err, "failed to get price for simulated sell")
+	}
+
 	if t.wallet[t.pair.From].LessThan(amount) {
 		return fmt.Errorf("insufficient %s balance: have %s need %s", t.pair.From, t.wallet[t.pair.From].String(), amount.String())
 	}
+
+	quoteReceived := amount.Mul(price)
+	t.wallet[t.pair.From] = t.wallet[t.pair.From].Sub(amount)
+	t.wallet[t.pair.To] = t.wallet[t.pair.To].Add(quoteReceived)
+
+	if t.position != nil {
+		remaining := t.position.Amount.Sub(amount)
+		if remaining.LessThanOrEqual(decimal.Zero) {
+			t.position = nil
+		} else {
+			t.position.Amount = remaining
+		}
+	}
+
 	t.orders[id] = orderInfo{amount: amount, side: "sell"}
-	t.logger.Info("order sell", zap.String("id", id), zap.String("amount", amount.String()))
+	t.logger.Info("Simulated sell executed",
+		zap.String("id", id),
+		zap.String("amount", amount.String()),
+		zap.String("price", price.String()))
 	return nil
 }
 
@@ -60,58 +131,10 @@ func (t *SimulateTrader) OrderExecuted(ctx context.Context, id string) (bool, de
 	defer t.mu.RUnlock()
 	o, ok := t.orders[id]
 	if !ok {
-		t.logger.Warn("missing order assume executed", zap.String("id", id))
+		t.logger.Warn("missing order, assuming executed for simulation purposes", zap.String("id", id))
 		return true, decimal.Zero, nil
 	}
 	return true, o.amount, nil
-}
-
-func (t *SimulateTrader) ApplyTrade(price decimal.Decimal, amount decimal.Decimal, side string) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	switch side {
-	case "buy":
-		if t.wallet[t.pair.To].LessThan(amount) {
-			return errors.Errorf("insufficient %s balance: have %s need %s", t.pair.To, t.wallet[t.pair.To].String(), amount.String())
-		}
-		baseAdded := amount.Div(price)
-		t.wallet[t.pair.To] = t.wallet[t.pair.To].Sub(amount)
-		t.wallet[t.pair.From] = t.wallet[t.pair.From].Add(baseAdded)
-		if t.position == nil {
-			pos, err := entity.NewPositionFromExternalSnapshot(baseAdded, price, time.Now())
-			if err != nil {
-				return errors.Wrap(err, "create position")
-			}
-			t.position = pos
-		} else {
-			totalBase := t.position.Amount.Add(baseAdded)
-			if totalBase.GreaterThan(decimal.Zero) {
-				existingNotional := t.position.EntryPrice.Mul(t.position.Amount)
-				addedNotional := baseAdded.Mul(price)
-				t.position.Amount = totalBase
-				t.position.EntryPrice = existingNotional.Add(addedNotional).Div(totalBase)
-			}
-		}
-		return nil
-	case "sell":
-		if t.wallet[t.pair.From].LessThan(amount) {
-			return errors.Errorf("insufficient %s balance: have %s need %s", t.pair.From, t.wallet[t.pair.From].String(), amount.String())
-		}
-		quoteReceived := amount.Mul(price)
-		t.wallet[t.pair.From] = t.wallet[t.pair.From].Sub(amount)
-		t.wallet[t.pair.To] = t.wallet[t.pair.To].Add(quoteReceived)
-		if t.position != nil {
-			remaining := t.position.Amount.Sub(amount)
-			if remaining.LessThanOrEqual(decimal.Zero) {
-				t.position = nil
-			} else {
-				t.position.Amount = remaining
-			}
-		}
-		return nil
-	default:
-		return errors.Errorf("unknown side: %s", side)
-	}
 }
 
 func (t *SimulateTrader) GetBalance(ctx context.Context, currency string) (decimal.Decimal, error) {

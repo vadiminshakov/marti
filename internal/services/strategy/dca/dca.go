@@ -22,7 +22,6 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/gowal"
 	"github.com/vadiminshakov/marti/internal/entity"
-	"github.com/vadiminshakov/marti/internal/services/trader"
 	"go.uber.org/zap"
 )
 
@@ -244,10 +243,6 @@ func (d *DCAStrategy) AddDCAPurchase(intentID string, price, amount decimal.Deci
 
 	d.markTradeProcessed(intentID)
 
-	// apply virtual trade if using simulation trader
-	if err := d.applySimulationTrade(price, amount, "buy"); err != nil {
-		return err
-	}
 
 	return d.saveDCASeries()
 }
@@ -705,38 +700,3 @@ func (d *DCAStrategy) Initialize(ctx context.Context) error {
 	return nil
 }
 
-// applySimulationTrade applies a trade to the simulation trader if applicable
-func (d *DCAStrategy) applySimulationTrade(price, amount decimal.Decimal, side string) error {
-	// attempt direct assertion to concrete simulator
-	if simTrader, ok := d.trader.(*trader.SimulateTrader); ok {
-		return simTrader.ApplyTrade(price, amount, side)
-	}
-	return nil
-}
-
-// SyncSimulationBalance synchronizes simulation trader balance with loaded WAL purchases
-// This is needed when restarting in simulation mode - the DCA series is loaded from WAL
-// but the simulation trader starts with zero balances.
-func (d *DCAStrategy) SyncSimulationBalance() error {
-	simTrader, ok := d.trader.(*trader.SimulateTrader)
-	if !ok {
-		return nil
-	}
-	for _, purchase := range d.dcaSeries.Purchases {
-		if err := simTrader.ApplyTrade(purchase.Price, purchase.Amount, "buy"); err != nil {
-			return errors.Wrapf(err, "failed to sync purchase %s to simulation balance", purchase.ID)
-		}
-		d.l.Debug("Synced purchase to simulation balance",
-			zap.String("purchase_id", purchase.ID),
-			zap.String("price", purchase.Price.String()),
-			zap.String("amount", purchase.Amount.String()),
-		)
-	}
-	if len(d.dcaSeries.Purchases) > 0 {
-		d.l.Info("Synchronized simulation balance with WAL purchases",
-			zap.String("pair", d.pair.String()),
-			zap.Int("purchases_count", len(d.dcaSeries.Purchases)),
-		)
-	}
-	return nil
-}

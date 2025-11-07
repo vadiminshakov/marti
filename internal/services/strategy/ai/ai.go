@@ -11,7 +11,6 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/internal/entity"
 	"github.com/vadiminshakov/marti/internal/services/promptbuilder"
-	"github.com/vadiminshakov/marti/internal/services/trader"
 	"go.uber.org/zap"
 )
 
@@ -257,25 +256,12 @@ func (s *AIStrategy) refreshPosition(ctx context.Context) {
 
 // buildPrompt constructs the prompt for the LLM using PromptBuilder
 func (s *AIStrategy) buildPrompt(snapshot entity.MarketSnapshot) string {
-	// Convert current position to promptbuilder format
-	var pbPosition *promptbuilder.Position
-	if s.currentPosition != nil {
-		pbPosition = &promptbuilder.Position{
-			EntryPrice:   s.currentPosition.EntryPrice,
-			Amount:       s.currentPosition.Amount,
-			StopLoss:     s.currentPosition.StopLoss,
-			TakeProfit:   s.currentPosition.TakeProfit,
-			Invalidation: s.currentPosition.Invalidation,
-			EntryTime:    s.currentPosition.EntryTime,
-		}
-	}
-
 	// Create market context
 	ctx := promptbuilder.MarketContext{
 		Primary:         snapshot.PrimaryTimeFrame,
 		VolumeAnalysis:  snapshot.VolumeAnalysis,
 		HigherTimeframe: snapshot.HigherTimeFrame,
-		CurrentPosition: pbPosition,
+		CurrentPosition: s.currentPosition,
 		Balance:         snapshot.QuoteBalance,
 	}
 
@@ -339,12 +325,6 @@ func (s *AIStrategy) executeBuy(
 		return nil, errors.Wrap(err, "failed to execute buy order")
 	}
 
-	// If underlying trader is the in-process simulator, apply immediate fill for accounting.
-	if sim, ok := s.trader.(*trader.SimulateTrader); ok {
-		if err := sim.ApplyTrade(snapshot.Price(), positionValue, "buy"); err != nil {
-			s.logger.Warn("Failed to apply simulated buy trade", zap.Error(err))
-		}
-	}
 
 	exitPlan := decision.ExitPlan
 	takeProfit := decimal.NewFromFloat(exitPlan.TakeProfitPrice)
@@ -387,11 +367,6 @@ func (s *AIStrategy) executeClose(ctx context.Context, currentPrice decimal.Deci
 		return nil, errors.Wrap(err, "failed to execute sell order")
 	}
 
-	if sim, ok := s.trader.(*trader.SimulateTrader); ok {
-		if err := sim.ApplyTrade(currentPrice, position.Amount, "sell"); err != nil {
-			s.logger.Warn("Failed to apply simulated sell trade", zap.Error(err))
-		}
-	}
 
 	// Calculate P&L
 	pnl := position.PnL(currentPrice)

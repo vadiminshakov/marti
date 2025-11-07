@@ -11,13 +11,24 @@ import (
 	"go.uber.org/zap"
 )
 
+// mockPricer is a simple mock for the Pricer interface.
+type mockPricer struct {
+	price decimal.Decimal
+}
+
+func (m *mockPricer) GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error) {
+	return m.price, nil
+}
+
 func TestSimulateTrader_NewSimulateTrader(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
+	pricer := &mockPricer{price: decimal.NewFromInt(50000)}
 
-	trader, err := NewSimulateTrader(pair, logger)
+	trader, err := NewSimulateTrader(pair, logger, pricer)
 	require.NoError(t, err)
 	require.NotNil(t, trader)
+	assert.NotNil(t, trader.pricer)
 
 	// check initial balances
 	btcBalance, err := trader.GetBalance(context.Background(), "BTC")
@@ -31,11 +42,12 @@ func TestSimulateTrader_NewSimulateTrader(t *testing.T) {
 func TestSimulateTrader_Buy(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
-	trader, err := NewSimulateTrader(pair, logger)
+	pricer := &mockPricer{price: decimal.NewFromInt(50000)}
+	trader, err := NewSimulateTrader(pair, logger, pricer)
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	amount := decimal.NewFromFloat(0.1)
+	amount := decimal.NewFromFloat(0.1) // 0.1 BTC
 	orderID := "test-order-1"
 
 	err = trader.Buy(ctx, amount, orderID)
@@ -46,12 +58,25 @@ func TestSimulateTrader_Buy(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, executed)
 	assert.True(t, filledAmount.Equal(amount))
+
+	// verify balances updated correctly
+	btcBalance, err := trader.GetBalance(context.Background(), "BTC")
+	require.NoError(t, err)
+	usdtBalance, err := trader.GetBalance(context.Background(), "USDT")
+	require.NoError(t, err)
+
+	expectedBTC := amount
+	expectedUSDT := decimal.NewFromInt(10000).Sub(amount.Mul(pricer.price)) // 10000 - 0.1*50000 = 5000
+
+	assert.True(t, btcBalance.Equal(expectedBTC))
+	assert.True(t, usdtBalance.Equal(expectedUSDT))
 }
 
 func TestSimulateTrader_Sell_InsufficientBalance(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
-	trader, err := NewSimulateTrader(pair, logger)
+	pricer := &mockPricer{price: decimal.NewFromInt(50000)}
+	trader, err := NewSimulateTrader(pair, logger, pricer)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -64,74 +89,16 @@ func TestSimulateTrader_Sell_InsufficientBalance(t *testing.T) {
 	assert.Contains(t, err.Error(), "insufficient")
 }
 
-func TestSimulateTrader_ApplyTrade_Buy(t *testing.T) {
+func TestSimulateTrader_Buy_InsufficientBalance(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
-	trader, err := NewSimulateTrader(pair, logger)
+	pricer := &mockPricer{price: decimal.NewFromInt(50000)}
+	trader, err := NewSimulateTrader(pair, logger, pricer)
 	require.NoError(t, err)
 
-	price := decimal.NewFromInt(50000)
-	usdtAmount := decimal.NewFromInt(5000) // spending 5000 USDT
-
-	err = trader.ApplyTrade(price, usdtAmount, "buy")
-	require.NoError(t, err)
-
-	// verify balances updated correctly
-	btcBalance, err := trader.GetBalance(context.Background(), "BTC")
-	require.NoError(t, err)
-	usdtBalance, err := trader.GetBalance(context.Background(), "USDT")
-	require.NoError(t, err)
-
-	expectedBTC := usdtAmount.Div(price) // 5000 / 50000 = 0.1 BTC
-	expectedUSDT := decimal.NewFromInt(10000).Sub(usdtAmount) // 10000 - 5000 = 5000
-
-	assert.True(t, btcBalance.Equal(expectedBTC), "BTC balance should be %s, got %s", expectedBTC, btcBalance)
-	assert.True(t, usdtBalance.Equal(expectedUSDT), "USDT balance should be %s, got %s", expectedUSDT, usdtBalance)
-}
-
-func TestSimulateTrader_ApplyTrade_Sell(t *testing.T) {
-	pair := entity.Pair{From: "BTC", To: "USDT"}
-	logger := zap.NewNop()
-	trader, err := NewSimulateTrader(pair, logger)
-	require.NoError(t, err)
-
-	// first buy some BTC with 5000 USDT
-	buyPrice := decimal.NewFromInt(50000)
-	buyUSDT := decimal.NewFromInt(5000)
-	err = trader.ApplyTrade(buyPrice, buyUSDT, "buy")
-	require.NoError(t, err)
-
-	// now sell some BTC (0.05 BTC)
-	sellPrice := decimal.NewFromInt(55000)
-	sellBTC := decimal.NewFromFloat(0.05)
-	err = trader.ApplyTrade(sellPrice, sellBTC, "sell")
-	require.NoError(t, err)
-
-	// verify balances
-	btcBalance, err := trader.GetBalance(context.Background(), "BTC")
-	require.NoError(t, err)
-	usdtBalance, err := trader.GetBalance(context.Background(), "USDT")
-	require.NoError(t, err)
-
-	// bought: 5000/50000 = 0.1 BTC, spent 5000 USDT
-	// sold: 0.05 BTC, received 0.05 * 55000 = 2750 USDT
-	expectedBTC := buyUSDT.Div(buyPrice).Sub(sellBTC) // 0.1 - 0.05 = 0.05
-	expectedUSDT := decimal.NewFromInt(10000).Sub(buyUSDT).Add(sellPrice.Mul(sellBTC)) // 10000 - 5000 + 2750 = 7750
-
-	assert.True(t, btcBalance.Equal(expectedBTC), "BTC balance should be %s, got %s", expectedBTC, btcBalance)
-	assert.True(t, usdtBalance.Equal(expectedUSDT), "USDT balance should be %s, got %s", expectedUSDT, usdtBalance)
-}
-
-func TestSimulateTrader_ApplyTrade_InsufficientBalance(t *testing.T) {
-	pair := entity.Pair{From: "BTC", To: "USDT"}
-	logger := zap.NewNop()
-	trader, err := NewSimulateTrader(pair, logger)
-	require.NoError(t, err)
-
-	// try to buy more USDT worth than we have
-	price := decimal.NewFromInt(50000)
-	usdtAmount := decimal.NewFromInt(50000) // trying to spend 50000 USDT, but we only have 10000
-	err = trader.ApplyTrade(price, usdtAmount, "buy")
+	// try to buy more than we can afford
+	amount := decimal.NewFromFloat(0.3) // 0.3 * 50000 = 15000 USDT, but we only have 10000
+	err = trader.Buy(context.Background(), amount, "some-order")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "insufficient")
 }
@@ -139,13 +106,13 @@ func TestSimulateTrader_ApplyTrade_InsufficientBalance(t *testing.T) {
 func TestSimulateTrader_OrderExecuted_NotFound(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
-	trader, err := NewSimulateTrader(pair, logger)
+	pricer := &mockPricer{}
+	trader, err := NewSimulateTrader(pair, logger, pricer)
 	require.NoError(t, err)
 
 	ctx := context.Background()
 	executed, filledAmount, err := trader.OrderExecuted(ctx, "non-existent-order")
 	require.NoError(t, err)
-	// In simulation mode, unknown orders (e.g., from previous session) are assumed executed with zero amount
 	assert.True(t, executed)
 	assert.True(t, filledAmount.Equal(decimal.Zero))
 }
@@ -153,69 +120,49 @@ func TestSimulateTrader_OrderExecuted_NotFound(t *testing.T) {
 func TestSimulateTrader_FullTradeCycle(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
-	trader, err := NewSimulateTrader(pair, logger)
+	pricer := &mockPricer{}
+	trader, err := NewSimulateTrader(pair, logger, pricer)
 	require.NoError(t, err)
 
 	ctx := context.Background()
 
 	// initial balances
-	initialBTC, err := trader.GetBalance(ctx, "BTC")
-	require.NoError(t, err)
 	initialUSDT, err := trader.GetBalance(ctx, "USDT")
 	require.NoError(t, err)
-	assert.True(t, initialBTC.Equal(decimal.Zero))
 	assert.True(t, initialUSDT.Equal(decimal.NewFromInt(10000)))
 
-	// buy cycle - buy with 5000 USDT
-	buyPrice := decimal.NewFromInt(50000)
-	buyUSDT := decimal.NewFromInt(5000)
+	// buy 0.1 BTC at 50000
+	pricer.price = decimal.NewFromInt(50000)
+	buyAmountBTC := decimal.NewFromFloat(0.1)
 	buyOrderID := "buy-order-1"
 
-	err = trader.Buy(ctx, buyUSDT, buyOrderID)
+	err = trader.Buy(ctx, buyAmountBTC, buyOrderID)
 	require.NoError(t, err)
-
-	err = trader.ApplyTrade(buyPrice, buyUSDT, "buy")
-	require.NoError(t, err)
-
-	// verify buy executed
-	executed, filledAmount, err := trader.OrderExecuted(ctx, buyOrderID)
-	require.NoError(t, err)
-	assert.True(t, executed)
-	assert.True(t, filledAmount.Equal(buyUSDT))
 
 	// check balances after buy
 	btcAfterBuy, err := trader.GetBalance(ctx, "BTC")
 	require.NoError(t, err)
 	usdtAfterBuy, err := trader.GetBalance(ctx, "USDT")
 	require.NoError(t, err)
-	expectedBTC := buyUSDT.Div(buyPrice) // 5000 / 50000 = 0.1
-	assert.True(t, btcAfterBuy.Equal(expectedBTC))
-	assert.True(t, usdtAfterBuy.Equal(decimal.NewFromInt(5000))) // 10000 - 5000
+	assert.True(t, btcAfterBuy.Equal(buyAmountBTC))              // should have 0.1 BTC
+	assert.True(t, usdtAfterBuy.Equal(decimal.NewFromInt(5000))) // 10000 - (0.1 * 50000)
 
-	// sell cycle
-	sellPrice := decimal.NewFromInt(60000)
-	sellAmount := decimal.NewFromFloat(0.05)
+	// sell 0.05 BTC at 60000
+	pricer.price = decimal.NewFromInt(60000)
+	sellAmountBTC := decimal.NewFromFloat(0.05)
 	sellOrderID := "sell-order-1"
 
-	err = trader.Sell(ctx, sellAmount, sellOrderID)
+	err = trader.Sell(ctx, sellAmountBTC, sellOrderID)
 	require.NoError(t, err)
-
-	err = trader.ApplyTrade(sellPrice, sellAmount, "sell")
-	require.NoError(t, err)
-
-	// verify sell executed
-	executed, filledAmount, err = trader.OrderExecuted(ctx, sellOrderID)
-	require.NoError(t, err)
-	assert.True(t, executed)
-	assert.True(t, filledAmount.Equal(sellAmount))
 
 	// check final balances
 	finalBTC, err := trader.GetBalance(ctx, "BTC")
 	require.NoError(t, err)
 	finalUSDT, err := trader.GetBalance(ctx, "USDT")
 	require.NoError(t, err)
-	expectedFinalBTC := expectedBTC.Sub(sellAmount) // 0.1 - 0.05 = 0.05
-	expectedFinalUSDT := usdtAfterBuy.Add(sellPrice.Mul(sellAmount)) // 5000 + 60000*0.05 = 8000
+
+	expectedFinalBTC := buyAmountBTC.Sub(sellAmountBTC)                      // 0.1 - 0.05 = 0.05
+	expectedFinalUSDT := usdtAfterBuy.Add(pricer.price.Mul(sellAmountBTC)) // 5000 + (60000 * 0.05) = 8000
 	assert.True(t, finalBTC.Equal(expectedFinalBTC))
 	assert.True(t, finalUSDT.Equal(expectedFinalUSDT))
 }
