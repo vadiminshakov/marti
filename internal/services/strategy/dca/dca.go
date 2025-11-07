@@ -649,7 +649,7 @@ func (d *DCAStrategy) Initialize(ctx context.Context) error {
 	calculatedInitialBuyAmount, err := d.calculateIndividualBuyAmount(ctx)
 	if err != nil {
 		d.l.Error("Failed to calculate initial buy amount", zap.Error(err))
-		
+
 		return errors.Wrap(err, "failed to calculate initial buy amount")
 	}
 	if calculatedInitialBuyAmount.IsZero() {
@@ -685,13 +685,13 @@ func (d *DCAStrategy) Initialize(ctx context.Context) error {
 	if err := d.trader.Buy(ctx, calculatedInitialBuyAmount, intent.ID); err != nil {
 		d.markIntentFailed(intent, err)
 		d.l.Error("Initial buy execution failed", zap.Error(err))
-		
+
 		return errors.Wrapf(err, "initial buy execution failed for %s", d.pair.String())
 	}
 
 	if err := d.AddDCAPurchase(intent.ID, currentPrice, calculatedInitialBuyAmount, operationTime, 1); err != nil {
 		d.l.Error("Failed to record initial purchase state", zap.Error(err))
-		
+
 		return errors.Wrapf(err, "failed to record initial purchase state for %s", d.pair.String())
 	}
 
@@ -707,11 +707,10 @@ func (d *DCAStrategy) Initialize(ctx context.Context) error {
 
 // applySimulationTrade applies a trade to the simulation trader if applicable
 func (d *DCAStrategy) applySimulationTrade(price, amount decimal.Decimal, side string) error {
-	if simTrader, ok := d.trader.(trader.SimulationTrader); ok {
+	// attempt direct assertion to concrete simulator
+	if simTrader, ok := d.trader.(*trader.SimulateTrader); ok {
 		return simTrader.ApplyTrade(price, amount, side)
 	}
-
-	// not a simulation trader, no action needed
 	return nil
 }
 
@@ -719,31 +718,25 @@ func (d *DCAStrategy) applySimulationTrade(price, amount decimal.Decimal, side s
 // This is needed when restarting in simulation mode - the DCA series is loaded from WAL
 // but the simulation trader starts with zero balances.
 func (d *DCAStrategy) SyncSimulationBalance() error {
-	simTrader, ok := d.trader.(trader.SimulationTrader)
+	simTrader, ok := d.trader.(*trader.SimulateTrader)
 	if !ok {
-		// not a simulation trader, nothing to sync
 		return nil
 	}
-
-	// apply all existing purchases to simulation balance
 	for _, purchase := range d.dcaSeries.Purchases {
 		if err := simTrader.ApplyTrade(purchase.Price, purchase.Amount, "buy"); err != nil {
 			return errors.Wrapf(err, "failed to sync purchase %s to simulation balance", purchase.ID)
 		}
-		
 		d.l.Debug("Synced purchase to simulation balance",
 			zap.String("purchase_id", purchase.ID),
 			zap.String("price", purchase.Price.String()),
 			zap.String("amount", purchase.Amount.String()),
 		)
 	}
-
 	if len(d.dcaSeries.Purchases) > 0 {
 		d.l.Info("Synchronized simulation balance with WAL purchases",
 			zap.String("pair", d.pair.String()),
 			zap.Int("purchases_count", len(d.dcaSeries.Purchases)),
 		)
 	}
-
 	return nil
 }

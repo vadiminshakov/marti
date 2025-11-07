@@ -58,7 +58,6 @@ type AIStrategy struct {
 	higherLookback   int
 }
 
-
 // NewAIStrategy creates a new AI trading strategy instance
 func NewAIStrategy(
 	logger *zap.Logger,
@@ -340,10 +339,10 @@ func (s *AIStrategy) executeBuy(
 		return nil, errors.Wrap(err, "failed to execute buy order")
 	}
 
-	if sim, ok := s.trader.(trader.SimulationTrader); ok {
+	// If underlying trader is the in-process simulator, apply immediate fill for accounting.
+	if sim, ok := s.trader.(*trader.SimulateTrader); ok {
 		if err := sim.ApplyTrade(snapshot.Price(), positionValue, "buy"); err != nil {
-			s.logger.Warn("Failed to apply simulated buy trade",
-				zap.Error(err))
+			s.logger.Warn("Failed to apply simulated buy trade", zap.Error(err))
 		}
 	}
 
@@ -388,10 +387,9 @@ func (s *AIStrategy) executeClose(ctx context.Context, currentPrice decimal.Deci
 		return nil, errors.Wrap(err, "failed to execute sell order")
 	}
 
-	if sim, ok := s.trader.(trader.SimulationTrader); ok {
+	if sim, ok := s.trader.(*trader.SimulateTrader); ok {
 		if err := sim.ApplyTrade(currentPrice, position.Amount, "sell"); err != nil {
-			s.logger.Warn("Failed to apply simulated sell trade",
-				zap.Error(err))
+			s.logger.Warn("Failed to apply simulated sell trade", zap.Error(err))
 		}
 	}
 
