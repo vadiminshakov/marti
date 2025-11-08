@@ -19,13 +19,15 @@ type Pricer interface {
 
 // SimulateTrader is a simple spot/margin simulator.
 type SimulateTrader struct {
-	mu       sync.RWMutex
-	pair     entity.Pair
-	logger   *zap.Logger
-	wallet   map[string]decimal.Decimal
-	orders   map[string]orderInfo
-	position *entity.Position
-	pricer   Pricer
+	mu         sync.RWMutex
+	pair       entity.Pair
+	logger     *zap.Logger
+	wallet     map[string]decimal.Decimal
+	orders     map[string]orderInfo
+	position   *entity.Position
+	pricer     Pricer
+	leverage   int
+	marketType entity.MarketType
 }
 
 type orderInfo struct {
@@ -34,16 +36,32 @@ type orderInfo struct {
 }
 
 // NewSimulateTrader creates a new SimulateTrader.
-func NewSimulateTrader(pair entity.Pair, logger *zap.Logger, pricer Pricer) (*SimulateTrader, error) {
+func NewSimulateTrader(pair entity.Pair, marketType entity.MarketType, leverage int, logger *zap.Logger, pricer Pricer) (*SimulateTrader, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	if pricer == nil {
 		return nil, errors.New("pricer is required for SimulateTrader")
 	}
+	if leverage < 1 {
+		leverage = 1
+	}
 	wallet := map[string]decimal.Decimal{pair.From: decimal.Zero, pair.To: decimal.NewFromInt(10000)}
-	logger.Info("simulate init", zap.String("pair", pair.String()), zap.String("base", wallet[pair.From].String()), zap.String("quote", wallet[pair.To].String()))
-	return &SimulateTrader{pair: pair, logger: logger, wallet: wallet, orders: make(map[string]orderInfo), pricer: pricer}, nil
+	logger.Info("simulate init",
+		zap.String("pair", pair.String()),
+		zap.String("base", wallet[pair.From].String()),
+		zap.String("quote", wallet[pair.To].String()),
+		zap.String("market_type", string(marketType)),
+		zap.Int("leverage", leverage))
+	return &SimulateTrader{
+		pair:       pair,
+		logger:     logger,
+		wallet:     wallet,
+		orders:     make(map[string]orderInfo),
+		pricer:     pricer,
+		leverage:   leverage,
+		marketType: marketType,
+	}, nil
 }
 
 // Buy simulates a market buy order, fetching the price from its pricer.
@@ -59,11 +77,25 @@ func (t *SimulateTrader) Buy(ctx context.Context, amount decimal.Decimal, id str
 
 	quoteAmount := amount.Mul(price)
 
-	if t.wallet[t.pair.To].LessThan(quoteAmount) {
-		return errors.Errorf("insufficient %s balance: have %s need %s", t.pair.To, t.wallet[t.pair.To].String(), quoteAmount.String())
+	// For margin trading with leverage, we can buy more than we have in wallet
+	var requiredQuote decimal.Decimal
+	if t.marketType == entity.MarketTypeMargin && t.leverage > 1 {
+		// With leverage, we only need to have 1/leverage of the quote amount
+		requiredQuote = quoteAmount.Div(decimal.NewFromInt(int64(t.leverage)))
+	} else {
+		// For spot trading, we need the full quote amount
+		requiredQuote = quoteAmount
 	}
 
-	t.wallet[t.pair.To] = t.wallet[t.pair.To].Sub(quoteAmount)
+	if t.wallet[t.pair.To].LessThan(requiredQuote) {
+		return errors.Errorf("insufficient %s balance: have %s need %s (with %dx leverage)",
+			t.pair.To,
+			t.wallet[t.pair.To].String(),
+			requiredQuote.String(),
+			t.leverage)
+	}
+
+	t.wallet[t.pair.To] = t.wallet[t.pair.To].Sub(requiredQuote)
 	t.wallet[t.pair.From] = t.wallet[t.pair.From].Add(amount)
 
 	if t.position == nil {
@@ -101,8 +133,26 @@ func (t *SimulateTrader) Sell(ctx context.Context, amount decimal.Decimal, id st
 		return errors.Wrap(err, "failed to get price for simulated sell")
 	}
 
-	if t.wallet[t.pair.From].LessThan(amount) {
-		return fmt.Errorf("insufficient %s balance: have %s need %s", t.pair.From, t.wallet[t.pair.From].String(), amount.String())
+	// For margin trading with leverage, we can sell more than we have (short selling)
+	// But we still need to check if we have enough to cover the margin requirement
+	var requiredBase decimal.Decimal
+	if t.marketType == entity.MarketTypeMargin && t.leverage > 1 {
+		// With leverage, we only need to have 1/leverage of the base amount for margin
+		requiredBase = amount.Div(decimal.NewFromInt(int64(t.leverage)))
+		// For short selling, we can allow negative balance up to leverage limit
+		if t.wallet[t.pair.From].LessThan(requiredBase.Neg()) {
+			return fmt.Errorf("insufficient %s balance for leveraged sell: have %s, max short allowed %s (with %dx leverage)",
+				t.pair.From,
+				t.wallet[t.pair.From].String(),
+				requiredBase.Neg().String(),
+				t.leverage)
+		}
+	} else {
+		// For spot trading, we need the full base amount
+		requiredBase = amount
+		if t.wallet[t.pair.From].LessThan(requiredBase) {
+			return fmt.Errorf("insufficient %s balance: have %s need %s", t.pair.From, t.wallet[t.pair.From].String(), requiredBase.String())
+		}
 	}
 
 	quoteReceived := amount.Mul(price)

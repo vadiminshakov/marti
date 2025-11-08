@@ -73,7 +73,7 @@ func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.
 		// use logger from context or create a new one
 		logger := zap.L()
 		pricerInstance := pricer.NewSimulatePricer(simulateClient.GetBinanceClient())
-		traderInstance, err := trader.NewSimulateTrader(pair, logger, pricerInstance)
+		traderInstance, err := trader.NewSimulateTrader(pair, marketType, leverage, logger, pricerInstance)
 		if err != nil {
 			return nil, nil, errors.Wrap(err, "failed to create SimulateTrader")
 		}

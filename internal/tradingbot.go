@@ -36,7 +36,13 @@ type TradingBot struct {
 // It initializes the appropriate trader and pricer components based on the platform specified in the config,
 // and sets up the trading strategy with the provided parameters.
 func NewTradingBot(logger *zap.Logger, conf config.Config, client any) (*TradingBot, error) {
-	currentTrader, currentPricer, err := createTraderAndPricer(conf.Platform, conf.Pair, conf.MarketType, conf.Leverage, client)
+	// for AI strategy, use MaxLeverage; for DCA strategy, use Leverage
+	leverage := conf.Leverage
+	if conf.StrategyType == "ai" {
+		leverage = conf.MaxLeverage
+	}
+
+	currentTrader, currentPricer, err := createTraderAndPricer(conf.Platform, conf.Pair, conf.MarketType, leverage, client)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create trader and pricer")
 	}

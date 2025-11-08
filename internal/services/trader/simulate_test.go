@@ -25,7 +25,7 @@ func TestSimulateTrader_NewSimulateTrader(t *testing.T) {
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(50000)}
 
-	trader, err := NewSimulateTrader(pair, logger, pricer)
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer)
 	require.NoError(t, err)
 	require.NotNil(t, trader)
 	assert.NotNil(t, trader.pricer)
@@ -43,7 +43,7 @@ func TestSimulateTrader_Buy(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(50000)}
-	trader, err := NewSimulateTrader(pair, logger, pricer)
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -76,7 +76,7 @@ func TestSimulateTrader_Sell_InsufficientBalance(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(50000)}
-	trader, err := NewSimulateTrader(pair, logger, pricer)
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -93,7 +93,7 @@ func TestSimulateTrader_Buy_InsufficientBalance(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(50000)}
-	trader, err := NewSimulateTrader(pair, logger, pricer)
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer)
 	require.NoError(t, err)
 
 	// try to buy more than we can afford
@@ -107,7 +107,7 @@ func TestSimulateTrader_OrderExecuted_NotFound(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{}
-	trader, err := NewSimulateTrader(pair, logger, pricer)
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -121,7 +121,7 @@ func TestSimulateTrader_FullTradeCycle(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{}
-	trader, err := NewSimulateTrader(pair, logger, pricer)
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -161,7 +161,7 @@ func TestSimulateTrader_FullTradeCycle(t *testing.T) {
 	finalUSDT, err := trader.GetBalance(ctx, "USDT")
 	require.NoError(t, err)
 
-	expectedFinalBTC := buyAmountBTC.Sub(sellAmountBTC)                      // 0.1 - 0.05 = 0.05
+	expectedFinalBTC := buyAmountBTC.Sub(sellAmountBTC)                    // 0.1 - 0.05 = 0.05
 	expectedFinalUSDT := usdtAfterBuy.Add(pricer.price.Mul(sellAmountBTC)) // 5000 + (60000 * 0.05) = 8000
 	assert.True(t, finalBTC.Equal(expectedFinalBTC))
 	assert.True(t, finalUSDT.Equal(expectedFinalUSDT))
