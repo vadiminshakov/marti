@@ -173,21 +173,16 @@ func (pb *PromptBuilder) BuildUserPrompt(ctx MarketContext) string {
 
 	sb.WriteString(fmt.Sprintf("# Market Analysis for %s\n\n", pb.pair.String()))
 
-	// Multi-timeframe overview
 	if overview := pb.formatMultiTimeframe(ctx); overview != "" {
 		sb.WriteString(overview)
 	}
 
-	// Recent market data (last 20 candles)
 	sb.WriteString(pb.formatRecentData(ctx.Primary, 20))
 
-	// Historical context (older candles)
 	sb.WriteString(pb.formatHistoricalSummary(ctx.Primary))
 
-	// Volume analysis
 	sb.WriteString(pb.formatVolumeAnalysis(ctx.VolumeAnalysis))
 
-	// Position information
 	if ctx.CurrentPosition != nil {
 		currentPrice := decimal.Zero
 		if ctx.Primary != nil {
@@ -201,11 +196,9 @@ func (pb *PromptBuilder) BuildUserPrompt(ctx MarketContext) string {
 		sb.WriteString("**Status:** No open position\n\n")
 	}
 
-	// Account information
 	sb.WriteString("## Account Information\n\n")
 	sb.WriteString(fmt.Sprintf("**Available Balance (%s):** %s\n\n", pb.pair.To, ctx.Balance.StringFixed(2)))
 
-	// Instructions
 	sb.WriteString("## Instructions\n\n")
 	sb.WriteString("Analyze the market data and provide your trading decision in JSON format.\n")
 	if ctx.CurrentPosition != nil {
@@ -231,26 +224,26 @@ func (pb *PromptBuilder) formatRecentData(primary *entity.Timeframe, limit int) 
 
 	klines := primary.Candles
 
-	// Calculate start index for last N candles
+	// calculate start index for last N candles
 	startIdx := len(klines) - limit
 	if startIdx < 0 {
 		startIdx = 0
 	}
 
-	// Table header
+	// table header
 	sb.WriteString("```\n")
 	sb.WriteString("Time     | Open     | High     | Low      | Close    | Volume   | EMA20    | EMA50    | MACD   | RSI7  | RSI14 | ATR14\n")
 	sb.WriteString("---------|----------|----------|----------|----------|----------|----------|----------|--------|-------|-------|-------\n")
 
-	// Table rows
+	// table rows
 	for i := startIdx; i < len(klines); i++ {
 		k := klines[i]
 		timeStr := k.OpenTime.Format("15:04")
 
-		// Get corresponding indicator data if available
+		// get corresponding indicator data if available
 		ind, hasIndicators := primary.IndicatorForCandle(i)
 
-		// Format row with 2 decimal places for prices, appropriate precision for indicators
+		// format row with 2 decimal places for prices, appropriate precision for indicators
 		sb.WriteString(fmt.Sprintf("%-8s | %8.2f | %8.2f | %8.2f | %8.2f | %8.2f",
 			timeStr,
 			toFloat(k.Open),
@@ -300,13 +293,13 @@ func (pb *PromptBuilder) formatHistoricalSummary(primary *entity.Timeframe) stri
 
 	sb.WriteString("## Historical Context (Older Candles)\n\n")
 
-	// Get historical data (everything except the last 20)
+	// get historical data (everything except the last 20)
 	endIdx := len(klines) - 20
 	if endIdx <= 0 {
 		return ""
 	}
 
-	// Close prices
+	// close prices
 	sb.WriteString("**Close Prices:** [")
 	for i := 0; i < endIdx; i++ {
 		if i > 0 {
@@ -356,11 +349,11 @@ func (pb *PromptBuilder) formatVolumeAnalysis(volume entity.VolumeAnalysis) stri
 
 	sb.WriteString("## Volume Analysis\n\n")
 
-	// Current and average volume
+	// current and average volume
 	sb.WriteString(fmt.Sprintf("**Current Volume:** %s\n", volume.CurrentVolume.StringFixed(2)))
 	sb.WriteString(fmt.Sprintf("**Average Volume (20-period):** %s\n", volume.AverageVolume.StringFixed(2)))
 
-	// Relative volume with interpretation
+	// relative volume with interpretation
 	relVol := volume.RelativeVolume
 	sb.WriteString(fmt.Sprintf("**Relative Volume:** %.2fx", toFloat(relVol)))
 
@@ -374,10 +367,10 @@ func (pb *PromptBuilder) formatVolumeAnalysis(volume entity.VolumeAnalysis) stri
 		sb.WriteString(" (Near average)\n")
 	}
 
-	// Volume spikes
+	// volume spikes
 	if len(volume.VolumeSpikes) > 0 {
 		sb.WriteString("\n**Volume Spikes (>1.5x avg):** ")
-		// Show only the most recent spikes (last 10)
+		// show only the most recent spikes (last 10)
 		startIdx := 0
 		if len(volume.VolumeSpikes) > 10 {
 			startIdx = len(volume.VolumeSpikes) - 10
@@ -413,7 +406,7 @@ func (pb *PromptBuilder) formatMultiTimeframe(ctx MarketContext) string {
 
 	sb.WriteString("## Multi-Timeframe Overview\n\n")
 
-	// Primary timeframe (current)
+	// primary timeframe (current)
 	if hasPrimary {
 		primarySummary := ctx.Primary.Summary
 
@@ -427,7 +420,7 @@ func (pb *PromptBuilder) formatMultiTimeframe(ctx MarketContext) string {
 		sb.WriteString(fmt.Sprintf("- Trend: %s\n", primarySummary.Trend.Title()))
 	}
 
-	// Higher timeframe
+	// higher timeframe
 	if hasHigher {
 		htf := ctx.HigherTimeframe.Summary
 		sb.WriteString(fmt.Sprintf("\n**Higher Timeframe (%s):**\n", htf.Interval))
@@ -439,7 +432,7 @@ func (pb *PromptBuilder) formatMultiTimeframe(ctx MarketContext) string {
 		))
 		sb.WriteString(fmt.Sprintf("- Trend: %s\n", htf.Trend.Title()))
 
-		// Check trend alignment
+		// check trend alignment
 		if hasPrimary {
 			primaryTrend := ctx.Primary.Summary.Trend
 
@@ -467,12 +460,12 @@ func (pb *PromptBuilder) formatPosition(position *entity.Position, currentPrice 
 	sb.WriteString("## Current Position\n\n")
 	sb.WriteString("**Status:** Open Long\n\n")
 
-	// Entry information
+	// entry information
 	sb.WriteString(fmt.Sprintf("**Entry Price:** %s\n", position.EntryPrice.StringFixed(2)))
 	sb.WriteString(fmt.Sprintf("**Amount:** %s %s\n", position.Amount.StringFixed(8), pb.pair.From))
 	sb.WriteString(fmt.Sprintf("**Current Price:** %s\n", currentPrice.StringFixed(2)))
 
-	// Calculate P&L
+	// calculate P&L
 	pnl := position.PnL(currentPrice)
 	pnlPercent := decimal.Zero
 	if !position.EntryPrice.IsZero() {
@@ -492,7 +485,7 @@ func (pb *PromptBuilder) formatPosition(position *entity.Position, currentPrice 
 		toFloat(pnlPercent),
 	))
 
-	// Time held
+	// time held
 	if !position.EntryTime.IsZero() {
 		duration := time.Since(position.EntryTime)
 		sb.WriteString(fmt.Sprintf("**Time Held:** %s\n", formatDuration(duration)))
@@ -500,7 +493,7 @@ func (pb *PromptBuilder) formatPosition(position *entity.Position, currentPrice 
 
 	sb.WriteString("\n")
 
-	// Exit levels
+	// exit levels
 	if !position.StopLoss.IsZero() || !position.TakeProfit.IsZero() {
 		sb.WriteString("**Exit Levels:**\n")
 
@@ -521,7 +514,7 @@ func (pb *PromptBuilder) formatPosition(position *entity.Position, currentPrice 
 			))
 		}
 
-		// Calculate risk-reward ratio
+		// calculate risk-reward ratio
 		if !position.StopLoss.IsZero() && !position.TakeProfit.IsZero() {
 			risk := position.EntryPrice.Sub(position.StopLoss).Abs()
 			reward := position.TakeProfit.Sub(position.EntryPrice).Abs()
@@ -535,7 +528,7 @@ func (pb *PromptBuilder) formatPosition(position *entity.Position, currentPrice 
 		sb.WriteString("\n")
 	}
 
-	// Invalidation condition
+	// invalidation condition
 	if position.Invalidation != "" {
 		sb.WriteString(fmt.Sprintf("**Invalidation Condition:** %s\n\n", position.Invalidation))
 	}

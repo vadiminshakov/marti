@@ -39,16 +39,15 @@ func (t *BinanceTrader) Buy(ctx context.Context, amount decimal.Decimal, clientO
 	amount = amount.RoundFloor(4)
 
 	if t.marketType == entity.MarketTypeMargin {
-		// Use margin order service for margin trading
+		// use margin order service for margin trading
 		_, err := t.client.NewCreateMarginOrderService().Symbol(t.pair.Symbol()).
 			Side(binance.SideTypeBuy).Type(binance.OrderTypeMarket).
 			Quantity(amount.String()).
-			NewClientOrderID(clientOrderID).
-			Do(ctx)
+			NewClientOrderID(clientOrderID).Do(ctx)
 		return err
 	}
 
-	// Use regular spot order service
+	// use regular spot order service
 	_, err := t.client.NewCreateOrderService().Symbol(t.pair.Symbol()).
 		Side(binance.SideTypeBuy).Type(binance.OrderTypeMarket).
 		Quantity(amount.String()).
@@ -61,7 +60,7 @@ func (t *BinanceTrader) Sell(ctx context.Context, amount decimal.Decimal, client
 	amount = amount.RoundFloor(4)
 
 	if t.marketType == entity.MarketTypeMargin {
-		// Use margin order service for margin trading
+		// use margin order service for margin trading
 		_, err := t.client.NewCreateMarginOrderService().Symbol(t.pair.Symbol()).
 			Side(binance.SideTypeSell).Type(binance.OrderTypeMarket).
 			Quantity(amount.String()).
@@ -70,7 +69,7 @@ func (t *BinanceTrader) Sell(ctx context.Context, amount decimal.Decimal, client
 		return err
 	}
 
-	// Use regular spot order service
+	// use regular spot order service
 	_, err := t.client.NewCreateOrderService().Symbol(t.pair.Symbol()).
 		Side(binance.SideTypeSell).Type(binance.OrderTypeMarket).
 		Quantity(amount.String()).
@@ -84,13 +83,13 @@ func (t *BinanceTrader) OrderExecuted(ctx context.Context, clientOrderID string)
 	var err error
 
 	if t.marketType == entity.MarketTypeMargin {
-		// Query margin order
+		// query margin order
 		order, err = t.client.NewGetMarginOrderService().
 			Symbol(t.pair.Symbol()).
 			OrigClientOrderID(clientOrderID).
 			Do(ctx)
 	} else {
-		// Query spot order
+		// query spot order
 		order, err = t.client.NewGetOrderService().
 			Symbol(t.pair.Symbol()).
 			OrigClientOrderID(clientOrderID).
@@ -132,7 +131,7 @@ func (t *BinanceTrader) OrderExecuted(ctx context.Context, clientOrderID string)
 
 func (t *BinanceTrader) GetBalance(ctx context.Context, currency string) (decimal.Decimal, error) {
 	if t.marketType == entity.MarketTypeMargin {
-		// Get margin account balance
+		// get margin account balance
 		marginAccount, err := t.client.NewGetMarginAccountService().Do(ctx)
 		if err != nil {
 			return decimal.Zero, errors.Wrap(err, "failed to get binance margin account balance")
@@ -150,7 +149,7 @@ func (t *BinanceTrader) GetBalance(ctx context.Context, currency string) (decima
 		return decimal.Zero, nil
 	}
 
-	// Get spot account balance
+	// get spot account balance
 	account, err := t.client.NewGetAccountService().Do(ctx)
 	if err != nil {
 		return decimal.Zero, errors.Wrap(err, "failed to get binance account balance")

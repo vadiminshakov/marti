@@ -28,7 +28,7 @@ func NewBybitTrader(client *bybit.Client, pair entity.Pair, marketType entity.Ma
 		leverage:   leverage,
 	}
 
-	// For margin trading (linear category), set leverage via API
+	// for margin trading (linear category), set leverage via API
 	if marketType == entity.MarketTypeMargin && leverage > 1 {
 		err := trader.setLeverage()
 		if err != nil {
@@ -187,7 +187,7 @@ func (t *BybitTrader) OrderExecuted(ctx context.Context, clientOrderID string) (
 }
 
 func (t *BybitTrader) GetBalance(ctx context.Context, currency string) (decimal.Decimal, error) {
-	// Choose the correct account type based on market type
+	// choose the correct account type based on market type
 	accountType := bybit.AccountTypeV5SPOT
 	if t.marketType == entity.MarketTypeMargin {
 		accountType = bybit.AccountTypeV5CONTRACT

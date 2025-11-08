@@ -421,7 +421,7 @@ func (d *DCAStrategy) calculateSellAmount(profit decimal.Decimal) decimal.Decima
 	doubleThreshold := d.dcaPercentThresholdSell.Mul(decimal.NewFromInt(2))
 
 	// calculate total base currency holdings from quote currency position and average entry price
-	// TotalAmount is in quote currency (e.g., USDT), need to convert to base currency (e.g., BTC)
+	// totalAmount is in quote currency (e.g., USDT), need to convert to base currency (e.g., BTC)
 	totalBaseAmount := d.dcaSeries.TotalAmount.Div(d.dcaSeries.AvgEntryPrice)
 
 	if profit.GreaterThan(doubleThreshold) {

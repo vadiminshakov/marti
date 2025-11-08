@@ -251,7 +251,7 @@ func (s *AIStrategy) executeBuy(
 		s.logger.Info("Opening new position")
 	}
 
-	// Calculate position size based on risk percent
+	// calculate position size based on risk percent
 	budget := entity.NewRiskBudget(decision.RiskPercent)
 	positionValue, amount := budget.Allocate(snapshot.QuoteBalance, snapshot.Price())
 	if amount.LessThanOrEqual(decimal.Zero) {
@@ -313,7 +313,7 @@ func (s *AIStrategy) executeSell(ctx context.Context, currentPrice decimal.Decim
 		return nil, errors.Wrap(err, "failed to execute sell order")
 	}
 
-	// Calculate P&L
+	// calculate P&L
 	pnl := position.PnL(currentPrice)
 	s.logger.Info("Position closed",
 		zap.String("pnl", pnl.String()))

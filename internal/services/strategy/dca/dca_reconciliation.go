@@ -40,7 +40,7 @@ func (d *DCAStrategy) reconcileTradeIntents(ctx context.Context) error {
 			d.l.Error("Failed to process pending intent",
 				zap.Error(err),
 				zap.String("intent_id", intent.ID))
-			// Continue processing other intents even if one fails
+
 			continue
 		}
 	}
@@ -50,13 +50,13 @@ func (d *DCAStrategy) reconcileTradeIntents(ctx context.Context) error {
 
 // processPendingIntent processes a single pending trade intent with polling until completion.
 func (d *DCAStrategy) processPendingIntent(ctx context.Context, intent *tradeIntentRecord) error {
-	// If already applied to series, ensure journal reflects done and return
+	// if already applied to series, ensure journal reflects done and return
 	if d.isTradeProcessed(intent.ID) {
 		_ = d.journal.MarkDone(intent)
 		return nil
 	}
 
-	// Defensive default for polling interval
+	// defensive default for polling interval
 	if d.orderCheckInterval <= 0 {
 		d.orderCheckInterval = defaultOrderCheckInterval
 	}
@@ -67,14 +67,14 @@ func (d *DCAStrategy) processPendingIntent(ctx context.Context, intent *tradeInt
 			return errors.Wrapf(err, "failed to check order execution for intent %s", intent.ID)
 		}
 
-		// Track partial fill progress by updating the intent amount in journal
+		// track partial fill progress by updating the intent amount in journal
 		if filledAmount.GreaterThan(decimal.Zero) && !filledAmount.Equal(intent.Amount) {
 			_ = d.journal.UpdateAmount(intent, filledAmount)
 			intent.Amount = filledAmount
 		}
 
 		if !executed {
-			// Not yet completed — wait and retry
+			// not yet completed — wait and retry
 			time.Sleep(d.orderCheckInterval)
 			continue
 		}
@@ -86,7 +86,7 @@ func (d *DCAStrategy) processPendingIntent(ctx context.Context, intent *tradeInt
 
 		switch intent.Action {
 		case intentActionBuy:
-			// Executed buy with zero amount is invalid → mark failed
+			// executed buy with zero amount is invalid → mark failed
 			if filledAmount.LessThanOrEqual(decimal.Zero) {
 				if err := d.journal.MarkFailed(intent, errors.New("zero filled amount")); err != nil {
 					return err
@@ -104,7 +104,7 @@ func (d *DCAStrategy) processPendingIntent(ctx context.Context, intent *tradeInt
 			return errors.Errorf("unknown intent action: %s", intent.Action)
 		}
 
-		// Mark intent done after applying to series
+		// mark intent done after applying to series
 		if err := d.journal.MarkDone(intent); err != nil {
 			return errors.Wrapf(err, "failed to mark intent as done: %s", intent.ID)
 		}
@@ -167,7 +167,6 @@ func (d *DCAStrategy) applyExecutedSell(intent *tradeIntentRecord) error {
 			d.resetDCASeries(intent.Price)
 		}
 	}
-
 
 	d.markTradeProcessed(intent.ID)
 	return d.saveDCASeries()

@@ -98,7 +98,7 @@ func NewBybitKlineProvider(client *bybit.Client) *BybitKlineProvider {
 // GetKlines fetches kline data from Bybit
 func (p *BybitKlineProvider) GetKlines(ctx context.Context, pair entity.Pair, interval string, limit int) ([]entity.MarketCandle, error) {
 	// Note: Bybit kline API implementation is pending
-	// For now, return an error indicating this feature is not yet supported
+	// for now, return an error indicating this feature is not yet supported
 	return nil, fmt.Errorf("Bybit kline provider for AI strategy is not yet implemented - please use Binance or Simulate platform for AI strategy")
 }
 
