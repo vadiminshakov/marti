@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/vadiminshakov/marti/internal/services/promptbuilder"
 )
 
 const (
@@ -20,28 +21,27 @@ const (
 
 // LLMClient defines the interface for interacting with LLM services
 type LLMClient interface {
-	// Chat sends a chat request with system and user prompts and returns the model's response
-	Chat(ctx context.Context, systemPrompt, userPrompt string) (string, error)
+	// GetDecision sends market data to the LLM and returns a trading decision
+	GetDecision(ctx context.Context, marketContext promptbuilder.MarketContext) (string, error)
 }
 
 type OpenAICompatibleClient struct {
-	apiURL     string
-	apiKey     string
-	model      string
-	httpClient *http.Client
-	maxRetries int
-	retryDelay time.Duration
+	apiURL        string
+	apiKey        string
+	model         string
+	httpClient    *http.Client
+	promptBuilder *promptbuilder.PromptBuilder
+	maxRetries    int
+	retryDelay    time.Duration
 }
 
 // NewOpenAICompatibleClient creates a new client for OpenAI-compatible APIs
-// apiURL: the base URL for the API (e.g., "https://openrouter.ai/api/v1/chat/completions")
-// apiKey: the API key for authentication
-// model: the model identifier (e.g., "deepseek/deepseek-chat", "openai/gpt-4")
-func NewOpenAICompatibleClient(apiURL, apiKey, model string) *OpenAICompatibleClient {
+func NewOpenAICompatibleClient(apiURL, apiKey, model string, promptBuilder *promptbuilder.PromptBuilder) *OpenAICompatibleClient {
 	return &OpenAICompatibleClient{
-		apiURL: apiURL,
-		apiKey: apiKey,
-		model:  model,
+		apiURL:        apiURL,
+		apiKey:        apiKey,
+		model:         model,
+		promptBuilder: promptBuilder,
 		httpClient: &http.Client{
 			Timeout: defaultTimeout,
 		},
@@ -92,18 +92,20 @@ type apiError struct {
 	Code    string `json:"code"`
 }
 
-// Chat sends a chat request to the LLM API and returns the response
-func (c *OpenAICompatibleClient) Chat(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+// GetDecision builds prompts, sends a chat request to the LLM API, and returns the response
+func (c *OpenAICompatibleClient) GetDecision(ctx context.Context, marketContext promptbuilder.MarketContext) (string, error) {
 	if c.apiKey == "" {
 		return "", errors.New("LLM API key is empty")
 	}
+
+	userPrompt := c.promptBuilder.BuildUserPrompt(marketContext)
 
 	reqBody := chatRequest{
 		Model: c.model,
 		Messages: []message{
 			{
 				Role:    "system",
-				Content: systemPrompt,
+				Content: promptbuilder.SystemPrompt,
 			},
 			{
 				Role:    "user",

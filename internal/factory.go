@@ -13,6 +13,7 @@ import (
 	"github.com/vadiminshakov/marti/internal/entity"
 	"github.com/vadiminshakov/marti/internal/services/market/collector"
 	"github.com/vadiminshakov/marti/internal/services/pricer"
+	"github.com/vadiminshakov/marti/internal/services/promptbuilder"
 	"github.com/vadiminshakov/marti/internal/services/strategy/ai"
 	"github.com/vadiminshakov/marti/internal/services/strategy/dca"
 	"github.com/vadiminshakov/marti/internal/services/trader"
@@ -147,8 +148,11 @@ func createAIStrategy(
 	tradeSvc traderService,
 	client any,
 ) (TradingStrategy, error) {
+	// Create PromptBuilder
+	promptBuilder := promptbuilder.NewPromptBuilder(conf.Pair, logger)
+
 	// Create LLM client
-	llmClient := clients.NewOpenAICompatibleClient(conf.LLMAPIURL, conf.LLMAPIKey, conf.Model)
+	llmClient := clients.NewOpenAICompatibleClient(conf.LLMAPIURL, conf.LLMAPIKey, conf.Model, promptBuilder)
 
 	// Create kline provider based on platform
 	var klineProvider collector.KlineProvider
