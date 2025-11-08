@@ -40,8 +40,8 @@ func (t *traderCsv) Buy(ctx context.Context, amount decimal.Decimal, clientOrder
 		return errors.New("prices channel is closed")
 	}
 
-	// When starting with USDT, the amount parameter is in USDT
-	// We need to calculate how much BTC we can buy with this amount of USDT
+	// when starting with USDT, the amount parameter is in USDT
+	// we need to calculate how much BTC we can buy with this amount of USDT
 	usdtAmount := amount
 	btcAmount := usdtAmount.Div(price) // Convert USDT to BTC based on current price
 
@@ -70,43 +70,43 @@ func (t *traderCsv) Buy(ctx context.Context, amount decimal.Decimal, clientOrder
 
 // Sell sells amount of asset in trade pair.
 func (t *traderCsv) Sell(ctx context.Context, amount decimal.Decimal, clientOrderID string) error {
-	// If we don't have any BTC, we can't sell
+	// if we don't have any BTC, we can't sell
 	if t.balance1.LessThanOrEqual(decimal.Zero) {
 		return fmt.Errorf("cannot sell BTC, balance is zero")
 	}
 
-	// Make sure we don't try to sell more than we have
+	// make sure we don't try to sell more than we have
 	amountToSell := amount
 	if amountToSell.GreaterThan(t.balance1) {
 		amountToSell = t.balance1
 	}
 
-	// Subtract the BTC amount from our balance
+	// subtract the BTC amount from our balance
 	t.balance1 = t.balance1.Sub(amountToSell)
 	price, ok := <-t.pricesCh
 	if !ok && price.IsZero() {
 		return errors.New("prices channel is closed")
 	}
 
-	// Calculate how much USDT we get for the BTC
+	// calculate how much USDT we get for the BTC
 	usdtAmount := price.Mul(amountToSell)
 
-	// Calculate fee (0.1% of the trade amount)
+	// calculate fee (0.1% of the trade amount)
 	tradeFee := usdtAmount.Mul(decimal.NewFromFloat(feePercent))
 
-	// Add the USDT to our balance (minus fee)
+	// add the USDT to our balance (minus fee)
 	t.balance2 = t.balance2.Add(usdtAmount)
 
-	// Track the fee
+	// track the fee
 	t.fee = t.fee.Add(tradeFee)
 
-	// Keep track of balance history
+	// keep track of balance history
 	t.oldbalance2 = t.balance2
 	if t.firstbalance2.IsZero() {
 		t.firstbalance2 = t.balance2
 	}
 
-	// Increment deal counter
+	// increment deal counter
 	t.dealsCount++
 
 	if t.executed == nil {

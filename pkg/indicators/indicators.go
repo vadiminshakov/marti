@@ -30,16 +30,16 @@ func CalculateEMA(closes []decimal.Decimal, period int) ([]decimal.Decimal, erro
 
 	closesFloat := decimalsToFloat64(closes)
 
-	// Create EMA indicator
+	// create EMA indicator
 	ema := trend.NewEmaWithPeriod[float64](period)
 
-	// Convert slice to channel
+	// convert slice to channel
 	inputChan := helper.SliceToChan(closesFloat)
 
-	// Compute EMA
+	// compute EMA
 	outputChan := ema.Compute(inputChan)
 
-	// Convert channel back to slice
+	// convert channel back to slice
 	emaFloat := helper.ChanToSlice(outputChan)
 
 	return float64ToDecimals(emaFloat), nil
@@ -54,23 +54,23 @@ func CalculateMACD(closes []decimal.Decimal) ([]decimal.Decimal, error) {
 
 	closesFloat := decimalsToFloat64(closes)
 
-	// Create MACD indicator
+	// create MACD indicator
 	macd := trend.NewMacd[float64]()
 
-	// Convert slice to channel
+	// convert slice to channel
 	inputChan := helper.SliceToChan(closesFloat)
 
-	// Compute MACD - returns both MACD and signal channels
+	// compute MACD - returns both MACD and signal channels
 	macdChan, signalChan := macd.Compute(inputChan)
 
 	// IMPORTANT: Must drain signal channel in goroutine to prevent blocking
 	go func() {
 		for range signalChan {
-			// Just drain it
+			// just drain it
 		}
 	}()
 
-	// Convert channel back to slice
+	// convert channel back to slice
 	macdFloat := helper.ChanToSlice(macdChan)
 
 	return float64ToDecimals(macdFloat), nil
@@ -84,16 +84,16 @@ func CalculateRSI(closes []decimal.Decimal, period int) ([]decimal.Decimal, erro
 
 	closesFloat := decimalsToFloat64(closes)
 
-	// Create RSI indicator
+	// create RSI indicator
 	rsi := momentum.NewRsiWithPeriod[float64](period)
 
-	// Convert slice to channel
+	// convert slice to channel
 	inputChan := helper.SliceToChan(closesFloat)
 
-	// Compute RSI
+	// compute RSI
 	outputChan := rsi.Compute(inputChan)
 
-	// Convert channel back to slice
+	// convert channel back to slice
 	rsiFloat := helper.ChanToSlice(outputChan)
 
 	return float64ToDecimals(rsiFloat), nil
@@ -115,18 +115,18 @@ func CalculateATR(priceData []PriceData, period int) ([]decimal.Decimal, error) 
 		closes[i], _ = pd.Close.Float64()
 	}
 
-	// Create ATR indicator
+	// create ATR indicator
 	atr := volatility.NewAtrWithPeriod[float64](period)
 
-	// Convert slices to channels
+	// convert slices to channels
 	highChan := helper.SliceToChan(highs)
 	lowChan := helper.SliceToChan(lows)
 	closeChan := helper.SliceToChan(closes)
 
-	// Compute ATR
+	// compute ATR
 	outputChan := atr.Compute(highChan, lowChan, closeChan)
 
-	// Convert channel back to slice
+	// convert channel back to slice
 	atrFloat := helper.ChanToSlice(outputChan)
 
 	return float64ToDecimals(atrFloat), nil
@@ -179,7 +179,7 @@ func CalculateAllIndicators(priceData []PriceData) ([]entity.TechnicalIndicators
 		return nil, fmt.Errorf("failed to calculate ATR14: %w", err)
 	}
 
-	// Find the minimum length (some indicators may return fewer values due to warmup period)
+	// find the minimum length (some indicators may return fewer values due to warmup period)
 	minLen := len(ema20)
 	if len(ema50) < minLen {
 		minLen = len(ema50)
@@ -200,8 +200,8 @@ func CalculateAllIndicators(priceData []PriceData) ([]entity.TechnicalIndicators
 		minLen = len(atr14)
 	}
 
-	// Build result starting from the point where all indicators are available
-	// Calculate offset for each indicator separately
+	// build result starting from the point where all indicators are available
+	// calculate offset for each indicator separately
 	offsetEMA20 := len(ema20) - minLen
 	offsetEMA50 := len(ema50) - minLen
 	offsetMACD := len(macd) - minLen

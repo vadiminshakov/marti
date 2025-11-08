@@ -173,7 +173,7 @@ func getYaml(path string) ([]Config, error) {
 			strategyType = "dca"
 		}
 
-		// Parse market_type (default to "spot")
+		// parse market_type (default to "spot")
 		marketType := entity.MarketType(c.MarketTypeStr)
 		if c.MarketTypeStr == "" {
 			marketType = entity.MarketTypeSpot
@@ -182,7 +182,7 @@ func getYaml(path string) ([]Config, error) {
 			return nil, fmt.Errorf("invalid market_type '%s' in yaml config (must be 'spot' or 'margin')", c.MarketTypeStr)
 		}
 
-		// Parse leverage (default to 1)
+		// parse leverage (default to 1)
 		leverage := 1
 		if c.LeverageStr != "" {
 			var err error
@@ -212,7 +212,7 @@ func getYaml(path string) ([]Config, error) {
 
 		// Parse common or DCA-specific fields
 		if strategyType == "dca" {
-			// Amount is required for DCA strategy
+			// amount is required for DCA strategy
 			if c.Amount == "" {
 				return nil, fmt.Errorf("'amount' is required for DCA strategy")
 			}

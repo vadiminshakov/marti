@@ -70,7 +70,7 @@ func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.
 			return nil, nil, fmt.Errorf("simulate platform expects *clients.SimulateClient, got %T", client)
 		}
 
-		// Use logger from context or create a new one
+		// use logger from context or create a new one
 		logger := zap.L()
 		pricerInstance := pricer.NewSimulatePricer(simulateClient.GetBinanceClient())
 		traderInstance, err := trader.NewSimulateTrader(pair, logger, pricerInstance)
@@ -136,7 +136,6 @@ func createDCAStrategy(
 		return nil, err
 	}
 
-
 	return dcaStrategy, nil
 }
 
@@ -148,13 +147,13 @@ func createAIStrategy(
 	tradeSvc traderService,
 	client any,
 ) (TradingStrategy, error) {
-	// Create PromptBuilder
+	// create PromptBuilder
 	promptBuilder := promptbuilder.NewPromptBuilder(conf.Pair, logger)
 
-	// Create LLM client
+	// create LLM client
 	llmClient := clients.NewOpenAICompatibleClient(conf.LLMAPIURL, conf.LLMAPIKey, conf.Model, promptBuilder)
 
-	// Create kline provider based on platform
+	// create kline provider based on platform
 	var klineProvider collector.KlineProvider
 	switch conf.Platform {
 	case "binance":
@@ -179,7 +178,7 @@ func createAIStrategy(
 		return nil, fmt.Errorf("unsupported platform for AI strategy: %s", conf.Platform)
 	}
 
-	// Create market data collector
+	// create market data collector
 	marketDataCollector := collector.NewMarketDataCollector(
 		klineProvider,
 		conf.Pair,
@@ -189,7 +188,7 @@ func createAIStrategy(
 		return nil, fmt.Errorf("AI strategy supports only margin market type, got %s", conf.MarketType)
 	}
 
-	// Create AI strategy
+	// create AI strategy
 	aiStrategy, err := ai.NewAIStrategy(
 		logger,
 		conf.Pair,
