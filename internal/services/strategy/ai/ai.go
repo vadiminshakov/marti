@@ -32,7 +32,7 @@ type pricer interface {
 }
 
 type llmClient interface {
-	Chat(ctx context.Context, systemPrompt, userPrompt string) (string, error)
+	GetDecision(ctx context.Context, marketContext promptbuilder.MarketContext) (string, error)
 }
 
 type marketDataCollector interface {
@@ -49,8 +49,6 @@ type AIStrategy struct {
 	pricer           pricer
 	trader           tradersvc
 	logger           *zap.Logger
-	currentPosition  *entity.Position
-	promptBuilder    *promptbuilder.PromptBuilder
 	primaryTimeframe string
 	primaryLookback  int
 	higherTimeframe  string
@@ -75,8 +73,6 @@ func NewAIStrategy(
 		return nil, fmt.Errorf("AI strategy requires margin market type, got %s", marketType)
 	}
 
-	promptBuilder := promptbuilder.NewPromptBuilder(pair, logger)
-
 	if higherTimeframe == "" {
 		higherTimeframe = "15m"
 	}
@@ -93,7 +89,6 @@ func NewAIStrategy(
 		pricer:           pricer,
 		trader:           tradeSvc,
 		logger:           logger,
-		promptBuilder:    promptBuilder,
 		primaryTimeframe: primaryTimeframe,
 		primaryLookback:  primaryLookback,
 		higherTimeframe:  higherTimeframe,
@@ -121,8 +116,6 @@ func (s *AIStrategy) Initialize(ctx context.Context) error {
 
 	s.logger.Info("Starting AI trading strategy", fields...)
 
-	s.refreshPosition(ctx)
-
 	return nil
 }
 
@@ -149,17 +142,20 @@ func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 		return nil, errors.Wrap(err, "failed to get margin balance")
 	}
 
-	s.refreshPosition(ctx)
+	position, err := s.trader.GetPosition(ctx, s.pair)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get position")
+	}
 
 	logFields := []zap.Field{
 		zap.String("price", currentPrice.StringFixed(2)),
 		zap.String(s.pair.To+"_balance", quoteBalance.StringFixed(2)),
 	}
 
-	if s.currentPosition != nil {
+	if position != nil {
 		logFields = append(logFields,
-			zap.String("position_amount", s.currentPosition.Amount.StringFixed(8)),
-			zap.String("position_entry", s.currentPosition.EntryPrice.StringFixed(2)))
+			zap.String("position_amount", position.Amount.StringFixed(8)),
+			zap.String("position_entry", position.EntryPrice.StringFixed(2)))
 	}
 
 	s.logger.Info("Market analysis", logFields...)
@@ -183,18 +179,15 @@ func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 		HigherTimeFrame:  higherTimeframeData,
 	}
 
-	// build prompt for LLM using PromptBuilder
-	userPrompt := s.buildPrompt(snapshot)
-
 	// get decision from LLM
-	response, err := s.llmClient.Chat(ctx, promptbuilder.SystemPrompt, userPrompt)
+	response, err := s.llmClient.GetDecision(ctx, s.buildMarketContext(snapshot, position))
 	if err != nil {
 		s.logger.Error("Failed to get AI response", zap.Error(err))
 		return nil, errors.Wrap(err, "failed to get AI decision")
 	}
 
 	// parse and validate decision
-	decision, err := entity.NewDecision(response, s.currentPosition != nil)
+	decision, err := entity.NewDecision(response)
 	if err != nil {
 		s.logger.Error("Decision validation failed",
 			zap.Error(err),
@@ -212,61 +205,18 @@ func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 		zap.String("reasoning", decision.Reasoning))
 
 	// execute decision
-	return s.executeDecision(ctx, decision, snapshot)
+	return s.executeDecision(ctx, decision, snapshot, position)
 }
 
-// refreshPosition pulls the latest margin position state from the exchange.
-func (s *AIStrategy) refreshPosition(ctx context.Context) {
-	position, err := s.trader.GetPosition(ctx, s.pair)
-	if err != nil {
-		s.logger.Warn("Failed to refresh margin position from exchange", zap.Error(err))
-		return
-	}
-
-	if position == nil || position.Amount.LessThanOrEqual(decimal.Zero) {
-		if s.currentPosition != nil {
-			s.logger.Info("Clearing position - exchange reports no open margin position")
-		}
-		s.currentPosition = nil
-		return
-	}
-
-	prev := s.currentPosition
-	s.currentPosition = position
-
-	if prev == nil {
-		s.logger.Info("Tracked margin position initialized from exchange",
-			zap.String("amount", position.Amount.String()),
-			zap.String("entry_price", position.EntryPrice.String()))
-		return
-	}
-
-	if !prev.Amount.Equal(position.Amount) {
-		s.logger.Info("Margin position size updated",
-			zap.String("old", prev.Amount.String()),
-			zap.String("new", position.Amount.String()))
-	}
-
-	if !prev.EntryPrice.Equal(position.EntryPrice) {
-		s.logger.Info("Margin position entry price updated",
-			zap.String("old", prev.EntryPrice.String()),
-			zap.String("new", position.EntryPrice.String()))
-	}
-}
-
-// buildPrompt constructs the prompt for the LLM using PromptBuilder
-func (s *AIStrategy) buildPrompt(snapshot entity.MarketSnapshot) string {
-	// Create market context
-	ctx := promptbuilder.MarketContext{
+// buildMarketContext constructs the market context for the LLM
+func (s *AIStrategy) buildMarketContext(snapshot entity.MarketSnapshot, position *entity.Position) promptbuilder.MarketContext {
+	return promptbuilder.MarketContext{
 		Primary:         snapshot.PrimaryTimeFrame,
 		VolumeAnalysis:  snapshot.VolumeAnalysis,
 		HigherTimeframe: snapshot.HigherTimeFrame,
-		CurrentPosition: s.currentPosition,
+		CurrentPosition: position,
 		Balance:         snapshot.QuoteBalance,
 	}
-
-	// Use PromptBuilder to generate the prompt
-	return s.promptBuilder.BuildUserPrompt(ctx)
 }
 
 // executeDecision executes the trading decision
@@ -274,16 +224,14 @@ func (s *AIStrategy) executeDecision(
 	ctx context.Context,
 	decision *entity.Decision,
 	snapshot entity.MarketSnapshot,
+	position *entity.Position,
 ) (*entity.TradeEvent, error) {
 	switch decision.Action {
 	case "buy":
-		return s.executeBuy(ctx, decision, snapshot)
-	case "close":
-		return s.executeClose(ctx, snapshot.Price())
-	case "hold":
-		return nil, nil
+		return s.executeBuy(ctx, decision, snapshot, position)
 	case "sell":
-		s.logger.Warn("Short selling not yet supported, treating as HOLD")
+		return s.executeSell(ctx, snapshot.Price(), position)
+	case "hold":
 		return nil, nil
 	default:
 		return nil, fmt.Errorf("unknown action: %s", decision.Action)
@@ -295,10 +243,12 @@ func (s *AIStrategy) executeBuy(
 	ctx context.Context,
 	decision *entity.Decision,
 	snapshot entity.MarketSnapshot,
+	position *entity.Position,
 ) (*entity.TradeEvent, error) {
-	if s.currentPosition != nil {
-		s.logger.Warn("Cannot open new position while one is already open")
-		return nil, nil
+	if position != nil {
+		s.logger.Info("Adding to existing position")
+	} else {
+		s.logger.Info("Opening new position")
 	}
 
 	// Calculate position size based on risk percent
@@ -335,8 +285,6 @@ func (s *AIStrategy) executeBuy(
 		}
 	}
 
-	s.refreshPosition(ctx)
-
 	return &entity.TradeEvent{
 		Action: entity.ActionBuy,
 		Amount: amount,
@@ -345,14 +293,13 @@ func (s *AIStrategy) executeBuy(
 	}, nil
 }
 
-// executeClose closes the current position
-func (s *AIStrategy) executeClose(ctx context.Context, currentPrice decimal.Decimal) (*entity.TradeEvent, error) {
-	if s.currentPosition == nil {
-		s.logger.Warn("No position to close")
+// executeSell closes the current long position.
+// In the future, it might be extended to open short positions.
+func (s *AIStrategy) executeSell(ctx context.Context, currentPrice decimal.Decimal, position *entity.Position) (*entity.TradeEvent, error) {
+	if position == nil {
+		s.logger.Warn("Received 'sell' action without an open position, treating as HOLD. Short selling is not yet supported.")
 		return nil, nil
 	}
-
-	position := s.currentPosition
 
 	orderID := uuid.New().String()
 
@@ -377,10 +324,6 @@ func (s *AIStrategy) executeClose(ctx context.Context, currentPrice decimal.Deci
 		Pair:   s.pair,
 		Price:  currentPrice,
 	}
-
-	// Clear position
-	s.currentPosition = nil
-	s.refreshPosition(ctx)
 
 	return tradeEvent, nil
 }

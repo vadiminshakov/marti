@@ -24,7 +24,7 @@ type ExitPlan struct {
 }
 
 // NewDecision builds a validated trading decision from raw LLM response.
-func NewDecision(raw string, hasPosition bool) (*Decision, error) {
+func NewDecision(raw string) (*Decision, error) {
 	response := sanitizeDecisionPayload(raw)
 
 	if !json.Valid([]byte(response)) {
@@ -46,10 +46,6 @@ func NewDecision(raw string, hasPosition bool) (*Decision, error) {
 
 	if err := validateDecisionRiskPercent(&decision); err != nil {
 		return nil, err
-	}
-
-	if err := validateDecisionActionConsistency(&decision, hasPosition); err != nil {
-		return nil, errors.Wrap(err, "action consistency error")
 	}
 
 	if decision.Action == "buy" {
@@ -80,7 +76,7 @@ func validateDecisionRequiredFields(decision *Decision) error {
 }
 
 func validateDecisionAction(decision *Decision) error {
-	validActions := map[string]bool{"buy": true, "sell": true, "hold": true, "close": true}
+	validActions := map[string]bool{"buy": true, "sell": true, "hold": true}
 	if !validActions[decision.Action] {
 		return fmt.Errorf("Invalid action: %s", decision.Action)
 	}
@@ -91,20 +87,6 @@ func validateDecisionRiskPercent(decision *Decision) error {
 	if decision.RiskPercent < 0 || decision.RiskPercent > 15 {
 		return fmt.Errorf("Invalid risk_percent: %f (must be 0.0-15.0)", decision.RiskPercent)
 	}
-	return nil
-}
-
-func validateDecisionActionConsistency(decision *Decision, hasPosition bool) error {
-	action := decision.Action
-
-	if action == "buy" && hasPosition {
-		return errors.New("cannot buy when position already exists")
-	}
-
-	if action == "close" && !hasPosition {
-		return errors.New("cannot close when no position exists")
-	}
-
 	return nil
 }
 

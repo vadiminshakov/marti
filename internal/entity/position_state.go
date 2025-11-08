@@ -77,3 +77,8 @@ func (p *Position) PnL(currentPrice decimal.Decimal) decimal.Decimal {
 
 	return currentPrice.Sub(p.EntryPrice).Mul(p.Amount)
 }
+
+// IsPositive returns true if the position is open and has a positive amount.
+func (p *Position) IsPositive() bool {
+	return p != nil && p.Amount.IsPositive()
+}
