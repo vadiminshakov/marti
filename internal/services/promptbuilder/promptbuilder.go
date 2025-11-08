@@ -22,11 +22,11 @@ You can take trades in both directions—opening long positions when you expect 
 Maximize returns while preserving capital through rational analysis of market data patterns.
 
 ## TRADING CONSTRAINTS
-1. **Directional flexibility**: You may open either long or short positions without using leverage.
+1. **Directional Flexibility**: You can open long positions (buy) or short positions (sell).
 2. **Maximum position size**: 15% of available balance per trade
 3. **Risk management**: Every buy order must include stop-loss and take-profit levels
 4. **Minimum risk-reward**: Take-profit must be at least 2x the distance to stop-loss (1:2 ratio)
-5. **Position limits**: Only one position at a time
+5. **Position Management**: You can increase the size of an existing position (buy more) or partially close it (sell a portion).
 
 ## AVAILABLE DATA FIELDS
 
@@ -79,7 +79,7 @@ Respond with ONLY valid JSON. No markdown, no code blocks, no additional text.
 **Required JSON structure:**
 
 {
-  "action": "buy|hold|close",
+  "action": "buy|sell|hold",
   "risk_percent": 0.0,
   "reasoning": "explain your analysis and decision",
   "exit_plan": {
@@ -92,14 +92,14 @@ Respond with ONLY valid JSON. No markdown, no code blocks, no additional text.
 **Field specifications:**
 
 - **action** (string): Must be one of:
-  - "buy": Open new long position (only when no position exists)
-  - "hold": Take no action / maintain current state
-  - "close": Close existing position (only when position exists)
+  - "buy": Open a new long position or add to an existing long position.
+  - "sell": Open a new short position, or close/reduce an existing long position.
+  - "hold": Take no action and maintain the current state.
 
 - **risk_percent** (float): Percentage of balance to allocate (0.0-15.0)
   - Should reflect your confidence in the trade
   - Higher confidence = higher allocation (up to 15% max)
-  - Use 0.0 for "hold" and "close" actions
+  - Use 0.0 for "hold" and "sell" actions.
 
 - **reasoning** (string): Explain your analysis
   - What patterns or data influenced your decision
@@ -115,7 +115,6 @@ Respond with ONLY valid JSON. No markdown, no code blocks, no additional text.
 
 **Validation rules:**
 - Cannot "buy" when position already exists
-- Cannot "close" when no position exists
 - For "buy" action: (take_profit_price - entry_price) >= 2 × (entry_price - stop_loss_price)
 - All prices must be positive numbers
 - invalidation_condition must be a non-empty string for "buy" actions
@@ -210,7 +209,7 @@ func (pb *PromptBuilder) BuildUserPrompt(ctx MarketContext) string {
 	sb.WriteString("## Instructions\n\n")
 	sb.WriteString("Analyze the market data and provide your trading decision in JSON format.\n")
 	if ctx.CurrentPosition != nil {
-		sb.WriteString("You currently have an open position - decide whether to hold or close it.\n")
+		sb.WriteString("You currently have an open position - decide whether to hold or sell it.\n")
 	} else {
 		sb.WriteString("You have no open position - decide whether to buy or hold (wait).\n")
 	}
