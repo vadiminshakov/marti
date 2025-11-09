@@ -147,6 +147,13 @@ func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 		return nil, errors.Wrap(err, "failed to get position")
 	}
 
+	baseBalance, baseErr := s.trader.GetBalance(ctx, s.pair.From)
+	if baseErr != nil {
+		s.logger.Warn("Failed to get base currency balance for logs",
+			zap.Error(baseErr),
+			zap.String("currency", s.pair.From))
+	}
+
 	logFields := []zap.Field{
 		zap.String("price", currentPrice.StringFixed(2)),
 		zap.String(s.pair.To+"_balance", quoteBalance.StringFixed(2)),
@@ -156,6 +163,16 @@ func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 		logFields = append(logFields,
 			zap.String("position_amount", position.Amount.StringFixed(8)),
 			zap.String("position_entry", position.EntryPrice.StringFixed(2)))
+	}
+
+	if baseErr == nil {
+		logFields = append(logFields,
+			zap.String(s.pair.From+"_balance", baseBalance.StringFixed(2)))
+	}
+
+	if position != nil {
+		logFields = append(logFields,
+			zap.String("position_pnl", position.PnL(currentPrice).StringFixed(2)))
 	}
 
 	s.logger.Info("Market analysis", logFields...)
