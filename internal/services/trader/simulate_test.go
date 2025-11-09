@@ -166,3 +166,55 @@ func TestSimulateTrader_FullTradeCycle(t *testing.T) {
 	assert.True(t, finalBTC.Equal(expectedFinalBTC))
 	assert.True(t, finalUSDT.Equal(expectedFinalUSDT))
 }
+
+func TestSimulateTrader_MarginTrade_ReleasesMarginAndPnl_OnLoss(t *testing.T) {
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+	logger := zap.NewNop()
+	pricer := &mockPricer{price: decimal.NewFromInt(100)}
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeMargin, 10, logger, pricer)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	err = trader.Buy(ctx, decimal.NewFromInt(1), "margin-buy")
+	require.NoError(t, err)
+
+	usdtAfterBuy, err := trader.GetBalance(ctx, "USDT")
+	require.NoError(t, err)
+	assert.True(t, usdtAfterBuy.Equal(decimal.NewFromInt(9990)))
+
+	pricer.price = decimal.NewFromInt(95)
+
+	err = trader.Sell(ctx, decimal.NewFromInt(1), "margin-sell")
+	require.NoError(t, err)
+
+	usdtAfterSell, err := trader.GetBalance(ctx, "USDT")
+	require.NoError(t, err)
+	assert.True(t, usdtAfterSell.Equal(decimal.NewFromInt(9995))) // loss of 5 USDT
+}
+
+func TestSimulateTrader_MarginTrade_ReleasesMarginAndPnl_OnProfit(t *testing.T) {
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+	logger := zap.NewNop()
+	pricer := &mockPricer{price: decimal.NewFromInt(100)}
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeMargin, 5, logger, pricer)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	err = trader.Buy(ctx, decimal.NewFromInt(1), "margin-buy")
+	require.NoError(t, err)
+
+	usdtAfterBuy, err := trader.GetBalance(ctx, "USDT")
+	require.NoError(t, err)
+	assert.True(t, usdtAfterBuy.Equal(decimal.NewFromInt(9980)))
+
+	pricer.price = decimal.NewFromInt(110)
+
+	err = trader.Sell(ctx, decimal.NewFromInt(1), "margin-sell")
+	require.NoError(t, err)
+
+	usdtAfterSell, err := trader.GetBalance(ctx, "USDT")
+	require.NoError(t, err)
+	assert.True(t, usdtAfterSell.Equal(decimal.NewFromInt(10010)))
+}

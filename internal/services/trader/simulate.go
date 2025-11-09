@@ -28,6 +28,10 @@ type SimulateTrader struct {
 	pricer     Pricer
 	leverage   int
 	marketType entity.MarketType
+	// marginUsed tracks how much quote-side collateral is currently locked
+	// for open margin positions so that we can release the same amount plus
+	// realised PnL when the position is unwound.
+	marginUsed decimal.Decimal
 }
 
 type orderInfo struct {
@@ -61,6 +65,7 @@ func NewSimulateTrader(pair entity.Pair, marketType entity.MarketType, leverage 
 		pricer:     pricer,
 		leverage:   leverage,
 		marketType: marketType,
+		marginUsed: decimal.Zero,
 	}, nil
 }
 
@@ -77,13 +82,13 @@ func (t *SimulateTrader) Buy(ctx context.Context, amount decimal.Decimal, id str
 
 	quoteAmount := amount.Mul(price)
 
-	// For margin trading with leverage, we can buy more than we have in wallet
+	// for margin trading with leverage, we can buy more than we have in wallet.
 	var requiredQuote decimal.Decimal
 	if t.marketType == entity.MarketTypeMargin && t.leverage > 1 {
-		// With leverage, we only need to have 1/leverage of the quote amount
+		// with leverage, we only need to have 1/leverage of the quote amount.
 		requiredQuote = quoteAmount.Div(decimal.NewFromInt(int64(t.leverage)))
 	} else {
-		// For spot trading, we need the full quote amount
+		// for spot trading, we need the full quote amount.
 		requiredQuote = quoteAmount
 	}
 
@@ -96,10 +101,15 @@ func (t *SimulateTrader) Buy(ctx context.Context, amount decimal.Decimal, id str
 	}
 
 	t.wallet[t.pair.To] = t.wallet[t.pair.To].Sub(requiredQuote)
+	if t.marketType == entity.MarketTypeMargin && t.leverage > 1 {
+		// Keep track of the collateral that stays locked for the position
+		// so that the same amount can be released when we close.
+		t.marginUsed = t.marginUsed.Add(requiredQuote)
+	}
 	t.wallet[t.pair.From] = t.wallet[t.pair.From].Add(amount)
 
 	if t.position == nil {
-		pos, err := entity.NewPositionFromExternalSnapshot(amount, price, time.Now())
+		pos, err := entity.NewPositionFromExternalSnapshot(amount, price, time.Now(), entity.PositionSideLong)
 		if err != nil {
 			return errors.Wrap(err, "create position")
 		}
@@ -133,13 +143,13 @@ func (t *SimulateTrader) Sell(ctx context.Context, amount decimal.Decimal, id st
 		return errors.Wrap(err, "failed to get price for simulated sell")
 	}
 
-	// For margin trading with leverage, we can sell more than we have (short selling)
-	// But we still need to check if we have enough to cover the margin requirement
+	// for margin trading with leverage, we can sell more than we have (short selling),
+	// but we still need to check if we have enough to cover the margin requirement.
 	var requiredBase decimal.Decimal
 	if t.marketType == entity.MarketTypeMargin && t.leverage > 1 {
-		// With leverage, we only need to have 1/leverage of the base amount for margin
+		// with leverage, we only need to have 1/leverage of the base amount for margin.
 		requiredBase = amount.Div(decimal.NewFromInt(int64(t.leverage)))
-		// For short selling, we can allow negative balance up to leverage limit
+		// for short selling, we can allow negative balance up to leverage limit
 		if t.wallet[t.pair.From].LessThan(requiredBase.Neg()) {
 			return fmt.Errorf("insufficient %s balance for leveraged sell: have %s, max short allowed %s (with %dx leverage)",
 				t.pair.From,
@@ -148,7 +158,7 @@ func (t *SimulateTrader) Sell(ctx context.Context, amount decimal.Decimal, id st
 				t.leverage)
 		}
 	} else {
-		// For spot trading, we need the full base amount
+		// for spot trading, we need the full base amount
 		requiredBase = amount
 		if t.wallet[t.pair.From].LessThan(requiredBase) {
 			return fmt.Errorf("insufficient %s balance: have %s need %s", t.pair.From, t.wallet[t.pair.From].String(), requiredBase.String())
@@ -157,7 +167,31 @@ func (t *SimulateTrader) Sell(ctx context.Context, amount decimal.Decimal, id st
 
 	quoteReceived := amount.Mul(price)
 	t.wallet[t.pair.From] = t.wallet[t.pair.From].Sub(amount)
-	t.wallet[t.pair.To] = t.wallet[t.pair.To].Add(quoteReceived)
+	prevAmount := decimal.Zero
+	entryPrice := decimal.Zero
+	if t.position != nil {
+		prevAmount = t.position.Amount
+		entryPrice = t.position.EntryPrice
+	}
+
+	if t.marketType == entity.MarketTypeMargin && t.leverage > 1 && prevAmount.GreaterThan(decimal.Zero) {
+		// release the collateral equivalent to the closed share of the position
+		// and credit realised PnL instead of the whole notional.
+		fraction := amount.Div(prevAmount)
+		if fraction.GreaterThan(decimal.NewFromInt(1)) {
+			fraction = decimal.NewFromInt(1)
+		}
+		marginReleased := t.marginUsed.Mul(fraction)
+		// realisedPnL = (exit - entry) * amount
+		realizedPnl := price.Sub(entryPrice).Mul(amount)
+		t.marginUsed = t.marginUsed.Sub(marginReleased)
+		if t.marginUsed.LessThan(decimal.Zero) {
+			t.marginUsed = decimal.Zero
+		}
+		t.wallet[t.pair.To] = t.wallet[t.pair.To].Add(marginReleased.Add(realizedPnl))
+	} else {
+		t.wallet[t.pair.To] = t.wallet[t.pair.To].Add(quoteReceived)
+	}
 
 	if t.position != nil {
 		remaining := t.position.Amount.Sub(amount)
@@ -220,6 +254,21 @@ func (t *SimulateTrader) SetPositionStops(ctx context.Context, pair entity.Pair,
 		t.position.StopLoss = decimal.Zero
 	}
 	return nil
+}
+
+// ExecuteAction executes a trading action (SimulateTrader does not support short positions yet)
+func (t *SimulateTrader) ExecuteAction(ctx context.Context, action entity.Action, amount decimal.Decimal) error {
+	// For now, simulate trader only supports long positions
+	switch action {
+	case entity.ActionOpenLong:
+		return t.Buy(ctx, amount, fmt.Sprintf("sim-%d", time.Now().UnixNano()))
+	case entity.ActionCloseLong:
+		return t.Sell(ctx, amount, fmt.Sprintf("sim-%d", time.Now().UnixNano()))
+	case entity.ActionOpenShort, entity.ActionCloseShort:
+		return fmt.Errorf("short positions not supported by SimulateTrader")
+	default:
+		return fmt.Errorf("unknown action: %s", action)
+	}
 }
 
 func (t *SimulateTrader) UnrealizedPnL(ctx context.Context, price decimal.Decimal) decimal.Decimal {
