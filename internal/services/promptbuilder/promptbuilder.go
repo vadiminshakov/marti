@@ -79,7 +79,7 @@ Respond with ONLY valid JSON. No markdown, no code blocks, no additional text.
 **Required JSON structure:**
 
 {
-  "action": "buy|sell|hold",
+  "action": "open_long|close_long|open_short|close_short|hold",
   "risk_percent": 0.0,
   "reasoning": "explain your analysis and decision",
   "exit_plan": {
@@ -92,32 +92,43 @@ Respond with ONLY valid JSON. No markdown, no code blocks, no additional text.
 **Field specifications:**
 
 - **action** (string): Must be one of:
-  - "buy": Open a new long position or add to an existing long position.
-  - "sell": Open a new short position, or close/reduce an existing long position.
+  - "open_long": Open a new long position or add to an existing long position.
+  - "close_long": Close or reduce an existing long position.
+  - "open_short": Open a new short position or add to an existing short position.
+  - "close_short": Close or reduce an existing short position.
   - "hold": Take no action and maintain the current state.
 
 - **risk_percent** (float): Percentage of balance to allocate (0.0-15.0)
   - Should reflect your confidence in the trade
   - Higher confidence = higher allocation (up to 15% max)
-  - Use 0.0 for "hold" and "sell" actions.
+  - Use 0.0 for "hold", "close_long", and "close_short" actions.
+  - Only use positive values for "open_long" and "open_short" actions.
 
 - **reasoning** (string): Explain your analysis
   - What patterns or data influenced your decision
   - Why you chose this specific action
   - Be specific about which data points matter
 
-- **exit_plan** (object): Required for "buy" action, use zeros/empty for others
+- **exit_plan** (object): Required for "open_long" and "open_short" actions, use zeros/empty for others
   - **stop_loss_price** (float): Exact price to exit if trade fails
+    - For long: stop_loss < entry_price (exit when price goes down)
+    - For short: stop_loss > entry_price (exit when price goes up)
   - **take_profit_price** (float): Target price for profit-taking
+    - For long: take_profit > entry_price (profit when price goes up)
+    - For short: take_profit < entry_price (profit when price goes down)
   - **invalidation_condition** (string): Specific, measurable condition that would invalidate your thesis
     - Must be objective and verifiable
     - Examples: "Price closes below 45000", "RSI drops below 30", "Volume spike with red candle"
 
 **Validation rules:**
-- Cannot "buy" when position already exists
-- For "buy" action: (take_profit_price - entry_price) >= 2 × (entry_price - stop_loss_price)
+- Cannot "open_long" when long position already exists
+- Cannot "open_short" when short position already exists
+- Cannot "close_long" without an open long position
+- Cannot "close_short" without an open short position
+- For "open_long": (take_profit_price - entry_price) >= 2 × (entry_price - stop_loss_price)
+- For "open_short": (entry_price - take_profit_price) >= 2 × (stop_loss_price - entry_price)
 - All prices must be positive numbers
-- invalidation_condition must be a non-empty string for "buy" actions
+- invalidation_condition must be a non-empty string for "open_long" and "open_short" actions
 
 ## TRADING PHILOSOPHY
 
@@ -202,9 +213,13 @@ func (pb *PromptBuilder) BuildUserPrompt(ctx MarketContext) string {
 	sb.WriteString("## Instructions\n\n")
 	sb.WriteString("Analyze the market data and provide your trading decision in JSON format.\n")
 	if ctx.CurrentPosition != nil {
-		sb.WriteString("You currently have an open position - decide whether to hold or sell it.\n")
+		if ctx.CurrentPosition.Side == entity.PositionSideLong {
+			sb.WriteString("You currently have an open LONG position - decide whether to hold, close_long, or add to it.\n")
+		} else if ctx.CurrentPosition.Side == entity.PositionSideShort {
+			sb.WriteString("You currently have an open SHORT position - decide whether to hold, close_short, or add to it.\n")
+		}
 	} else {
-		sb.WriteString("You have no open position - decide whether to buy or hold (wait).\n")
+		sb.WriteString("You have no open position - decide whether to open_long, open_short, or hold (wait).\n")
 	}
 
 	return sb.String()
@@ -458,7 +473,11 @@ func (pb *PromptBuilder) formatPosition(position *entity.Position, currentPrice 
 	var sb strings.Builder
 
 	sb.WriteString("## Current Position\n\n")
-	sb.WriteString("**Status:** Open Long\n\n")
+	if position.Side == entity.PositionSideLong {
+		sb.WriteString("**Status:** Open Long\n\n")
+	} else if position.Side == entity.PositionSideShort {
+		sb.WriteString("**Status:** Open Short\n\n")
+	}
 
 	// entry information
 	sb.WriteString(fmt.Sprintf("**Entry Price:** %s\n", position.EntryPrice.StringFixed(2)))
@@ -469,7 +488,13 @@ func (pb *PromptBuilder) formatPosition(position *entity.Position, currentPrice 
 	pnl := position.PnL(currentPrice)
 	pnlPercent := decimal.Zero
 	if !position.EntryPrice.IsZero() {
-		pnlPercent = currentPrice.Sub(position.EntryPrice).Div(position.EntryPrice).Mul(decimal.NewFromInt(100))
+		if position.Side == entity.PositionSideLong {
+			// for long: (currentPrice - entryPrice) / entryPrice * 100
+			pnlPercent = currentPrice.Sub(position.EntryPrice).Div(position.EntryPrice).Mul(decimal.NewFromInt(100))
+		} else {
+			// for short: (entryPrice - currentPrice) / entryPrice * 100
+			pnlPercent = position.EntryPrice.Sub(currentPrice).Div(position.EntryPrice).Mul(decimal.NewFromInt(100))
+		}
 	}
 
 	pnlSign := ""
