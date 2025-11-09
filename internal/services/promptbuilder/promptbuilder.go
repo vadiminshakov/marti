@@ -141,7 +141,7 @@ Do not force trades. "hold" is a valid decision when conditions are unclear.
 5. When in doubt, use "hold"
 
 You should strive to capture as much profit as possible as quickly as you can, using current market conditions.
-Don’t hold back from taking a trade if any short-term (5+ minutes) strategy looks profitable to you.
+Don’t hold back from taking a trade if any short-term strategy looks profitable to you.
 You can also use longer-term trades if you see an opportunity. You choose the strategy yourself. The main goal is to extract profit as efficiently as possible.`
 
 // PromptBuilder constructs optimized prompts for the LLM
