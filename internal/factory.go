@@ -21,8 +21,7 @@ import (
 )
 
 type traderService interface {
-	Buy(ctx context.Context, amount decimal.Decimal, clientOrderID string) error
-	Sell(ctx context.Context, amount decimal.Decimal, clientOrderID string) error
+	ExecuteAction(ctx context.Context, action entity.Action, amount decimal.Decimal, clientOrderID string) error
 	OrderExecuted(ctx context.Context, clientOrderID string) (bool, decimal.Decimal, error)
 	GetBalance(ctx context.Context, currency string) (decimal.Decimal, error)
 	GetPosition(ctx context.Context, pair entity.Pair) (*entity.Position, error)
