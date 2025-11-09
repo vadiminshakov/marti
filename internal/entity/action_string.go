@@ -9,17 +9,20 @@ func _() {
 	// Re-run the stringer command to generate them again.
 	var x [1]struct{}
 	_ = x[ActionNull-0]
-	_ = x[ActionBuy-1]
-	_ = x[ActionSell-2]
+	_ = x[ActionOpenLong-1]
+	_ = x[ActionCloseLong-2]
+	_ = x[ActionOpenShort-3]
+	_ = x[ActionCloseShort-4]
 }
 
-const _Action_name = "ActionNullActionBuyActionSell"
+const _Action_name = "ActionNullActionOpenLongActionCloseLongActionOpenShortActionCloseShort"
 
-var _Action_index = [...]uint8{0, 10, 19, 29}
+var _Action_index = [...]uint8{0, 10, 24, 39, 54, 70}
 
 func (i Action) String() string {
-	if i < 0 || i >= Action(len(_Action_index)-1) {
+	idx := int(i) - 0
+	if i < 0 || idx >= len(_Action_index)-1 {
 		return "Action(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
-	return _Action_name[_Action_index[i]:_Action_index[i+1]]
+	return _Action_name[_Action_index[idx]:_Action_index[idx+1]]
 }

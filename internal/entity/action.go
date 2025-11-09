@@ -8,8 +8,12 @@ type Action int
 const (
 	// ActionNull represents no action or an undefined action
 	ActionNull Action = iota
-	// ActionBuy represents a buy order action
-	ActionBuy
-	// ActionSell represents a sell order action
-	ActionSell
+	// ActionOpenLong opens a long position (buy to open)
+	ActionOpenLong
+	// ActionCloseLong closes a long position (sell to close)
+	ActionCloseLong
+	// ActionOpenShort opens a short position (sell to open)
+	ActionOpenShort
+	// ActionCloseShort closes a short position (buy to close)
+	ActionCloseShort
 )
