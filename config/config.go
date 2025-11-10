@@ -32,7 +32,7 @@ type Config struct {
 	PollPriceInterval time.Duration
 	// MarketType specifies the market type for trading ("spot" or "margin")
 	MarketType entity.MarketType
-	// Leverage specifies the leverage multiplier for margin trading (1-20)
+	// Leverage specifies the leverage multiplier for margin trading (minimum 1)
 	// NOTE: leverage > 1 can ONLY be used with MarketTypeMargin, NOT with MarketTypeSpot
 	// NOTE: Leverage parameter is NOT supported for AI strategy. AI strategy manages position sizing internally.
 	// Config validation will reject:
@@ -94,15 +94,22 @@ type ConfigTmp struct {
 	MaxLeverageStr            string `yaml:"max_leverage,omitempty"`
 }
 
+var (
+	configPathFlag = flag.String("config", "", "path to yaml config")
+	pairFlag       = flag.String("pair", "BTC_USDT", "trade pair, example: BTC_USDT")
+	amountFlag     = flag.String("amount", "10", "percentage of quote currency balance to use (1-100)")
+	piFlag         = flag.Duration("pollpriceinterval", 5*time.Minute, "poll market price interval")
+)
+
 // Get retrieves configuration settings from either YAML file or command-line arguments.
 // If a config file path is provided via the -config flag, it reads from the YAML file.
 // Otherwise, it attempts to parse configuration from command-line flags.
 // Returns a slice of Config objects to support multiple trading configurations.
 func Get() ([]Config, error) {
-	config := flag.String("config", "", "path to yaml config")
 	flag.Parse()
-	if *config != "" {
-		return getYaml(*config)
+
+	if *configPathFlag != "" {
+		return getYaml(*configPathFlag)
 	}
 
 	pair, amount, pollPriceInterval, err := getFromCLI()
@@ -124,12 +131,6 @@ func Get() ([]Config, error) {
 
 func getFromCLI() (pair entity.Pair, amount decimal.Decimal,
 	pollPriceInterval time.Duration, _ error) {
-	pairFlag := flag.String("pair", "BTC_USDT", "trade pair, example: BTC_USDT")
-	amountFlag := flag.String("amount", "10", "percentage of quote currency balance to use (1-100)")
-	pi := flag.Duration("pollpriceinterval", 5*time.Minute, "poll market price interval")
-
-	flag.Parse()
-
 	var err error
 	pair, err = getPairFromString(*pairFlag)
 	if err != nil {
@@ -144,7 +145,7 @@ func getFromCLI() (pair entity.Pair, amount decimal.Decimal,
 		return entity.Pair{}, decimal.Decimal{}, 0, fmt.Errorf("amount must be between 1 and 100 percent, got %s", amount.String())
 	}
 
-	pollPriceInterval = *pi
+	pollPriceInterval = *piFlag
 
 	return pair, amount, pollPriceInterval, nil
 }
@@ -190,8 +191,8 @@ func getYaml(path string) ([]Config, error) {
 			if err != nil {
 				return nil, fmt.Errorf("incorrect 'leverage' param in yaml config (must be an integer), error: %w", err)
 			}
-			if leverage < 1 || leverage > 20 {
-				return nil, fmt.Errorf("leverage must be between 1 and 20, got %d", leverage)
+			if leverage < 1 {
+				return nil, fmt.Errorf("leverage must be at least 1, got %d", leverage)
 			}
 		}
 
@@ -330,8 +331,8 @@ func getYaml(path string) ([]Config, error) {
 				if err != nil {
 					return nil, fmt.Errorf("incorrect 'max_leverage' param in yaml config (must be an integer), error: %w", err)
 				}
-				if maxLeverage < 1 || maxLeverage > 20 {
-					return nil, fmt.Errorf("max_leverage must be between 1 and 20, got %d", maxLeverage)
+				if maxLeverage < 1 {
+					return nil, fmt.Errorf("max_leverage must be at least 1, got %d", maxLeverage)
 				}
 				newConfig.MaxLeverage = maxLeverage
 			}
