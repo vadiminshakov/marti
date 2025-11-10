@@ -158,7 +158,7 @@ func (t *BybitTrader) ExecuteAction(ctx context.Context, action entity.Action, a
 	if err != nil {
 		return errors.Wrapf(err, "failed to execute %s action", action)
 	}
-	
+
 	return nil
 }
 

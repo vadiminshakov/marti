@@ -52,8 +52,7 @@ type DCASeries struct {
 }
 
 type tradersvc interface {
-	Buy(ctx context.Context, amount decimal.Decimal, clientOrderID string) error
-	Sell(ctx context.Context, amount decimal.Decimal, clientOrderID string) error
+	ExecuteAction(ctx context.Context, action entity.Action, amount decimal.Decimal, clientOrderID string) error
 	OrderExecuted(ctx context.Context, clientOrderID string) (executed bool, filledAmount decimal.Decimal, err error)
 	GetBalance(ctx context.Context, currency string) (decimal.Decimal, error)
 }
@@ -377,7 +376,7 @@ func (d *DCAStrategy) actBuy(ctx context.Context, price decimal.Decimal) (*entit
 		return nil, err
 	}
 
-	if err := d.trader.Buy(ctx, individualBuyAmount, intent.ID); err != nil {
+	if err := d.trader.ExecuteAction(ctx, entity.ActionOpenLong, individualBuyAmount, intent.ID); err != nil {
 		d.markIntentFailed(intent, err)
 		return nil, errors.Wrapf(err, "trader buy failed for pair %s with amount %s", d.pair.String(), individualBuyAmount.String())
 	}
@@ -387,7 +386,7 @@ func (d *DCAStrategy) actBuy(ctx context.Context, price decimal.Decimal) (*entit
 			zap.Error(err),
 			zap.String("intent_id", intent.ID))
 		return &entity.TradeEvent{
-			Action: entity.ActionBuy,
+			Action: entity.ActionOpenLong,
 			Amount: individualBuyAmount,
 			Pair:   d.pair,
 			Price:  price,
@@ -410,7 +409,7 @@ func (d *DCAStrategy) actBuy(ctx context.Context, price decimal.Decimal) (*entit
 		zap.String(d.pair.To+"_balance", quoteBalance.String()))
 
 	return &entity.TradeEvent{
-		Action: entity.ActionBuy,
+		Action: entity.ActionOpenLong,
 		Amount: individualBuyAmount,
 		Pair:   d.pair,
 		Price:  price,
@@ -471,7 +470,7 @@ func (d *DCAStrategy) actSell(ctx context.Context, price decimal.Decimal) (*enti
 	}
 
 	// sell uses base currency amount (e.g., BTC)
-	if err := d.trader.Sell(ctx, amountBaseCurrency, intent.ID); err != nil {
+	if err := d.trader.ExecuteAction(ctx, entity.ActionCloseLong, amountBaseCurrency, intent.ID); err != nil {
 		d.markIntentFailed(intent, err)
 		return nil, errors.Wrapf(err, "trader sell failed for pair %s, amount %s", d.pair.String(), amountBaseCurrency.String())
 	}
@@ -481,7 +480,7 @@ func (d *DCAStrategy) actSell(ctx context.Context, price decimal.Decimal) (*enti
 			zap.Error(err),
 			zap.String("intent_id", intent.ID))
 		return &entity.TradeEvent{
-			Action: entity.ActionSell,
+			Action: entity.ActionCloseLong,
 			Amount: amountBaseCurrency,
 			Pair:   d.pair,
 			Price:  price,
@@ -497,7 +496,7 @@ func (d *DCAStrategy) actSell(ctx context.Context, price decimal.Decimal) (*enti
 	quoteBalance, _ := d.trader.GetBalance(ctx, d.pair.To)
 
 	tradeEvent := &entity.TradeEvent{
-		Action: entity.ActionSell,
+		Action: entity.ActionCloseLong,
 		Amount: amountBaseCurrency,
 		Pair:   d.pair,
 		Price:  price,
@@ -672,7 +671,7 @@ func (d *DCAStrategy) Initialize(ctx context.Context) error {
 		return err
 	}
 
-	if err := d.trader.Buy(ctx, calculatedInitialBuyAmount, intent.ID); err != nil {
+	if err := d.trader.ExecuteAction(ctx, entity.ActionOpenLong, calculatedInitialBuyAmount, intent.ID); err != nil {
 		d.markIntentFailed(intent, err)
 		d.l.Error("Initial buy execution failed", zap.Error(err))
 

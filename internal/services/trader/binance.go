@@ -188,6 +188,7 @@ func (t *BinanceTrader) GetPosition(ctx context.Context, pair entity.Pair) (*ent
 		return trades[i].Time < trades[j].Time
 	})
 
+	// totalQty can be positive (long) or negative (short)
 	totalQty := decimal.Zero
 	totalCost := decimal.Zero
 	var entryTime time.Time
@@ -206,52 +207,107 @@ func (t *BinanceTrader) GetPosition(ctx context.Context, pair entity.Pair) (*ent
 		tradeTime := time.UnixMilli(trade.Time)
 
 		if trade.IsBuyer {
+			// buying: increases position (towards long or closes short)
 			if totalQty.LessThanOrEqual(decimal.Zero) {
-				entryTime = tradeTime
-			}
-			totalCost = totalCost.Add(price.Mul(qty))
-			totalQty = totalQty.Add(qty)
-		} else {
-			if totalQty.LessThanOrEqual(decimal.Zero) {
-				continue
-			}
-
-			reducedQty := qty
-			if reducedQty.GreaterThan(totalQty) {
-				reducedQty = totalQty
-			}
-
-			if totalQty.GreaterThan(decimal.Zero) {
-				avgCost := decimal.Zero
-				if !totalCost.Equal(decimal.Zero) {
-					avgCost = totalCost.Div(totalQty)
+				// opening long or starting to close short
+				if totalQty.Equal(decimal.Zero) {
+					entryTime = tradeTime
 				}
-				totalCost = totalCost.Sub(avgCost.Mul(reducedQty))
 			}
 
-			totalQty = totalQty.Sub(reducedQty)
-			if totalQty.LessThanOrEqual(decimal.Zero) {
-				totalQty = decimal.Zero
+			// if closing a short position, reduce cost proportionally
+			if totalQty.LessThan(decimal.Zero) {
+				absQty := totalQty.Abs()
+				reducedQty := qty
+				if reducedQty.GreaterThan(absQty) {
+					reducedQty = absQty
+				}
+
+				if absQty.GreaterThan(decimal.Zero) {
+					avgCost := totalCost.Div(absQty)
+					totalCost = totalCost.Sub(avgCost.Mul(reducedQty))
+				}
+
+				remainingQty := qty.Sub(reducedQty)
+				if remainingQty.GreaterThan(decimal.Zero) {
+					// flipping to long
+					totalCost = price.Mul(remainingQty)
+					entryTime = tradeTime
+				}
+			} else {
+				// adding to long position
+				totalCost = totalCost.Add(price.Mul(qty))
+			}
+
+			totalQty = totalQty.Add(qty)
+
+			if totalQty.Equal(decimal.Zero) {
+				totalCost = decimal.Zero
+				entryTime = time.Time{}
+			}
+		} else {
+			// selling: decreases position (closes long or opens short)
+			if totalQty.GreaterThanOrEqual(decimal.Zero) {
+				// closing long or starting to open short
+				if totalQty.Equal(decimal.Zero) {
+					entryTime = tradeTime
+				}
+			}
+
+			// if closing a long position, reduce cost proportionally
+			if totalQty.GreaterThan(decimal.Zero) {
+				reducedQty := qty
+				if reducedQty.GreaterThan(totalQty) {
+					reducedQty = totalQty
+				}
+
+				if totalQty.GreaterThan(decimal.Zero) {
+					avgCost := totalCost.Div(totalQty)
+							totalCost = totalCost.Sub(avgCost.Mul(reducedQty))
+						}
+
+						remainingQty := qty.Sub(reducedQty)
+						if remainingQty.GreaterThan(decimal.Zero) {
+							// flipping to short
+							totalCost = price.Mul(remainingQty)
+							entryTime = tradeTime
+						}
+					} else {
+						// adding to short position
+						totalCost = totalCost.Add(price.Mul(qty))
+					}
+
+			totalQty = totalQty.Sub(qty)
+
+			if totalQty.Equal(decimal.Zero) {
 				totalCost = decimal.Zero
 				entryTime = time.Time{}
 			}
 		}
 	}
 
-	if totalQty.LessThanOrEqual(decimal.Zero) {
+	// no position if totalQty is zero
+	if totalQty.Equal(decimal.Zero) {
 		return nil, nil
 	}
 
+	absQty := totalQty.Abs()
 	if totalCost.LessThanOrEqual(decimal.Zero) {
 		return nil, nil
 	}
 
-	avgPrice := totalCost.Div(totalQty)
+	avgPrice := totalCost.Div(absQty)
 	if avgPrice.LessThanOrEqual(decimal.Zero) {
 		return nil, nil
 	}
 
-	position, err := entity.NewPositionFromExternalSnapshot(totalQty, avgPrice, entryTime)
+	// determine position side
+	side := entity.PositionSideLong
+	if totalQty.LessThan(decimal.Zero) {
+		side = entity.PositionSideShort
+	}
+
+	position, err := entity.NewPositionFromExternalSnapshot(absQty, avgPrice, entryTime, side)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to construct position snapshot")
 	}
@@ -289,13 +345,13 @@ func (t *BinanceTrader) SetPositionStops(ctx context.Context, pair entity.Pair, 
 	}
 
 	if takeProfit.GreaterThan(decimal.Zero) {
-		if err := t.placeBinanceProtectiveOrder(ctx, pair, quantity, takeProfit, binance.OrderTypeTakeProfit, binanceTakeProfitClientPrefix); err != nil {
+		if err := t.placeBinanceProtectiveOrder(ctx, pair, quantity, takeProfit, binance.OrderTypeTakeProfit, binanceTakeProfitClientPrefix, position.Side); err != nil {
 			return err
 		}
 	}
 
 	if stopLoss.GreaterThan(decimal.Zero) {
-		if err := t.placeBinanceProtectiveOrder(ctx, pair, quantity, stopLoss, binance.OrderTypeStopLoss, binanceStopLossClientPrefix); err != nil {
+		if err := t.placeBinanceProtectiveOrder(ctx, pair, quantity, stopLoss, binance.OrderTypeStopLoss, binanceStopLossClientPrefix, position.Side); err != nil {
 			return err
 		}
 	}
@@ -336,12 +392,20 @@ func (t *BinanceTrader) placeBinanceProtectiveOrder(
 	price decimal.Decimal,
 	orderType binance.OrderType,
 	clientIDPrefix string,
+	positionSide entity.PositionSide,
 ) error {
 	clientOrderID := fmt.Sprintf("%s%d", clientIDPrefix, time.Now().UnixNano())
 
+	// for long positions: protective orders are sells
+	// for short positions: protective orders are buys
+	side := binance.SideTypeSell
+	if positionSide == entity.PositionSideShort {
+		side = binance.SideTypeBuy
+	}
+
 	_, err := t.client.NewCreateMarginOrderService().
 		Symbol(pair.Symbol()).
-		Side(binance.SideTypeSell).
+		Side(side).
 		Type(orderType).
 		Quantity(quantity.String()).
 		StopPrice(price.String()).
@@ -352,4 +416,22 @@ func (t *BinanceTrader) placeBinanceProtectiveOrder(
 	}
 
 	return nil
+}
+
+// ExecuteAction executes a trading action (supports both long and short positions)
+func (t *BinanceTrader) ExecuteAction(ctx context.Context, action entity.Action, amount decimal.Decimal, clientOrderID string) error {
+	switch action {
+	case entity.ActionOpenLong:
+		return t.Buy(ctx, amount, clientOrderID)
+	case entity.ActionCloseLong:
+		return t.Sell(ctx, amount, clientOrderID)
+	case entity.ActionOpenShort:
+		// Opening short = selling
+		return t.Sell(ctx, amount, clientOrderID)
+	case entity.ActionCloseShort:
+		// Closing short = buying
+		return t.Buy(ctx, amount, clientOrderID)
+	default:
+		return fmt.Errorf("unknown action: %s", action)
+	}
 }
