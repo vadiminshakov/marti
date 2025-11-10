@@ -50,7 +50,7 @@ func TestSimulateTrader_Buy(t *testing.T) {
 	amount := decimal.NewFromFloat(0.1) // 0.1 BTC
 	orderID := "test-order-1"
 
-	err = trader.Buy(ctx, amount, orderID)
+	err = trader.buy(ctx, amount, orderID)
 	require.NoError(t, err)
 
 	// verify order is recorded
@@ -84,7 +84,7 @@ func TestSimulateTrader_Sell_InsufficientBalance(t *testing.T) {
 	orderID := "test-order-sell"
 
 	// try to sell without having any BTC
-	err = trader.Sell(ctx, amount, orderID)
+	err = trader.sell(ctx, amount, orderID)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "insufficient")
 }
@@ -98,7 +98,7 @@ func TestSimulateTrader_Buy_InsufficientBalance(t *testing.T) {
 
 	// try to buy more than we can afford
 	amount := decimal.NewFromFloat(0.3) // 0.3 * 50000 = 15000 USDT, but we only have 10000
-	err = trader.Buy(context.Background(), amount, "some-order")
+	err = trader.buy(context.Background(), amount, "some-order")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "insufficient")
 }
@@ -136,7 +136,7 @@ func TestSimulateTrader_FullTradeCycle(t *testing.T) {
 	buyAmountBTC := decimal.NewFromFloat(0.1)
 	buyOrderID := "buy-order-1"
 
-	err = trader.Buy(ctx, buyAmountBTC, buyOrderID)
+	err = trader.buy(ctx, buyAmountBTC, buyOrderID)
 	require.NoError(t, err)
 
 	// check balances after buy
@@ -152,7 +152,7 @@ func TestSimulateTrader_FullTradeCycle(t *testing.T) {
 	sellAmountBTC := decimal.NewFromFloat(0.05)
 	sellOrderID := "sell-order-1"
 
-	err = trader.Sell(ctx, sellAmountBTC, sellOrderID)
+	err = trader.sell(ctx, sellAmountBTC, sellOrderID)
 	require.NoError(t, err)
 
 	// check final balances
@@ -176,7 +176,7 @@ func TestSimulateTrader_MarginTrade_ReleasesMarginAndPnl_OnLoss(t *testing.T) {
 
 	ctx := context.Background()
 
-	err = trader.Buy(ctx, decimal.NewFromInt(1), "margin-buy")
+	err = trader.buy(ctx, decimal.NewFromInt(1), "margin-buy")
 	require.NoError(t, err)
 
 	usdtAfterBuy, err := trader.GetBalance(ctx, "USDT")
@@ -185,7 +185,7 @@ func TestSimulateTrader_MarginTrade_ReleasesMarginAndPnl_OnLoss(t *testing.T) {
 
 	pricer.price = decimal.NewFromInt(95)
 
-	err = trader.Sell(ctx, decimal.NewFromInt(1), "margin-sell")
+	err = trader.sell(ctx, decimal.NewFromInt(1), "margin-sell")
 	require.NoError(t, err)
 
 	usdtAfterSell, err := trader.GetBalance(ctx, "USDT")
@@ -202,7 +202,7 @@ func TestSimulateTrader_MarginTrade_ReleasesMarginAndPnl_OnProfit(t *testing.T) 
 
 	ctx := context.Background()
 
-	err = trader.Buy(ctx, decimal.NewFromInt(1), "margin-buy")
+	err = trader.buy(ctx, decimal.NewFromInt(1), "margin-buy")
 	require.NoError(t, err)
 
 	usdtAfterBuy, err := trader.GetBalance(ctx, "USDT")
@@ -211,10 +211,90 @@ func TestSimulateTrader_MarginTrade_ReleasesMarginAndPnl_OnProfit(t *testing.T) 
 
 	pricer.price = decimal.NewFromInt(110)
 
-	err = trader.Sell(ctx, decimal.NewFromInt(1), "margin-sell")
+	err = trader.sell(ctx, decimal.NewFromInt(1), "margin-sell")
 	require.NoError(t, err)
 
 	usdtAfterSell, err := trader.GetBalance(ctx, "USDT")
 	require.NoError(t, err)
 	assert.True(t, usdtAfterSell.Equal(decimal.NewFromInt(10010)))
+}
+
+func TestSimulateTrader_ShortTrade_ReleasesMarginAndPnl_OnProfit(t *testing.T) {
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+	logger := zap.NewNop()
+	pricer := &mockPricer{price: decimal.NewFromInt(100)}
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeMargin, 5, logger, pricer)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	err = trader.ExecuteAction(ctx, entity.ActionOpenShort, decimal.NewFromInt(1), "short-open")
+	require.NoError(t, err)
+
+	usdtAfterOpen, err := trader.GetBalance(ctx, "USDT")
+	require.NoError(t, err)
+	assert.True(t, usdtAfterOpen.Equal(decimal.NewFromInt(9980)))
+
+	position, err := trader.GetPosition(ctx, pair)
+	require.NoError(t, err)
+	require.NotNil(t, position)
+	assert.Equal(t, entity.PositionSideShort, position.Side)
+	assert.True(t, position.Amount.Equal(decimal.NewFromInt(1)))
+
+	pricer.price = decimal.NewFromInt(80)
+
+	err = trader.ExecuteAction(ctx, entity.ActionCloseShort, decimal.NewFromInt(1), "short-close")
+	require.NoError(t, err)
+
+	usdtAfterClose, err := trader.GetBalance(ctx, "USDT")
+	require.NoError(t, err)
+	assert.True(t, usdtAfterClose.Equal(decimal.NewFromInt(10020)))
+
+	btcAfterClose, err := trader.GetBalance(ctx, "BTC")
+	require.NoError(t, err)
+	assert.True(t, btcAfterClose.Equal(decimal.Zero))
+
+	position, err = trader.GetPosition(ctx, pair)
+	require.NoError(t, err)
+	assert.Nil(t, position)
+}
+
+func TestSimulateTrader_ShortTrade_ReleasesMarginAndPnl_OnLoss(t *testing.T) {
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+	logger := zap.NewNop()
+	pricer := &mockPricer{price: decimal.NewFromInt(100)}
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeMargin, 5, logger, pricer)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	err = trader.ExecuteAction(ctx, entity.ActionOpenShort, decimal.NewFromInt(1), "short-open")
+	require.NoError(t, err)
+
+	usdtAfterOpen, err := trader.GetBalance(ctx, "USDT")
+	require.NoError(t, err)
+	assert.True(t, usdtAfterOpen.Equal(decimal.NewFromInt(9980)))
+
+	pricer.price = decimal.NewFromInt(120)
+
+	err = trader.ExecuteAction(ctx, entity.ActionCloseShort, decimal.NewFromInt(1), "short-close")
+	require.NoError(t, err)
+
+	usdtAfterClose, err := trader.GetBalance(ctx, "USDT")
+	require.NoError(t, err)
+	assert.True(t, usdtAfterClose.Equal(decimal.NewFromInt(9980)))
+}
+
+func TestSimulateTrader_ShortTrade_NotAllowedInSpot(t *testing.T) {
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+	logger := zap.NewNop()
+	pricer := &mockPricer{price: decimal.NewFromInt(100)}
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	err = trader.ExecuteAction(ctx, entity.ActionOpenShort, decimal.NewFromInt(1), "short-open")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "margin")
 }

@@ -45,7 +45,7 @@ func TestDCAStrategy_WithSimulationTrader(t *testing.T) {
 	usdtAmount := decimal.NewFromInt(5000)
 	baseAmount := usdtAmount.Div(price) // 0.1 BTC
 
-	err = simTrader.Buy(context.Background(), baseAmount, "order-1")
+	err = simTrader.ExecuteAction(context.Background(), entity.ActionOpenLong, baseAmount, "order-1")
 	require.NoError(t, err)
 
 	// verify balance updated
@@ -54,7 +54,7 @@ func TestDCAStrategy_WithSimulationTrader(t *testing.T) {
 	usdtBalance, err := simTrader.GetBalance(context.Background(), "USDT")
 	require.NoError(t, err)
 
-	expectedBTC := baseAmount // 0.1
+	expectedBTC := baseAmount                                            // 0.1
 	expectedUSDT := decimal.NewFromInt(10000).Sub(baseAmount.Mul(price)) // 10000 - 0.1*50000 = 5000
 
 	assert.True(t, btcBalance.Equal(expectedBTC), "BTC balance should be %s, got %s", expectedBTC, btcBalance)
@@ -76,7 +76,7 @@ func TestDCAStrategy_SimulationApplyTrade(t *testing.T) {
 	pr.price = buyPrice
 	buyUSDT := decimal.NewFromInt(5000)
 	buyBase := buyUSDT.Div(buyPrice) // 0.1
-	err = simTrader.Buy(context.Background(), buyBase, "order-buy")
+	err = simTrader.ExecuteAction(context.Background(), entity.ActionOpenLong, buyBase, "order-buy")
 	require.NoError(t, err)
 
 	btcAfterBuy, err := simTrader.GetBalance(context.Background(), "BTC")
@@ -91,7 +91,7 @@ func TestDCAStrategy_SimulationApplyTrade(t *testing.T) {
 	sellPrice := decimal.NewFromInt(60000)
 	pr.price = sellPrice
 	sellAmount := decimal.NewFromFloat(0.05)
-	err = simTrader.Sell(context.Background(), sellAmount, "order-sell")
+	err = simTrader.ExecuteAction(context.Background(), entity.ActionCloseLong, sellAmount, "order-sell")
 	require.NoError(t, err)
 
 	btcAfterSell, err := simTrader.GetBalance(context.Background(), "BTC")
