@@ -48,7 +48,8 @@ func NewDecision(raw string) (*Decision, error) {
 		return nil, err
 	}
 
-	if decision.Action == "buy" {
+	// exit plan is required for opening positions (open_long, open_short)
+	if decision.Action == "open_long" || decision.Action == "open_short" {
 		if err := validateDecisionExitPlan(&decision); err != nil {
 			return nil, errors.Wrap(err, "exit plan validation error")
 		}
@@ -76,7 +77,13 @@ func validateDecisionRequiredFields(decision *Decision) error {
 }
 
 func validateDecisionAction(decision *Decision) error {
-	validActions := map[string]bool{"buy": true, "sell": true, "hold": true}
+	validActions := map[string]bool{
+		"hold":        true,
+		"open_long":   true,
+		"close_long":  true,
+		"open_short":  true,
+		"close_short": true,
+	}
 	if !validActions[decision.Action] {
 		return fmt.Errorf("Invalid action: %s", decision.Action)
 	}
@@ -105,8 +112,15 @@ func validateDecisionExitPlan(decision *Decision) error {
 		return errors.New("invalidation_condition is required")
 	}
 
-	if exitPlan.StopLossPrice >= exitPlan.TakeProfitPrice {
-		return errors.New("stop_loss_price must be less than take_profit_price")
+	switch decision.Action {
+	case "open_long":
+		if exitPlan.StopLossPrice >= exitPlan.TakeProfitPrice {
+			return errors.New("stop_loss_price must be less than take_profit_price for long positions")
+		}
+	case "open_short":
+		if exitPlan.StopLossPrice <= exitPlan.TakeProfitPrice {
+			return errors.New("stop_loss_price must be greater than take_profit_price for short positions")
+		}
 	}
 
 	return nil
