@@ -140,3 +140,17 @@ func (t *traderCsv) GetBalance(ctx context.Context, currency string) (decimal.De
 		return decimal.Zero, nil
 	}
 }
+
+// ExecuteAction routes the action to Buy/Sell methods for testing.
+func (t *traderCsv) ExecuteAction(ctx context.Context, action entity.Action, amount decimal.Decimal, clientOrderID string) error {
+	switch action {
+	case entity.ActionOpenLong:
+		return t.Buy(ctx, amount, clientOrderID)
+	case entity.ActionCloseLong:
+		return t.Sell(ctx, amount, clientOrderID)
+	case entity.ActionOpenShort, entity.ActionCloseShort:
+		return fmt.Errorf("short positions not supported by traderCsv")
+	default:
+		return fmt.Errorf("unknown action: %s", action)
+	}
+}
