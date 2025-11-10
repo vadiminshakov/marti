@@ -113,6 +113,55 @@ func (t *BybitTrader) Sell(ctx context.Context, amount decimal.Decimal, clientOr
 	return nil
 }
 
+// ExecuteAction executes a trading action (open/close long/short)
+func (t *BybitTrader) ExecuteAction(ctx context.Context, action entity.Action, amount decimal.Decimal, clientOrderID string) error {
+	amount = amount.RoundFloor(4)
+	category := t.mapMarketTypeToCategory()
+	orderLinkID := clientOrderID
+
+	var side bybit.Side
+	var reduceOnly bool
+
+	switch action {
+	case entity.ActionOpenLong:
+		side = bybit.SideBuy
+		reduceOnly = false
+	case entity.ActionCloseLong:
+		side = bybit.SideSell
+		reduceOnly = true
+	case entity.ActionOpenShort:
+		side = bybit.SideSell
+		reduceOnly = false
+	case entity.ActionCloseShort:
+		side = bybit.SideBuy
+		reduceOnly = true
+	default:
+		return fmt.Errorf("unsupported action: %s", action)
+	}
+
+	var reduceOnlyPtr *bool
+	if t.marketType == entity.MarketTypeMargin && reduceOnly {
+		val := true
+		reduceOnlyPtr = &val
+	}
+
+	_, err := t.client.V5().Order().CreateOrder(bybit.V5CreateOrderParam{
+		Category:    category,
+		Symbol:      bybit.SymbolV5(t.pair.Symbol()),
+		Side:        side,
+		OrderType:   bybit.OrderTypeMarket,
+		Qty:         amount.String(),
+		OrderLinkID: &orderLinkID,
+		IsLeverage:  nil,
+		ReduceOnly:  reduceOnlyPtr,
+	})
+	if err != nil {
+		return errors.Wrapf(err, "failed to execute %s action", action)
+	}
+	
+	return nil
+}
+
 func (t *BybitTrader) OrderExecuted(ctx context.Context, clientOrderID string) (bool, decimal.Decimal, error) {
 	orderLinkID := clientOrderID
 	symbol := bybit.SymbolV5(t.pair.Symbol())
@@ -250,10 +299,6 @@ func (t *BybitTrader) GetPosition(_ context.Context, pair entity.Pair) (*entity.
 	var latest *entity.Position
 
 	for _, item := range resp.Result.List {
-		if item.Side != bybit.SideBuy {
-			continue
-		}
-
 		size, err := parseDecimal(item.Size)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to parse bybit position size")
@@ -297,12 +342,18 @@ func (t *BybitTrader) GetPosition(_ context.Context, pair entity.Pair) (*entity.
 			entryTime = parseTime(item.CreatedTime)
 		}
 
+		side := entity.PositionSideLong
+		if item.Side == bybit.SideSell {
+			side = entity.PositionSideShort
+		}
+
 		latest = &entity.Position{
 			EntryPrice: entryPrice,
 			Amount:     size,
 			StopLoss:   stopLoss,
 			TakeProfit: takeProfit,
 			EntryTime:  entryTime,
+			Side:       side,
 		}
 	}
 
