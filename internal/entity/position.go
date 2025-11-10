@@ -7,6 +7,18 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+//go:generate stringer -type=PositionSide
+
+// PositionSide represents the direction of a trading position
+type PositionSide int
+
+const (
+	// PositionSideLong represents a long position (buy to open)
+	PositionSideLong PositionSide = iota
+	// PositionSideShort represents a short position (sell to open)
+	PositionSideShort
+)
+
 // Position represents an open trading position tracked in memory.
 type Position struct {
 	EntryPrice   decimal.Decimal
@@ -15,10 +27,11 @@ type Position struct {
 	TakeProfit   decimal.Decimal
 	Invalidation string
 	EntryTime    time.Time
+	Side         PositionSide // Long or Short
 }
 
 // NewPosition constructs a position opened by the strategy.
-func NewPosition(amount, entryPrice decimal.Decimal, entryTime time.Time, exit ExitPlan) (*Position, error) {
+func NewPosition(amount, entryPrice decimal.Decimal, entryTime time.Time, exit ExitPlan, side PositionSide) (*Position, error) {
 	if amount.LessThanOrEqual(decimal.Zero) {
 		return nil, errors.New("position amount must be greater than zero")
 	}
@@ -33,11 +46,12 @@ func NewPosition(amount, entryPrice decimal.Decimal, entryTime time.Time, exit E
 		TakeProfit:   decimal.NewFromFloat(exit.TakeProfitPrice),
 		Invalidation: exit.InvalidationCondition,
 		EntryTime:    entryTime,
+		Side:         side,
 	}, nil
 }
 
 // NewPositionFromExternalSnapshot builds an in-memory position based on external (exchange) balance snapshot.
-func NewPositionFromExternalSnapshot(amount, entryPrice decimal.Decimal, entryTime time.Time) (*Position, error) {
+func NewPositionFromExternalSnapshot(amount, entryPrice decimal.Decimal, entryTime time.Time, side PositionSide) (*Position, error) {
 	if amount.LessThanOrEqual(decimal.Zero) {
 		return nil, errors.New("position amount must be greater than zero")
 	}
@@ -49,6 +63,7 @@ func NewPositionFromExternalSnapshot(amount, entryPrice decimal.Decimal, entryTi
 		EntryPrice: entryPrice,
 		Amount:     amount,
 		EntryTime:  entryTime,
+		Side:       side,
 	}, nil
 }
 
@@ -75,6 +90,11 @@ func (p *Position) PnL(currentPrice decimal.Decimal) decimal.Decimal {
 		return decimal.Zero
 	}
 
+	// for long positions: PnL = (currentPrice - entryPrice) * amount
+	// for short positions: PnL = (entryPrice - currentPrice) * amount
+	if p.Side == PositionSideShort {
+		return p.EntryPrice.Sub(currentPrice).Mul(p.Amount)
+	}
 	return currentPrice.Sub(p.EntryPrice).Mul(p.Amount)
 }
 
