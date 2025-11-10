@@ -6,7 +6,9 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/config"
+	"github.com/vadiminshakov/marti/internal/events"
 
 	"github.com/vadiminshakov/marti/internal/entity"
 	"go.uber.org/zap"
@@ -30,6 +32,11 @@ type TradingBot struct {
 	Config config.Config
 	// tradingStrategy holds the strategy implementation to be executed
 	tradingStrategy TradingStrategy
+	trader          traderService
+	pricer          Pricer
+	leverage        int
+	// balancePublisher feeds snapshots to the optional web UI.
+	balancePublisher *events.BalanceBroadcaster
 }
 
 // NewTradingBot creates a new trading bot instance with the specified configuration, exchange client, and logger.
@@ -63,8 +70,12 @@ func NewTradingBot(logger *zap.Logger, conf config.Config, client any) (*Trading
 	}
 
 	return &TradingBot{
-		Config:          conf,
-		tradingStrategy: tradingStrategy,
+		Config:           conf,
+		tradingStrategy:  tradingStrategy,
+		trader:           currentTrader,
+		pricer:           currentPricer,
+		leverage:         leverage,
+		balancePublisher: events.DefaultBalanceBroadcaster,
 	}, nil
 }
 
@@ -82,6 +93,10 @@ func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
 	// initialize trading strategy (handles initial buy if needed)
 	if err := b.tradingStrategy.Initialize(ctx); err != nil {
 		return errors.Wrap(err, "failed to initialize trading strategy")
+	}
+
+	if b.trader != nil && b.pricer != nil && b.balancePublisher != nil {
+		go b.streamBalances(ctx, logger.With(zap.String("component", "balance-reporter")))
 	}
 
 	ticker := time.NewTicker(b.Config.PollPriceInterval)
@@ -103,7 +118,104 @@ func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
 
 			if tradeEvent != nil {
 				logger.Info("Trade event occurred", zap.Any("event", tradeEvent))
+				go func() {
+					if err := b.publishBalanceSnapshot(ctx); err != nil {
+						logger.Debug("balance snapshot skipped", zap.Error(err))
+					}
+				}()
 			}
 		}
 	}
+}
+
+func (b *TradingBot) streamBalances(ctx context.Context, logger *zap.Logger) {
+	interval := b.Config.PollPriceInterval
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	if err := b.publishBalanceSnapshot(ctx); err != nil {
+		logger.Debug("balance snapshot skipped", zap.Error(err))
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := b.publishBalanceSnapshot(ctx); err != nil {
+				logger.Debug("balance snapshot skipped", zap.Error(err))
+			}
+		}
+	}
+}
+
+func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
+	if b.trader == nil || b.pricer == nil || b.balancePublisher == nil {
+		return nil
+	}
+
+	base, err := b.trader.GetBalance(ctx, b.Config.Pair.From)
+	if err != nil {
+		return errors.Wrapf(err, "get %s balance", b.Config.Pair.From)
+	}
+	quote, err := b.trader.GetBalance(ctx, b.Config.Pair.To)
+	if err != nil {
+		return errors.Wrapf(err, "get %s balance", b.Config.Pair.To)
+	}
+	price, err := b.pricer.GetPrice(ctx, b.Config.Pair)
+	if err != nil {
+		return errors.Wrap(err, "get price for balance snapshot")
+	}
+
+	total := quote.Add(base.Mul(price))
+	if b.Config.MarketType == entity.MarketTypeMargin {
+		position, err := b.trader.GetPosition(ctx, b.Config.Pair)
+		if err != nil {
+			return errors.Wrap(err, "get position for balance snapshot")
+		}
+		if position != nil && position.Amount.GreaterThan(decimal.Zero) {
+			lev := b.leverage
+			if lev < 1 {
+				lev = 1
+			}
+			if lev > 1 {
+				notional := position.Amount.Abs().Mul(position.EntryPrice)
+				collateral := notional.Div(decimal.NewFromInt(int64(lev)))
+				pnl := position.PnL(price)
+
+				freeBase := base
+				switch position.Side {
+				case entity.PositionSideLong:
+					if base.GreaterThanOrEqual(position.Amount) {
+						freeBase = base.Sub(position.Amount)
+					}
+				case entity.PositionSideShort:
+					shortImpact := position.Amount.Neg()
+					if base.LessThanOrEqual(shortImpact) {
+						freeBase = base.Sub(shortImpact)
+					}
+				}
+				freeBaseValue := decimal.Zero
+				if freeBase.GreaterThan(decimal.Zero) {
+					freeBaseValue = freeBase.Mul(price)
+				}
+				total = quote.Add(freeBaseValue).Add(collateral).Add(pnl)
+			}
+		}
+	}
+
+	b.balancePublisher.Publish(events.BalanceSnapshot{
+		Timestamp:  time.Now().UTC(),
+		Pair:       b.Config.Pair.String(),
+		Base:       base.String(),
+		Quote:      quote.String(),
+		TotalQuote: total.StringFixed(2),
+		Price:      price.String(),
+	})
+	
+	return nil
 }

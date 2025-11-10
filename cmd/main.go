@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"os"
 	"os/signal"
 	"sync"
@@ -23,10 +24,15 @@ import (
 	"github.com/vadiminshakov/marti/config"
 	"github.com/vadiminshakov/marti/internal"
 	"github.com/vadiminshakov/marti/internal/clients"
+	"github.com/vadiminshakov/marti/internal/events"
+	"github.com/vadiminshakov/marti/internal/web"
 	"go.uber.org/zap"
 )
 
 func main() {
+	var webAddr string
+	flag.StringVar(&webAddr, "web", ":8080", "address for web UI (disable with empty string)")
+	flag.Parse()
 	cfg := zap.NewProductionConfig()
 	cfg.DisableStacktrace = true
 	logger := zap.Must(cfg.Build())
@@ -44,16 +50,22 @@ func main() {
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+	defer signal.Stop(sigChan)
 
 	go func() {
-		<-sigChan
-		logger.Info("Received shutdown signal, initiating graceful shutdown...")
+		select {
+		case sig := <-sigChan:
+			logger.Info("Received shutdown signal, initiating graceful shutdown...", zap.String("signal", sig.String()))
+		case <-ctx.Done():
+			return
+		}
 		cancel()
 	}()
 
 	var wg sync.WaitGroup
 
 	for _, cfg := range configs {
+		cfg := cfg
 		var client any
 		switch cfg.Platform {
 		case "binance":
@@ -88,17 +100,31 @@ func main() {
 			botLogger.Fatal("Failed to create trading bot", zap.Error(err))
 		}
 
-		wg.Go(func() {
+		wg.Add(1)
+		go func(bot *internal.TradingBot, l *zap.Logger) {
+			defer wg.Done()
 			defer bot.Close()
-		
-			if err := bot.Run(ctx, botLogger); err != nil {
-				botLogger.Error("Trading bot failed", zap.Error(err))
+			if err := bot.Run(ctx, l); err != nil && ctx.Err() == nil {
+				l.Error("Trading bot failed", zap.Error(err))
 			}
-		})
+		}(bot, botLogger)
+	}
+
+	// start web server if enabled
+	if webAddr != "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			webLogger := logger.With(zap.String("component", "web"))
+			webLogger.Info("Starting web UI", zap.String("addr", webAddr))
+			srv := web.NewServer(webAddr, events.DefaultBalanceBroadcaster)
+			if err := srv.Start(ctx); err != nil && ctx.Err() == nil {
+				webLogger.Error("Web server exited", zap.Error(err))
+			}
+		}()
 	}
 
 	wg.Wait()
 
-	signal.Stop(sigChan)
 	logger.Info("All trading bots have shut down gracefully")
 }
