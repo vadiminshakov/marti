@@ -69,145 +69,26 @@ func NewSimulateTrader(pair entity.Pair, marketType entity.MarketType, leverage 
 	}, nil
 }
 
-// Buy simulates a market buy order, fetching the price from its pricer.
-// The 'amount' is expected to be in the base currency (e.g., BTC for BTC/USDT).
-func (t *SimulateTrader) Buy(ctx context.Context, amount decimal.Decimal, id string) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	price, err := t.pricer.GetPrice(ctx, t.pair)
-	if err != nil {
-		return errors.Wrap(err, "failed to get price for simulated buy")
-	}
-
-	quoteAmount := amount.Mul(price)
-
-	// for margin trading with leverage, we can buy more than we have in wallet.
-	var requiredQuote decimal.Decimal
-	if t.marketType == entity.MarketTypeMargin && t.leverage > 1 {
-		// with leverage, we only need to have 1/leverage of the quote amount.
-		requiredQuote = quoteAmount.Div(decimal.NewFromInt(int64(t.leverage)))
-	} else {
-		// for spot trading, we need the full quote amount.
-		requiredQuote = quoteAmount
-	}
-
-	if t.wallet[t.pair.To].LessThan(requiredQuote) {
-		return errors.Errorf("insufficient %s balance: have %s need %s (with %dx leverage)",
-			t.pair.To,
-			t.wallet[t.pair.To].String(),
-			requiredQuote.String(),
-			t.leverage)
-	}
-
-	t.wallet[t.pair.To] = t.wallet[t.pair.To].Sub(requiredQuote)
-	if t.marketType == entity.MarketTypeMargin && t.leverage > 1 {
-		// Keep track of the collateral that stays locked for the position
-		// so that the same amount can be released when we close.
-		t.marginUsed = t.marginUsed.Add(requiredQuote)
-	}
-	t.wallet[t.pair.From] = t.wallet[t.pair.From].Add(amount)
-
-	if t.position == nil {
-		pos, err := entity.NewPositionFromExternalSnapshot(amount, price, time.Now(), entity.PositionSideLong)
-		if err != nil {
-			return errors.Wrap(err, "create position")
+// ExecuteAction executes a trading action.
+func (t *SimulateTrader) ExecuteAction(ctx context.Context, action entity.Action, amount decimal.Decimal, clientOrderID string) error {
+	switch action {
+	case entity.ActionOpenLong:
+		return t.buy(ctx, amount, clientOrderID)
+	case entity.ActionCloseLong:
+		return t.sell(ctx, amount, clientOrderID)
+	case entity.ActionOpenShort:
+		if t.marketType != entity.MarketTypeMargin {
+			return fmt.Errorf("short positions are supported only in margin trading mode")
 		}
-		t.position = pos
-	} else {
-		totalBase := t.position.Amount.Add(amount)
-		if totalBase.GreaterThan(decimal.Zero) {
-			existingNotional := t.position.EntryPrice.Mul(t.position.Amount)
-			addedNotional := amount.Mul(price)
-			t.position.Amount = totalBase
-			t.position.EntryPrice = existingNotional.Add(addedNotional).Div(totalBase)
+		return t.sell(ctx, amount, clientOrderID)
+	case entity.ActionCloseShort:
+		if t.marketType != entity.MarketTypeMargin {
+			return fmt.Errorf("short positions are supported only in margin trading mode")
 		}
+		return t.buy(ctx, amount, clientOrderID)
+	default:
+		return fmt.Errorf("unknown action: %s", action)
 	}
-
-	t.orders[id] = orderInfo{amount: amount, side: "buy"}
-	t.logger.Info("Simulated buy executed",
-		zap.String("id", id),
-		zap.String("amount", amount.String()),
-		zap.String("price", price.String()))
-	return nil
-}
-
-// Sell simulates a market sell order, fetching the price from its pricer.
-// The 'amount' is expected to be in the base currency (e.g., BTC for BTC/USDT).
-func (t *SimulateTrader) Sell(ctx context.Context, amount decimal.Decimal, id string) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	price, err := t.pricer.GetPrice(ctx, t.pair)
-	if err != nil {
-		return errors.Wrap(err, "failed to get price for simulated sell")
-	}
-
-	// for margin trading with leverage, we can sell more than we have (short selling),
-	// but we still need to check if we have enough to cover the margin requirement.
-	var requiredBase decimal.Decimal
-	if t.marketType == entity.MarketTypeMargin && t.leverage > 1 {
-		// with leverage, we only need to have 1/leverage of the base amount for margin.
-		requiredBase = amount.Div(decimal.NewFromInt(int64(t.leverage)))
-		// for short selling, we can allow negative balance up to leverage limit
-		if t.wallet[t.pair.From].LessThan(requiredBase.Neg()) {
-			return fmt.Errorf("insufficient %s balance for leveraged sell: have %s, max short allowed %s (with %dx leverage)",
-				t.pair.From,
-				t.wallet[t.pair.From].String(),
-				requiredBase.Neg().String(),
-				t.leverage)
-		}
-	} else {
-		// for spot trading, we need the full base amount
-		requiredBase = amount
-		if t.wallet[t.pair.From].LessThan(requiredBase) {
-			return fmt.Errorf("insufficient %s balance: have %s need %s", t.pair.From, t.wallet[t.pair.From].String(), requiredBase.String())
-		}
-	}
-
-	quoteReceived := amount.Mul(price)
-	t.wallet[t.pair.From] = t.wallet[t.pair.From].Sub(amount)
-	prevAmount := decimal.Zero
-	entryPrice := decimal.Zero
-	if t.position != nil {
-		prevAmount = t.position.Amount
-		entryPrice = t.position.EntryPrice
-	}
-
-	if t.marketType == entity.MarketTypeMargin && t.leverage > 1 && prevAmount.GreaterThan(decimal.Zero) {
-		// release the collateral equivalent to the closed share of the position
-		// and credit realised PnL instead of the whole notional.
-		fraction := amount.Div(prevAmount)
-		if fraction.GreaterThan(decimal.NewFromInt(1)) {
-			fraction = decimal.NewFromInt(1)
-		}
-		marginReleased := t.marginUsed.Mul(fraction)
-		// realisedPnL = (exit - entry) * amount
-		realizedPnl := price.Sub(entryPrice).Mul(amount)
-		t.marginUsed = t.marginUsed.Sub(marginReleased)
-		if t.marginUsed.LessThan(decimal.Zero) {
-			t.marginUsed = decimal.Zero
-		}
-		t.wallet[t.pair.To] = t.wallet[t.pair.To].Add(marginReleased.Add(realizedPnl))
-	} else {
-		t.wallet[t.pair.To] = t.wallet[t.pair.To].Add(quoteReceived)
-	}
-
-	if t.position != nil {
-		remaining := t.position.Amount.Sub(amount)
-		if remaining.LessThanOrEqual(decimal.Zero) {
-			t.position = nil
-		} else {
-			t.position.Amount = remaining
-		}
-	}
-
-	t.orders[id] = orderInfo{amount: amount, side: "sell"}
-	t.logger.Info("Simulated sell executed",
-		zap.String("id", id),
-		zap.String("amount", amount.String()),
-		zap.String("price", price.String()))
-	return nil
 }
 
 func (t *SimulateTrader) OrderExecuted(ctx context.Context, id string) (bool, decimal.Decimal, error) {
@@ -256,21 +137,6 @@ func (t *SimulateTrader) SetPositionStops(ctx context.Context, pair entity.Pair,
 	return nil
 }
 
-// ExecuteAction executes a trading action (SimulateTrader does not support short positions yet)
-func (t *SimulateTrader) ExecuteAction(ctx context.Context, action entity.Action, amount decimal.Decimal) error {
-	// For now, simulate trader only supports long positions
-	switch action {
-	case entity.ActionOpenLong:
-		return t.Buy(ctx, amount, fmt.Sprintf("sim-%d", time.Now().UnixNano()))
-	case entity.ActionCloseLong:
-		return t.Sell(ctx, amount, fmt.Sprintf("sim-%d", time.Now().UnixNano()))
-	case entity.ActionOpenShort, entity.ActionCloseShort:
-		return fmt.Errorf("short positions not supported by SimulateTrader")
-	default:
-		return fmt.Errorf("unknown action: %s", action)
-	}
-}
-
 func (t *SimulateTrader) UnrealizedPnL(ctx context.Context, price decimal.Decimal) decimal.Decimal {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -278,4 +144,286 @@ func (t *SimulateTrader) UnrealizedPnL(ctx context.Context, price decimal.Decima
 		return decimal.Zero
 	}
 	return t.position.PnL(price)
+}
+
+// buy simulates a market buy order, fetching the price from its pricer.
+// The 'amount' is expected to be in the base currency (e.g., BTC for BTC/USDT).
+func (t *SimulateTrader) buy(ctx context.Context, amount decimal.Decimal, id string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if amount.LessThanOrEqual(decimal.Zero) {
+		return fmt.Errorf("buy amount must be positive, got %s", amount.String())
+	}
+
+	price, err := t.pricer.GetPrice(ctx, t.pair)
+	if err != nil {
+		return errors.Wrap(err, "failed to get price for simulated buy")
+	}
+
+	if t.position != nil && t.position.Side == entity.PositionSideShort {
+		return t.closeShortLocked(amount, id, price)
+	}
+
+	return t.openOrAddLongLocked(amount, id, price)
+}
+
+// sell simulates a market sell order, fetching the price from its pricer.
+// The 'amount' is expected to be in the base currency (e.g., BTC for BTC/USDT).
+func (t *SimulateTrader) sell(ctx context.Context, amount decimal.Decimal, id string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if amount.LessThanOrEqual(decimal.Zero) {
+		return fmt.Errorf("sell amount must be positive, got %s", amount.String())
+	}
+
+	price, err := t.pricer.GetPrice(ctx, t.pair)
+	if err != nil {
+		return errors.Wrap(err, "failed to get price for simulated sell")
+	}
+
+	if t.position != nil && t.position.Side == entity.PositionSideLong {
+		return t.closeLongLocked(amount, id, price)
+	}
+
+	if t.marketType == entity.MarketTypeMargin {
+		return t.openOrAddShortLocked(amount, id, price)
+	}
+
+	return t.sellSpotWithoutPosition(amount, id, price)
+}
+
+func (t *SimulateTrader) openOrAddLongLocked(amount decimal.Decimal, id string, price decimal.Decimal) error {
+	quoteAmount := amount.Mul(price)
+	requiredQuote := t.requiredQuoteAmount(quoteAmount)
+
+	if t.wallet[t.pair.To].LessThan(requiredQuote) {
+		return errors.Errorf("insufficient %s balance: have %s need %s (with %dx leverage)",
+			t.pair.To,
+			t.wallet[t.pair.To].String(),
+			requiredQuote.String(),
+			t.leverage)
+	}
+
+	t.wallet[t.pair.To] = t.wallet[t.pair.To].Sub(requiredQuote)
+	if t.marketType == entity.MarketTypeMargin {
+		t.marginUsed = t.marginUsed.Add(requiredQuote)
+	}
+	t.wallet[t.pair.From] = t.wallet[t.pair.From].Add(amount)
+
+	if t.position == nil {
+		pos, err := entity.NewPositionFromExternalSnapshot(amount, price, time.Now(), entity.PositionSideLong)
+		if err != nil {
+			return errors.Wrap(err, "create position")
+		}
+		t.position = pos
+	} else {
+		if t.position.Side != entity.PositionSideLong {
+			return fmt.Errorf("cannot open long while %s position is active", t.position.Side.String())
+		}
+		totalBase := t.position.Amount.Add(amount)
+		if totalBase.GreaterThan(decimal.Zero) {
+			existingNotional := t.position.EntryPrice.Mul(t.position.Amount)
+			addedNotional := amount.Mul(price)
+			t.position.Amount = totalBase
+			t.position.EntryPrice = existingNotional.Add(addedNotional).Div(totalBase)
+		}
+	}
+
+	t.orders[id] = orderInfo{amount: amount, side: "buy"}
+	t.logger.Info("Simulated buy executed",
+		zap.String("id", id),
+		zap.String("amount", amount.String()),
+		zap.String("price", price.String()),
+		zap.String("context", "open_long"))
+	return nil
+}
+
+func (t *SimulateTrader) closeLongLocked(amount decimal.Decimal, id string, price decimal.Decimal) error {
+	if t.position == nil || t.position.Side != entity.PositionSideLong {
+		return fmt.Errorf("no long position to close")
+	}
+
+	closeAmount := amount
+	if closeAmount.GreaterThan(t.position.Amount) {
+		closeAmount = t.position.Amount
+		t.logger.Warn("requested close amount exceeds long position size, capping to position amount",
+			zap.String("requested", amount.String()),
+			zap.String("position", t.position.Amount.String()))
+	}
+	if closeAmount.LessThanOrEqual(decimal.Zero) {
+		return fmt.Errorf("close amount must be positive, got %s", closeAmount.String())
+	}
+
+	if t.wallet[t.pair.From].LessThan(closeAmount) {
+		return fmt.Errorf("insufficient %s balance: have %s need %s",
+			t.pair.From,
+			t.wallet[t.pair.From].String(),
+			closeAmount.String())
+	}
+
+	t.wallet[t.pair.From] = t.wallet[t.pair.From].Sub(closeAmount)
+
+	prevAmount := t.position.Amount
+	entryPrice := t.position.EntryPrice
+
+	if t.marketType == entity.MarketTypeMargin {
+		fraction := closeAmount.Div(prevAmount)
+		one := decimal.NewFromInt(1)
+		if fraction.GreaterThan(one) {
+			fraction = one
+		}
+		marginReleased := t.marginUsed.Mul(fraction)
+		realizedPnl := price.Sub(entryPrice).Mul(closeAmount)
+		t.marginUsed = t.marginUsed.Sub(marginReleased)
+		if t.marginUsed.LessThan(decimal.Zero) {
+			t.marginUsed = decimal.Zero
+		}
+		t.wallet[t.pair.To] = t.wallet[t.pair.To].Add(marginReleased.Add(realizedPnl))
+	} else {
+		quoteReceived := closeAmount.Mul(price)
+		t.wallet[t.pair.To] = t.wallet[t.pair.To].Add(quoteReceived)
+	}
+
+	t.position.Amount = t.position.Amount.Sub(closeAmount)
+	if t.position.Amount.LessThanOrEqual(decimal.Zero) {
+		t.position = nil
+		t.marginUsed = decimal.Zero
+	}
+
+	t.orders[id] = orderInfo{amount: closeAmount, side: "sell"}
+	t.logger.Info("Simulated sell executed",
+		zap.String("id", id),
+		zap.String("amount", closeAmount.String()),
+		zap.String("price", price.String()),
+		zap.String("context", "close_long"))
+	return nil
+}
+
+func (t *SimulateTrader) openOrAddShortLocked(amount decimal.Decimal, id string, price decimal.Decimal) error {
+	if t.marketType != entity.MarketTypeMargin {
+		return fmt.Errorf("short positions are supported only in margin trading mode")
+	}
+
+	quoteAmount := amount.Mul(price)
+	requiredQuote := t.requiredQuoteAmount(quoteAmount)
+
+	if t.wallet[t.pair.To].LessThan(requiredQuote) {
+		return errors.Errorf("insufficient %s balance for short: have %s need %s (with %dx leverage)",
+			t.pair.To,
+			t.wallet[t.pair.To].String(),
+			requiredQuote.String(),
+			t.leverage)
+	}
+
+	if t.position != nil && t.position.Side == entity.PositionSideLong {
+		return fmt.Errorf("cannot open short while long position is active")
+	}
+
+	t.wallet[t.pair.To] = t.wallet[t.pair.To].Sub(requiredQuote)
+	t.marginUsed = t.marginUsed.Add(requiredQuote)
+	t.wallet[t.pair.From] = t.wallet[t.pair.From].Sub(amount)
+
+	if t.position == nil {
+		pos, err := entity.NewPositionFromExternalSnapshot(amount, price, time.Now(), entity.PositionSideShort)
+		if err != nil {
+			return errors.Wrap(err, "create short position")
+		}
+		t.position = pos
+	} else {
+		totalBase := t.position.Amount.Add(amount)
+		existingNotional := t.position.EntryPrice.Mul(t.position.Amount)
+		addedNotional := amount.Mul(price)
+		t.position.Amount = totalBase
+		t.position.EntryPrice = existingNotional.Add(addedNotional).Div(totalBase)
+	}
+
+	t.orders[id] = orderInfo{amount: amount, side: "sell"}
+	t.logger.Info("Simulated sell executed",
+		zap.String("id", id),
+		zap.String("amount", amount.String()),
+		zap.String("price", price.String()),
+		zap.String("context", "open_short"))
+	return nil
+}
+
+func (t *SimulateTrader) closeShortLocked(amount decimal.Decimal, id string, price decimal.Decimal) error {
+	if t.position == nil || t.position.Side != entity.PositionSideShort {
+		return fmt.Errorf("no short position to close")
+	}
+
+	closeAmount := amount
+	if closeAmount.GreaterThan(t.position.Amount) {
+		closeAmount = t.position.Amount
+		t.logger.Warn("requested close amount exceeds short position size, capping to position amount",
+			zap.String("requested", amount.String()),
+			zap.String("position", t.position.Amount.String()))
+	}
+	if closeAmount.LessThanOrEqual(decimal.Zero) {
+		return fmt.Errorf("close amount must be positive, got %s", closeAmount.String())
+	}
+
+	t.wallet[t.pair.From] = t.wallet[t.pair.From].Add(closeAmount)
+
+	prevAmount := t.position.Amount
+	entryPrice := t.position.EntryPrice
+	one := decimal.NewFromInt(1)
+	fraction := closeAmount.Div(prevAmount)
+	if fraction.GreaterThan(one) {
+		fraction = one
+	}
+	marginReleased := t.marginUsed.Mul(fraction)
+	realizedPnl := entryPrice.Sub(price).Mul(closeAmount)
+	t.marginUsed = t.marginUsed.Sub(marginReleased)
+	if t.marginUsed.LessThan(decimal.Zero) {
+		t.marginUsed = decimal.Zero
+	}
+	t.wallet[t.pair.To] = t.wallet[t.pair.To].Add(marginReleased.Add(realizedPnl))
+
+	t.position.Amount = t.position.Amount.Sub(closeAmount)
+	if t.position.Amount.LessThanOrEqual(decimal.Zero) {
+		t.position = nil
+		t.marginUsed = decimal.Zero
+	}
+
+	t.orders[id] = orderInfo{amount: closeAmount, side: "buy"}
+	t.logger.Info("Simulated buy executed",
+		zap.String("id", id),
+		zap.String("amount", closeAmount.String()),
+		zap.String("price", price.String()),
+		zap.String("context", "close_short"))
+	return nil
+}
+
+func (t *SimulateTrader) sellSpotWithoutPosition(amount decimal.Decimal, id string, price decimal.Decimal) error {
+	if t.wallet[t.pair.From].LessThan(amount) {
+		return fmt.Errorf("insufficient %s balance: have %s need %s",
+			t.pair.From,
+			t.wallet[t.pair.From].String(),
+			amount.String())
+	}
+
+	quoteReceived := amount.Mul(price)
+	t.wallet[t.pair.From] = t.wallet[t.pair.From].Sub(amount)
+	t.wallet[t.pair.To] = t.wallet[t.pair.To].Add(quoteReceived)
+
+	t.orders[id] = orderInfo{amount: amount, side: "sell"}
+	t.logger.Info("Simulated sell executed",
+		zap.String("id", id),
+		zap.String("amount", amount.String()),
+		zap.String("price", price.String()),
+		zap.String("context", "spot"))
+	return nil
+}
+
+func (t *SimulateTrader) requiredQuoteAmount(notional decimal.Decimal) decimal.Decimal {
+	if t.marketType != entity.MarketTypeMargin {
+		return notional
+	}
+	leverage := t.leverage
+	if leverage < 1 {
+		leverage = 1
+	}
+	return notional.Div(decimal.NewFromInt(int64(leverage)))
 }
