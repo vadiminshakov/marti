@@ -8,7 +8,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/config"
-	"github.com/vadiminshakov/marti/internal/events"
 
 	"github.com/vadiminshakov/marti/internal/entity"
 	"go.uber.org/zap"
@@ -35,14 +34,18 @@ type TradingBot struct {
 	trader          traderService
 	pricer          Pricer
 	leverage        int
-	// balancePublisher feeds snapshots to the optional web UI.
-	balancePublisher *events.BalanceBroadcaster
+	// balanceStore persists snapshots for UI/recovery.
+	balanceStore balanceSnapshotWriter
+}
+
+type balanceSnapshotWriter interface {
+	Save(snapshot entity.BalanceSnapshot) error
 }
 
 // NewTradingBot creates a new trading bot instance with the specified configuration, exchange client, and logger.
 // It initializes the appropriate trader and pricer components based on the platform specified in the config,
 // and sets up the trading strategy with the provided parameters.
-func NewTradingBot(logger *zap.Logger, conf config.Config, client any) (*TradingBot, error) {
+func NewTradingBot(logger *zap.Logger, conf config.Config, client any, balanceStore balanceSnapshotWriter) (*TradingBot, error) {
 	// for AI strategy, use MaxLeverage; for DCA strategy, use Leverage
 	leverage := conf.Leverage
 	if conf.StrategyType == "ai" {
@@ -70,12 +73,12 @@ func NewTradingBot(logger *zap.Logger, conf config.Config, client any) (*Trading
 	}
 
 	return &TradingBot{
-		Config:           conf,
-		tradingStrategy:  tradingStrategy,
-		trader:           currentTrader,
-		pricer:           currentPricer,
-		leverage:         leverage,
-		balancePublisher: events.DefaultBalanceBroadcaster,
+		Config:          conf,
+		tradingStrategy: tradingStrategy,
+		trader:          currentTrader,
+		pricer:          currentPricer,
+		leverage:        leverage,
+		balanceStore:    balanceStore,
 	}, nil
 }
 
@@ -95,9 +98,7 @@ func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
 		return errors.Wrap(err, "failed to initialize trading strategy")
 	}
 
-	if b.trader != nil && b.pricer != nil && b.balancePublisher != nil {
-		go b.streamBalances(ctx, logger.With(zap.String("component", "balance-reporter")))
-	}
+	go b.streamBalances(ctx, logger.With(zap.String("component", "balance-reporter")))
 
 	ticker := time.NewTicker(b.Config.PollPriceInterval)
 	defer ticker.Stop()
@@ -154,9 +155,6 @@ func (b *TradingBot) streamBalances(ctx context.Context, logger *zap.Logger) {
 }
 
 func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
-	if b.trader == nil || b.pricer == nil || b.balancePublisher == nil {
-		return nil
-	}
 
 	base, err := b.trader.GetBalance(ctx, b.Config.Pair.From)
 	if err != nil {
@@ -208,7 +206,7 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 		}
 	}
 
-	b.balancePublisher.Publish(events.BalanceSnapshot{
+	return b.balanceStore.Save(entity.BalanceSnapshot{
 		Timestamp:  time.Now().UTC(),
 		Pair:       b.Config.Pair.String(),
 		Base:       base.String(),
@@ -216,6 +214,4 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 		TotalQuote: total.StringFixed(2),
 		Price:      price.String(),
 	})
-	
-	return nil
 }

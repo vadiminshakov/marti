@@ -5,21 +5,28 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
-	"github.com/vadiminshakov/marti/internal/events"
+	"github.com/vadiminshakov/marti/internal/entity"
 )
+
+const snapshotPollInterval = 2 * time.Second
+
+type balanceSnapshotReader interface {
+	SnapshotsAfter(index uint64) ([]entity.BalanceSnapshotRecord, error)
+}
 
 // Server exposes HTTP endpoints serving the HTML UI and an SSE stream.
 type Server struct {
-	Addr        string
-	Broadcaster *events.BalanceBroadcaster
+	Addr  string
+	Store balanceSnapshotReader
 }
 
 // NewServer creates a new web server instance.
-func NewServer(addr string, b *events.BalanceBroadcaster) *Server {
-	return &Server{Addr: addr, Broadcaster: b}
+func NewServer(addr string, store balanceSnapshotReader) *Server {
+	return &Server{Addr: addr, Store: store}
 }
 
 // Start runs the HTTP server (blocking) and shuts it down when ctx is cancelled.
@@ -56,9 +63,9 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBalanceStream(w http.ResponseWriter, r *http.Request) {
-	if s.Broadcaster == nil {
+	if s.Store == nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprint(w, "broadcaster not available")
+		fmt.Fprint(w, "snapshot store not available")
 		return
 	}
 	flusher, ok := w.(http.Flusher)
@@ -71,12 +78,40 @@ func (s *Server) handleBalanceStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	ch := s.Broadcaster.Subscribe()
-	defer s.Broadcaster.Unsubscribe(ch)
-
 	// send a comment heartbeat every 30s so proxies keep connection
 	heartbeat := time.NewTicker(30 * time.Second)
 	defer heartbeat.Stop()
+
+	pollTicker := time.NewTicker(snapshotPollInterval)
+	defer pollTicker.Stop()
+
+	lastIndex := uint64(0)
+	sendSnapshots := func() error {
+		records, err := s.Store.SnapshotsAfter(lastIndex)
+		if err != nil {
+			return err
+		}
+		if len(records) == 0 {
+			return nil
+		}
+		for _, record := range records {
+			payload, err := json.Marshal(record.Snapshot)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(w, "event: balance\n")
+			fmt.Fprintf(w, "data: %s\n\n", payload)
+			flusher.Flush()
+			lastIndex = record.Index
+		}
+		return nil
+	}
+
+	if err := sendSnapshots(); err != nil {
+		http.Error(w, "failed to load snapshots", http.StatusInternalServerError)
+		log.Printf("balance stream initial load: %v", err)
+		return
+	}
 
 	for {
 		select {
@@ -85,11 +120,10 @@ func (s *Server) handleBalanceStream(w http.ResponseWriter, r *http.Request) {
 		case <-heartbeat.C:
 			fmt.Fprintf(w, ": ping\n\n")
 			flusher.Flush()
-		case snap := <-ch:
-			payload, _ := json.Marshal(snap)
-			fmt.Fprintf(w, "event: balance\n")
-			fmt.Fprintf(w, "data: %s\n\n", payload)
-			flusher.Flush()
+		case <-pollTicker.C:
+			if err := sendSnapshots(); err != nil {
+				log.Printf("balance stream poll err: %v", err)
+			}
 		}
 	}
 }

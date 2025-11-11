@@ -59,7 +59,7 @@ func TestNewTradingBot(t *testing.T) {
 			currentConf.Platform = tt.platform
 
 			logger := zap.NewNop()
-			bot, err := NewTradingBot(logger, currentConf, tt.client)
+			bot, err := NewTradingBot(logger, currentConf, tt.client, nil)
 
 			if tt.expectError {
 				require.Error(t, err)
