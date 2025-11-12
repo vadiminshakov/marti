@@ -128,12 +128,12 @@ func (s *Server) handleBalanceStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Minimal index page with a single total-balance chart + SSE.
+// Multi-pair dashboard with a chart + stats per trading pair.
 const indexHTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Marti Total Balance</title>
+  <title>Marti</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -170,7 +170,7 @@ const indexHTML = `<!DOCTYPE html>
       pointer-events:none;
     }
     #app {
-      width:min(960px, 96vw);
+      width:min(1180px, 96vw);
       background:var(--panel);
       border:3px solid var(--ink);
       padding:2rem;
@@ -179,7 +179,7 @@ const indexHTML = `<!DOCTYPE html>
       box-shadow:12px 12px 0 rgba(0,0,0,.15);
       display:flex;
       flex-direction:column;
-      gap:1.5rem;
+      gap:2rem;
     }
     #app::after {
       content:'';
@@ -211,30 +211,53 @@ const indexHTML = `<!DOCTYPE html>
       background:#ffffff;
       box-shadow:4px 4px 0 rgba(0,0,0,.15);
     }
-    .chart-panel {
+    .pair-grid {
+      display:grid;
+      grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));
+      gap:1.5rem;
+    }
+    .pair-card {
       border:3px solid var(--ink);
       padding:1.5rem;
       background:#fff;
       box-shadow:8px 8px 0 rgba(0,0,0,.15);
       display:flex;
       flex-direction:column;
-      gap:1.2rem;
+      gap:1rem;
+    }
+    .pair-card-header {
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:.5rem;
+    }
+    .pair-name {
+      font-family:'Press Start 2P','Space Mono',monospace;
+      font-size:.9rem;
+      letter-spacing:.08em;
+      margin:0;
+    }
+    .pair-chart {
+      width:100%;
+      border:2px solid var(--ink);
+      background:#fff;
+      image-rendering:pixelated;
     }
     .equity {
       border:3px solid var(--ink);
-      padding:1.5rem;
+      padding:1.2rem;
       background:#fff;
       box-shadow:6px 6px 0 rgba(0,0,0,.12);
     }
     .equity .label {
-      font-size:.68rem;
+      font-size:.62rem;
       text-transform:uppercase;
       letter-spacing:.2em;
       color:var(--ink-mid);
     }
     .equity .value {
       margin-top:.8rem;
-      font-size:2.4rem;
+      font-size:1.8rem;
       font-weight:700;
       letter-spacing:.08em;
       color:var(--ink);
@@ -244,13 +267,13 @@ const indexHTML = `<!DOCTYPE html>
       display:flex;
       flex-wrap:wrap;
       gap:.5rem;
-      margin-top:1.2rem;
+      margin-top:1rem;
     }
     .pill {
-      font-size:.6rem;
+      font-size:.55rem;
       letter-spacing:.12em;
       text-transform:uppercase;
-      padding:.4rem .75rem;
+      padding:.35rem .7rem;
       border:2px solid var(--ink);
       background:#fefefe;
       color:var(--ink);
@@ -260,60 +283,62 @@ const indexHTML = `<!DOCTYPE html>
       color:var(--ink-mid);
       border-color:var(--ink-mid);
     }
-    canvas {
-      width:100%;
-      border:2px solid var(--ink);
-      background:#fff;
-      image-rendering:pixelated;
+    .empty-state {
+      border:2px dashed var(--ink-soft);
+      padding:2rem;
+      text-align:center;
+      font-size:.8rem;
+      letter-spacing:.12em;
+      text-transform:uppercase;
+      color:var(--ink-mid);
     }
     @media (max-width:640px) {
       body { padding:1rem; }
       #app { padding:1.2rem; }
       header { flex-direction:column; align-items:flex-start; }
-      .equity .value { font-size:1.8rem; }
+      .pair-grid { grid-template-columns:1fr; }
     }
   </style>
 </head>
 <body>
   <div id="app">
-    <section class="chart-panel">
-      <header>
-        <div>
-          <p class="eyebrow">marti dashboard</p>
-          <h1>Total Balance</h1>
-        </div>
-        <div id="sse-status" class="status">Connecting…</div>
-      </header>
-      <canvas id="balanceChart" height="320"></canvas>
-    </section>
-    <section class="equity">
-      <div class="label">Total funds</div>
-      <div id="totalQuote" class="value">0</div>
-      <div class="meta">
-        <span id="pair" class="pill">—</span>
-        <span id="price" class="pill muted">Price —</span>
-        <span id="updated" class="pill muted">Waiting…</span>
+    <header>
+      <div>
+        <p class="eyebrow">marti dashboard</p>
+        <h1>Balance by Pair</h1>
       </div>
+      <div id="sse-status" class="status">Connecting…</div>
+    </header>
+    <section id="pairs" class="pair-grid">
+      <div id="emptyState" class="empty-state">Waiting for balance snapshots…</div>
     </section>
   </div>
 <script>
-const totalEl = document.getElementById('totalQuote');
-const pairEl = document.getElementById('pair');
-const priceEl = document.getElementById('price');
-const updatedEl = document.getElementById('updated');
 const statusEl = document.getElementById('sse-status');
+const pairContainer = document.getElementById('pairs');
+const emptyState = document.getElementById('emptyState');
+const pairViews = new Map();
 
 Chart.defaults.font.family = "'Space Mono', 'JetBrains Mono', monospace";
 Chart.defaults.font.size = 11;
 Chart.defaults.color = '#111111';
 
-const ctx = document.getElementById('balanceChart').getContext('2d');
-ctx.imageSmoothingEnabled = false;
+const parseNum = (value) => {
+  const num = parseFloat(value);
+  return Number.isFinite(num) ? num : 0;
+};
 
-const chart = new Chart(ctx, {
+const formatTs = (ts) => {
+  if(!ts){ return 'Waiting…'; }
+  const date = new Date(ts);
+  if(Number.isNaN(date.getTime())){ return 'Waiting…'; }
+  return date.toLocaleTimeString([], { hour12:false });
+};
+
+const buildChart = (ctx, pairLabel) => new Chart(ctx, {
   type: 'line',
   data: { labels: [], datasets: [{
-    label: 'Total Funds',
+    label: pairLabel + ' Funds',
     data: [],
     borderColor: '#111111',
     backgroundColor: 'rgba(0,0,0,0.08)',
@@ -351,10 +376,72 @@ const chart = new Chart(ctx, {
   }
 });
 
-const parseNum = (value) => {
-  const num = parseFloat(value);
-  return Number.isFinite(num) ? num : 0;
-};
+function ensurePairView(pair){
+  const safePair = pair || '—';
+  if(pairViews.has(safePair)){
+    return pairViews.get(safePair);
+  }
+
+  if(emptyState){
+    emptyState.remove();
+  }
+
+  const card = document.createElement('article');
+  card.className = 'pair-card';
+
+  const header = document.createElement('div');
+  header.className = 'pair-card-header';
+  const title = document.createElement('h2');
+  title.className = 'pair-name';
+  title.textContent = safePair;
+  const updated = document.createElement('span');
+  updated.className = 'pill muted';
+  updated.textContent = 'Waiting…';
+  header.append(title, updated);
+
+  const canvas = document.createElement('canvas');
+  canvas.height = 260;
+  canvas.className = 'pair-chart';
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  const chart = buildChart(ctx, safePair);
+
+  const equity = document.createElement('div');
+  equity.className = 'equity';
+  const label = document.createElement('div');
+  label.className = 'label';
+  label.textContent = 'Total funds';
+  const totalValue = document.createElement('div');
+  totalValue.className = 'value';
+  totalValue.textContent = '0';
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  const baseEl = document.createElement('span');
+  baseEl.className = 'pill';
+  baseEl.textContent = 'Base —';
+  const quoteEl = document.createElement('span');
+  quoteEl.className = 'pill';
+  quoteEl.textContent = 'Quote —';
+  const priceEl = document.createElement('span');
+  priceEl.className = 'pill muted';
+  priceEl.textContent = 'Price —';
+  meta.append(baseEl, quoteEl, priceEl);
+  equity.append(label, totalValue, meta);
+
+  card.append(header, canvas, equity);
+  pairContainer.appendChild(card);
+
+  const view = {
+    chart,
+    totalEl: totalValue,
+    updatedEl: updated,
+    baseEl,
+    quoteEl,
+    priceEl,
+  };
+  pairViews.set(safePair, view);
+  return view;
+}
 
 function deriveTotal(payload){
   if(payload.total_quote){
@@ -368,35 +455,32 @@ function deriveTotal(payload){
   return { numeric, display: numeric.toFixed(4) };
 }
 
-function renderNumbers(payload, total){
-  totalEl.textContent = total.display;
-  pairEl.textContent = payload.pair || '—';
-  priceEl.textContent = payload.price ? 'Price ' + payload.price : 'Price —';
-  if(payload.ts){
-    const ts = new Date(payload.ts);
-    updatedEl.textContent = isNaN(ts) ? '—' : ts.toLocaleTimeString([], { hour12:false });
-  } else {
-    updatedEl.textContent = '—';
-  }
+function renderNumbers(view, payload, total){
+  view.totalEl.textContent = total.display;
+  view.baseEl.textContent = payload.base ? 'Base ' + payload.base : 'Base —';
+  view.quoteEl.textContent = payload.quote ? 'Quote ' + payload.quote : 'Quote —';
+  view.priceEl.textContent = payload.price ? 'Price ' + payload.price : 'Price —';
+  view.updatedEl.textContent = formatTs(payload.ts);
 }
 
-function updateChart(payload, total){
+function updateChart(view, payload, total){
   const ts = payload.ts ? new Date(payload.ts) : new Date();
-  const labelSource = isNaN(ts) ? new Date() : ts;
+  const labelSource = Number.isNaN(ts.getTime()) ? new Date() : ts;
   const label = labelSource.toLocaleTimeString([], { hour12:false });
-  chart.data.labels.push(label);
-  chart.data.datasets[0].data.push(total.numeric);
-  if(chart.data.labels.length > 600){
-    chart.data.labels.shift();
-    chart.data.datasets[0].data.shift();
+  view.chart.data.labels.push(label);
+  view.chart.data.datasets[0].data.push(total.numeric);
+  if(view.chart.data.labels.length > 600){
+    view.chart.data.labels.shift();
+    view.chart.data.datasets[0].data.shift();
   }
-  chart.update('none');
+  view.chart.update('none');
 }
 
 function handlePayload(payload){
+  const view = ensurePairView(payload.pair);
   const total = deriveTotal(payload);
-  renderNumbers(payload, total);
-  updateChart(payload, total);
+  renderNumbers(view, payload, total);
+  updateChart(view, payload, total);
 }
 
 function connectSSE(){
