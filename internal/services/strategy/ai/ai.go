@@ -306,6 +306,11 @@ func (s *AIStrategy) executeBuy(
 	if takeProfit.GreaterThan(decimal.Zero) || stopLoss.GreaterThan(decimal.Zero) {
 		if err := s.trader.SetPositionStops(ctx, s.pair, takeProfit, stopLoss); err != nil {
 			s.logger.Warn("Failed to update position stops on exchange", zap.Error(err))
+		} else {
+			s.logger.Info("Updated position stops",
+				zap.String("pair", s.pair.Symbol()),
+				zap.String("take_profit", takeProfit.String()),
+				zap.String("stop_loss", stopLoss.String()))
 		}
 	}
 
@@ -404,6 +409,11 @@ func (s *AIStrategy) executeOpenShort(
 	if takeProfit.GreaterThan(decimal.Zero) || stopLoss.GreaterThan(decimal.Zero) {
 		if err := s.trader.SetPositionStops(ctx, s.pair, takeProfit, stopLoss); err != nil {
 			s.logger.Warn("Failed to update position stops on exchange", zap.Error(err))
+		} else {
+			s.logger.Info("Updated position stops",
+				zap.String("pair", s.pair.Symbol()),
+				zap.String("take_profit", takeProfit.String()),
+				zap.String("stop_loss", stopLoss.String()))
 		}
 	}
 
