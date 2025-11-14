@@ -1,12 +1,4 @@
-// Package dca implements DCA (Dollar-Cost Averaging) trading strategy.
-//
-// This file contains the core trading logic:
-//   - DCA strategy implementation (Trade method)
-//   - Buy/sell action execution
-//   - Price decision chain (waiting for dip, DCA buy, profit taking)
-//   - DCA series management (purchases tracking, statistics)
-//
-// For reconciliation/recovery logic after restarts, see dca_reconciliation.go
+// Package dca implements Dollar-Cost Averaging trading strategy (core logic here; reconciliation in dca_reconciliation.go).
 package dca
 
 import (
@@ -31,7 +23,7 @@ const (
 	defaultOrderCheckInterval = 1 * time.Minute
 )
 
-// DCAPurchase represents a single DCA purchase
+// DCAPurchase represents a single DCA purchase.
 type DCAPurchase struct {
 	ID        string          `json:"id"`
 	Price     decimal.Decimal `json:"price"`
@@ -40,7 +32,7 @@ type DCAPurchase struct {
 	TradePart int             `json:"trade_part"`
 }
 
-// DCASeries represents a complete DCA series
+// DCASeries is the current DCA series state.
 type DCASeries struct {
 	Purchases         []DCAPurchase   `json:"purchases"`
 	AvgEntryPrice     decimal.Decimal `json:"avg_entry_price"`
@@ -61,7 +53,7 @@ type pricer interface {
 	GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error)
 }
 
-// DCAStrategy makes trades for specific trade pair using DCA strategy.
+// DCAStrategy executes DCA trades for a pair.
 type DCAStrategy struct {
 	pair                    entity.Pair
 	amountPercent           decimal.Decimal
@@ -81,7 +73,7 @@ type DCAStrategy struct {
 	orderCheckInterval time.Duration
 }
 
-// NewDCAStrategy creates new DCAStrategy instance.
+// NewDCAStrategy returns a configured DCA strategy.
 func NewDCAStrategy(l *zap.Logger, pair entity.Pair, amountPercent decimal.Decimal, pricer pricer, trader tradersvc,
 	maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell decimal.Decimal) (*DCAStrategy, error) {
 
@@ -161,7 +153,7 @@ func NewDCAStrategy(l *zap.Logger, pair entity.Pair, amountPercent decimal.Decim
 	}, nil
 }
 
-// saveDCASeries saves the current DCA series to WAL
+// saveDCASeries persists series state to WAL.
 func (d *DCAStrategy) saveDCASeries() error {
 	data, err := json.Marshal(d.dcaSeries)
 	if err != nil {
@@ -172,7 +164,7 @@ func (d *DCAStrategy) saveDCASeries() error {
 	return d.wal.Write(nextIndex, d.seriesKey, data)
 }
 
-// calculateIndividualBuyAmount calculates buy amount based on current quote currency balance
+// calculateIndividualBuyAmount returns quote amount per DCA leg.
 func (d *DCAStrategy) calculateIndividualBuyAmount(ctx context.Context) (decimal.Decimal, error) {
 	quoteBalance, err := d.trader.GetBalance(ctx, d.pair.To)
 	if err != nil {
@@ -201,7 +193,7 @@ func (d *DCAStrategy) markTradeProcessed(intentID string) {
 	d.dcaSeries.ProcessedTradeIDs[intentID] = true
 }
 
-// AddDCAPurchase adds a new DCA purchase to the series and saves it to WAL
+// AddDCAPurchase records a DCA purchase and updates averages.
 func (d *DCAStrategy) AddDCAPurchase(intentID string, price, amount decimal.Decimal, purchaseTime time.Time, tradePartValue int) error {
 	if intentID != "" && d.isTradeProcessed(intentID) {
 		return nil
@@ -241,7 +233,7 @@ func (d *DCAStrategy) AddDCAPurchase(intentID string, price, amount decimal.Deci
 	return d.saveDCASeries()
 }
 
-// GetDCASeries returns the current DCA series
+// GetDCASeries exposes current DCA series snapshot.
 func (d *DCAStrategy) GetDCASeries() *DCASeries {
 	return d.dcaSeries
 }
@@ -255,7 +247,7 @@ func (d *DCAStrategy) markIntentFailed(intent *tradeIntentRecord, cause error) {
 	}
 }
 
-// Trade is the main method responsible for executing trading logic based on the current price of the asset.
+// Trade performs one DCA evaluation cycle.
 func (d *DCAStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 	price, err := d.getValidatedPrice(ctx)
 	if err != nil {
@@ -282,7 +274,7 @@ func (d *DCAStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 	return nil, nil
 }
 
-// getValidatedPrice retrieves and validates the current price
+// getValidatedPrice fetches current price.
 func (d *DCAStrategy) getValidatedPrice(ctx context.Context) (decimal.Decimal, error) {
 	price, err := d.pricer.GetPrice(ctx, d.pair)
 	if err != nil {
@@ -291,8 +283,7 @@ func (d *DCAStrategy) getValidatedPrice(ctx context.Context) (decimal.Decimal, e
 	return price, nil
 }
 
-// checkWaitingForDip checks if we're waiting for a price dip and acts accordingly
-// Returns (tradeEvent, shouldReturn, error) where shouldReturn indicates if the caller should return immediately
+// checkWaitingForDip handles post-sell dip wait logic.
 func (d *DCAStrategy) checkWaitingForDip(ctx context.Context, price decimal.Decimal) (*entity.TradeEvent, bool, error) {
 	if !d.dcaSeries.WaitingForDip || d.dcaSeries.LastSellPrice.IsZero() {
 		return nil, false, nil
@@ -324,7 +315,7 @@ func (d *DCAStrategy) checkWaitingForDip(ctx context.Context, price decimal.Deci
 	return tradeEvent, true, nil
 }
 
-// checkDCABuy checks if we should perform a DCA buy
+// checkDCABuy evaluates dip-buy conditions.
 func (d *DCAStrategy) checkDCABuy(ctx context.Context, price decimal.Decimal) (*entity.TradeEvent, error) {
 	if !price.LessThan(d.dcaSeries.AvgEntryPrice) {
 		return nil, nil
@@ -345,7 +336,7 @@ func (d *DCAStrategy) checkDCABuy(ctx context.Context, price decimal.Decimal) (*
 	return d.actBuy(ctx, price)
 }
 
-// checkProfitTaking checks if we should take profit
+// checkProfitTaking evaluates profit-taking conditions.
 func (d *DCAStrategy) checkProfitTaking(ctx context.Context, price decimal.Decimal) (*entity.TradeEvent, error) {
 	if !price.GreaterThan(d.dcaSeries.AvgEntryPrice) {
 		return nil, nil
@@ -530,7 +521,7 @@ func isPercentDifferenceSignificant(currentPrice, referencePrice, thresholdPerce
 	return absPercentageDiffHundred.GreaterThanOrEqual(thresholdPercent)
 }
 
-// calculatePercentageChange calculates the percentage change between current and reference price
+// calculatePercentageChange returns (current-reference)/reference * 100.
 func calculatePercentageChange(current, reference decimal.Decimal) decimal.Decimal {
 	if reference.IsZero() {
 		return decimal.Zero
@@ -538,7 +529,7 @@ func calculatePercentageChange(current, reference decimal.Decimal) decimal.Decim
 	return current.Sub(reference).Div(reference).Mul(decimal.NewFromInt(percentageMultiplier))
 }
 
-// calculateProfit calculates profit percentage based on current price and average entry price
+// calculateProfit returns (price-entry)/entry * 100.
 func calculateProfit(price, avgEntryPrice decimal.Decimal) decimal.Decimal {
 	if avgEntryPrice.IsZero() {
 		return decimal.Zero
@@ -599,10 +590,7 @@ func (d *DCAStrategy) recalculateSeriesStats() {
 	d.dcaSeries.FirstBuyTime = d.dcaSeries.Purchases[0].Time
 }
 
-// Initialize prepares the DCA strategy:
-// 1. setting up initial price reference
-// 2. executing initial buy if needed
-// 3. reconciling any pending trade intents from WAL
+// Initialize loads WAL, reconciles intents, and performs initial buy if needed.
 func (d *DCAStrategy) Initialize(ctx context.Context) error {
 	// reconcile any pending trade intents from WAL
 	if err := d.reconcileTradeIntents(ctx); err != nil {

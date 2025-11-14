@@ -1,4 +1,4 @@
-// Package ai implements AI-based trading strategy using LLM for decision making.
+// Package ai implements an LLM-driven trading strategy.
 package ai
 
 import (
@@ -38,8 +38,7 @@ type marketDataCollector interface {
 	FetchTimeframeData(ctx context.Context, interval string, lookback int) (*entity.Timeframe, error)
 }
 
-// AIStrategy implements trading strategy using AI/LLM for decision making.
-// The strategy operates in linear margin mode and derives its position state directly from the exchange.
+// AIStrategy executes margin trades based on LLM decisions.
 type AIStrategy struct {
 	pair             entity.Pair
 	marketType       entity.MarketType
@@ -54,7 +53,7 @@ type AIStrategy struct {
 	higherLookback   int
 }
 
-// NewAIStrategy creates a new AI trading strategy instance
+// NewAIStrategy constructs an AI strategy instance.
 func NewAIStrategy(
 	logger *zap.Logger,
 	pair entity.Pair,
@@ -95,7 +94,7 @@ func NewAIStrategy(
 	}, nil
 }
 
-// Initialize prepares the AI strategy for trading
+// Initialize prepares the AI strategy for trading (log only for AI strategy)
 func (s *AIStrategy) Initialize(ctx context.Context) error {
 	s.logger.Info("Initializing AI strategy",
 		zap.String("pair", s.pair.String()))
@@ -118,7 +117,7 @@ func (s *AIStrategy) Initialize(ctx context.Context) error {
 	return nil
 }
 
-// Trade executes the AI trading logic
+// Trade performs one AI evaluation and potential action.
 func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 	// collect market data and indicators
 	primaryFrame, err := s.marketData.FetchTimeframeData(ctx, s.primaryTimeframe, s.primaryLookback)
@@ -231,7 +230,7 @@ func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 	return s.executeDecision(ctx, decision, snapshot, position)
 }
 
-// buildMarketContext constructs the market context for the LLM
+// buildMarketContext assembles data passed to LLM.
 func (s *AIStrategy) buildMarketContext(snapshot entity.MarketSnapshot, position *entity.Position) promptbuilder.MarketContext {
 	return promptbuilder.MarketContext{
 		Primary:         snapshot.PrimaryTimeFrame,
@@ -242,7 +241,7 @@ func (s *AIStrategy) buildMarketContext(snapshot entity.MarketSnapshot, position
 	}
 }
 
-// executeDecision executes the trading decision
+// executeDecision routes decision to handler.
 func (s *AIStrategy) executeDecision(
 	ctx context.Context,
 	decision *entity.Decision,
@@ -265,7 +264,7 @@ func (s *AIStrategy) executeDecision(
 	}
 }
 
-// executeBuy executes a buy/open long order
+// executeBuy opens or adds to long position.
 func (s *AIStrategy) executeBuy(
 	ctx context.Context,
 	decision *entity.Decision,
@@ -322,7 +321,7 @@ func (s *AIStrategy) executeBuy(
 	}, nil
 }
 
-// executeSell closes the current long position
+// executeSell closes long position.
 func (s *AIStrategy) executeSell(ctx context.Context, currentPrice decimal.Decimal, position *entity.Position) (*entity.TradeEvent, error) {
 	if position == nil {
 		s.logger.Warn("Received 'sell' action without an open position, treating as HOLD")
@@ -362,7 +361,7 @@ func (s *AIStrategy) executeSell(ctx context.Context, currentPrice decimal.Decim
 	return tradeEvent, nil
 }
 
-// executeOpenShort executes a short position opening order
+// executeOpenShort opens or adds to short position.
 func (s *AIStrategy) executeOpenShort(
 	ctx context.Context,
 	decision *entity.Decision,
@@ -425,7 +424,7 @@ func (s *AIStrategy) executeOpenShort(
 	}, nil
 }
 
-// executeCloseShort closes the current short position
+// executeCloseShort closes short position.
 func (s *AIStrategy) executeCloseShort(ctx context.Context, currentPrice decimal.Decimal, position *entity.Position) (*entity.TradeEvent, error) {
 	if position == nil {
 		s.logger.Warn("Received 'close_short' action without an open position")
@@ -466,7 +465,7 @@ func (s *AIStrategy) executeCloseShort(ctx context.Context, currentPrice decimal
 	return tradeEvent, nil
 }
 
-// Close performs cleanup when the strategy is shut down
+// Close logs shutdown.
 func (s *AIStrategy) Close() error {
 	s.logger.Info("Closing AI strategy")
 	return nil

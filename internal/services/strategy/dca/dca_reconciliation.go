@@ -1,8 +1,3 @@
-// Package dca implements DCA (Dollar-Cost Averaging) trading strategy.
-//
-// This file contains reconciliation/recovery logic for the DCA strategy.
-// It handles pending trade intents from WAL and ensures the strategy state is consistent
-// after restarts or crashes.
 package dca
 
 import (
@@ -14,8 +9,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// reconcileTradeIntents processes any pending trade intents from WAL.
-// This is called during Initialize to ensure the strategy state is consistent.
+// reconcileTradeIntents applies pending trade intents from WAL.
 func (d *DCAStrategy) reconcileTradeIntents(ctx context.Context) error {
 	if d.journal == nil {
 		return nil
@@ -48,7 +42,7 @@ func (d *DCAStrategy) reconcileTradeIntents(ctx context.Context) error {
 	return nil
 }
 
-// processPendingIntent processes a single pending trade intent with polling until completion.
+// processPendingIntent polls until intent execution is applied.
 func (d *DCAStrategy) processPendingIntent(ctx context.Context, intent *tradeIntentRecord) error {
 	// if already applied to series, ensure journal reflects done and return
 	if d.isTradeProcessed(intent.ID) {
@@ -112,7 +106,7 @@ func (d *DCAStrategy) processPendingIntent(ctx context.Context, intent *tradeInt
 	}
 }
 
-// applyExecutedBuy applies a buy intent to the DCA series.
+// applyExecutedBuy applies executed buy to series.
 func (d *DCAStrategy) applyExecutedBuy(intent *tradeIntentRecord) error {
 	if d.isTradeProcessed(intent.ID) {
 		return nil
@@ -134,7 +128,7 @@ func (d *DCAStrategy) applyExecutedBuy(intent *tradeIntentRecord) error {
 	return nil
 }
 
-// applyExecutedSell applies a sell intent to the DCA series.
+// applyExecutedSell applies executed sell (partial or full).
 func (d *DCAStrategy) applyExecutedSell(intent *tradeIntentRecord) error {
 	if d.isTradeProcessed(intent.ID) {
 		return nil
@@ -172,7 +166,7 @@ func (d *DCAStrategy) applyExecutedSell(intent *tradeIntentRecord) error {
 	return d.saveDCASeries()
 }
 
-// resetDCASeries resets the DCA series after a full sell.
+// resetDCASeries clears series after full sell and sets dip wait.
 func (d *DCAStrategy) resetDCASeries(sellPrice decimal.Decimal) {
 	d.l.Info("Resetting DCA series and waiting for price drop",
 		zap.String("lastSellPrice", sellPrice.String()),
