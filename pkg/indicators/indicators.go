@@ -1,6 +1,4 @@
-// Package indicators provides technical analysis indicators for trading strategies.
-// It uses the cinar/indicator library to calculate common trading indicators
-// such as EMA, MACD, RSI, and ATR from price data.
+// Package indicators provides technical analysis indicators (EMA, MACD, RSI, ATR).
 package indicators
 
 import (
@@ -14,7 +12,7 @@ import (
 	"github.com/vadiminshakov/marti/internal/entity"
 )
 
-// PriceData represents OHLC (Open, High, Low, Close) price data
+// PriceData represents OHLC (open, high, low, close) price data.
 type PriceData struct {
 	Open  decimal.Decimal
 	High  decimal.Decimal
@@ -22,7 +20,7 @@ type PriceData struct {
 	Close decimal.Decimal
 }
 
-// CalculateEMA calculates the Exponential Moving Average for the given period
+// CalculateEMA calculates the Exponential Moving Average for the given period.
 func CalculateEMA(closes []decimal.Decimal, period int) ([]decimal.Decimal, error) {
 	if len(closes) < period {
 		return nil, fmt.Errorf("not enough data points: need %d, got %d", period, len(closes))
@@ -30,23 +28,15 @@ func CalculateEMA(closes []decimal.Decimal, period int) ([]decimal.Decimal, erro
 
 	closesFloat := decimalsToFloat64(closes)
 
-	// create EMA indicator
 	ema := trend.NewEmaWithPeriod[float64](period)
-
-	// convert slice to channel
 	inputChan := helper.SliceToChan(closesFloat)
-
-	// compute EMA
 	outputChan := ema.Compute(inputChan)
-
-	// convert channel back to slice
 	emaFloat := helper.ChanToSlice(outputChan)
 
 	return float64ToDecimals(emaFloat), nil
 }
 
-// CalculateMACD calculates the MACD indicator
-// Returns MACD line values
+// CalculateMACD calculates MACD line values.
 func CalculateMACD(closes []decimal.Decimal) ([]decimal.Decimal, error) {
 	if len(closes) < 26 {
 		return nil, fmt.Errorf("not enough data points for MACD: need at least 26, got %d", len(closes))
@@ -54,29 +44,19 @@ func CalculateMACD(closes []decimal.Decimal) ([]decimal.Decimal, error) {
 
 	closesFloat := decimalsToFloat64(closes)
 
-	// create MACD indicator
 	macd := trend.NewMacd[float64]()
-
-	// convert slice to channel
 	inputChan := helper.SliceToChan(closesFloat)
-
-	// compute MACD - returns both MACD and signal channels
 	macdChan, signalChan := macd.Compute(inputChan)
-
-	// IMPORTANT: Must drain signal channel in goroutine to prevent blocking
+	// drain signal channel to prevent blocking
 	go func() {
-		for range signalChan {
-			// just drain it
-		}
+		for range signalChan {}
 	}()
-
-	// convert channel back to slice
 	macdFloat := helper.ChanToSlice(macdChan)
 
 	return float64ToDecimals(macdFloat), nil
 }
 
-// CalculateRSI calculates the Relative Strength Index for the given period
+// CalculateRSI calculates the Relative Strength Index for the given period.
 func CalculateRSI(closes []decimal.Decimal, period int) ([]decimal.Decimal, error) {
 	if len(closes) < period+1 {
 		return nil, fmt.Errorf("not enough data points for RSI: need %d, got %d", period+1, len(closes))
@@ -84,22 +64,15 @@ func CalculateRSI(closes []decimal.Decimal, period int) ([]decimal.Decimal, erro
 
 	closesFloat := decimalsToFloat64(closes)
 
-	// create RSI indicator
 	rsi := momentum.NewRsiWithPeriod[float64](period)
-
-	// convert slice to channel
 	inputChan := helper.SliceToChan(closesFloat)
-
-	// compute RSI
 	outputChan := rsi.Compute(inputChan)
-
-	// convert channel back to slice
 	rsiFloat := helper.ChanToSlice(outputChan)
 
 	return float64ToDecimals(rsiFloat), nil
 }
 
-// CalculateATR calculates the Average True Range for the given period
+// CalculateATR calculates the Average True Range for the given period.
 func CalculateATR(priceData []PriceData, period int) ([]decimal.Decimal, error) {
 	if len(priceData) < period+1 {
 		return nil, fmt.Errorf("not enough data points for ATR: need %d, got %d", period+1, len(priceData))
@@ -115,25 +88,17 @@ func CalculateATR(priceData []PriceData, period int) ([]decimal.Decimal, error) 
 		closes[i], _ = pd.Close.Float64()
 	}
 
-	// create ATR indicator
 	atr := volatility.NewAtrWithPeriod[float64](period)
-
-	// convert slices to channels
 	highChan := helper.SliceToChan(highs)
 	lowChan := helper.SliceToChan(lows)
 	closeChan := helper.SliceToChan(closes)
-
-	// compute ATR
 	outputChan := atr.Compute(highChan, lowChan, closeChan)
-
-	// convert channel back to slice
 	atrFloat := helper.ChanToSlice(outputChan)
 
 	return float64ToDecimals(atrFloat), nil
 }
 
-// CalculateAllIndicators calculates all technical indicators for the given price data
-// Returns a slice of TechnicalIndicators, one for each data point where all indicators can be calculated
+// CalculateAllIndicators calculates all indicators and returns aligned slices.
 func CalculateAllIndicators(priceData []PriceData) ([]entity.TechnicalIndicators, error) {
 	if len(priceData) < 50 {
 		return nil, fmt.Errorf("not enough data points: need at least 50, got %d", len(priceData))
@@ -179,7 +144,7 @@ func CalculateAllIndicators(priceData []PriceData) ([]entity.TechnicalIndicators
 		return nil, fmt.Errorf("failed to calculate ATR14: %w", err)
 	}
 
-	// find the minimum length (some indicators may return fewer values due to warmup period)
+	// find minimum length among indicators (handles warmup differences)
 	minLen := len(ema20)
 	if len(ema50) < minLen {
 		minLen = len(ema50)
@@ -200,8 +165,7 @@ func CalculateAllIndicators(priceData []PriceData) ([]entity.TechnicalIndicators
 		minLen = len(atr14)
 	}
 
-	// build result starting from the point where all indicators are available
-	// calculate offset for each indicator separately
+	// build aligned result applying individual offsets
 	offsetEMA20 := len(ema20) - minLen
 	offsetEMA50 := len(ema50) - minLen
 	offsetMACD := len(macd) - minLen
@@ -227,7 +191,7 @@ func CalculateAllIndicators(priceData []PriceData) ([]entity.TechnicalIndicators
 	return result, nil
 }
 
-// decimalsToFloat64 converts a slice of decimal.Decimal to []float64
+// decimalsToFloat64 converts a slice of decimal.Decimal to []float64.
 func decimalsToFloat64(decimals []decimal.Decimal) []float64 {
 	result := make([]float64, len(decimals))
 	for i, d := range decimals {
@@ -236,7 +200,7 @@ func decimalsToFloat64(decimals []decimal.Decimal) []float64 {
 	return result
 }
 
-// float64ToDecimals converts a slice of float64 to []decimal.Decimal
+// float64ToDecimals converts a slice of float64 to []decimal.Decimal.
 func float64ToDecimals(floats []float64) []decimal.Decimal {
 	result := make([]decimal.Decimal, len(floats))
 	for i, f := range floats {

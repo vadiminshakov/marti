@@ -1,5 +1,4 @@
-// Package collector provides utilities for collecting and managing market data
-// such as klines (candlestick data) from cryptocurrency exchanges.
+// Package collector provides market data collection utilities.
 package collector
 
 import (
@@ -12,17 +11,17 @@ import (
 	"github.com/vadiminshakov/marti/internal/entity"
 )
 
-// BinanceKlineProvider implements KlineProvider for Binance exchange
+// BinanceKlineProvider implements KlineProvider for Binance exchange.
 type BinanceKlineProvider struct {
 	client *binance.Client
 }
 
-// NewBinanceKlineProvider creates a new Binance kline provider
+// NewBinanceKlineProvider creates a new Binance kline provider.
 func NewBinanceKlineProvider(client *binance.Client) *BinanceKlineProvider {
 	return &BinanceKlineProvider{client: client}
 }
 
-// GetKlines fetches kline data from Binance
+// GetKlines fetches kline data from Binance.
 func (p *BinanceKlineProvider) GetKlines(ctx context.Context, pair entity.Pair, interval string, limit int) ([]entity.MarketCandle, error) {
 	symbol := pair.Symbol()
 
