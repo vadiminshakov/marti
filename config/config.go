@@ -1,5 +1,4 @@
-// Package config provides configuration management for the marti trading bot.
-// It supports both YAML file-based configuration and command-line arguments.
+// Package config provides configuration management (YAML + CLI flags) for the trading bot.
 package config
 
 import (
@@ -15,56 +14,45 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config represents the trading bot configuration parameters.
-// It contains all necessary settings for running a trading strategy
-// including exchange platform, trading pair, and strategy-specific parameters.
+// Config holds all settings for running a trading strategy instance.
 type Config struct {
-	// Platform specifies the trading exchange platform (e.g., "binance", "bybit", "simulate")
+	// Platform specifies the exchange (e.g. binance, bybit, simulate).
 	Platform string
-	// Pair represents the cryptocurrency trading pair (e.g., BTC/USDT)
+	// Pair is the trading pair (e.g. BTC/USDT).
 	Pair entity.Pair
-	// StrategyType specifies which trading strategy to use ("dca" or "ai")
+	// StrategyType selects strategy ("dca" or "ai").
 	StrategyType string
-	// AmountPercent is the percentage of quote currency balance to use for each trade (1-100)
-	// Used by DCA strategy
+	// AmountPercent is % of quote balance per trade (DCA only).
 	AmountPercent decimal.Decimal
-	// PollPriceInterval defines how often to check price updates
+	// PollPriceInterval defines price polling interval.
 	PollPriceInterval time.Duration
-	// MarketType specifies the market type for trading ("spot" or "margin")
+	// MarketType is "spot" or "margin".
 	MarketType entity.MarketType
-	// Leverage specifies the leverage multiplier for margin trading (minimum 1)
-	// NOTE: leverage > 1 can ONLY be used with MarketTypeMargin, NOT with MarketTypeSpot
-	// NOTE: Leverage parameter is NOT supported for AI strategy. AI strategy manages position sizing internally.
-	// Config validation will reject:
-	// - spot trading with leverage > 1
-	// - AI strategy with leverage parameter specified
+	// Leverage multiplier (margin only, ignored by AI; must be 1 for spot).
 	Leverage int
 
-	// DCA Strategy parameters
-	// MaxDcaTrades is the maximum number of DCA trades allowed
+	// MaxDcaTrades limits DCA trades in a series.
 	MaxDcaTrades int
-	// DcaPercentThresholdBuy is the percentage threshold for triggering buy orders
+	// DcaPercentThresholdBuy triggers buy when percent drop reached.
 	DcaPercentThresholdBuy decimal.Decimal
-	// DcaPercentThresholdSell is the percentage threshold for triggering sell orders
+	// DcaPercentThresholdSell triggers sell when percent rise reached.
 	DcaPercentThresholdSell decimal.Decimal
 
-	// AI Strategy parameters
-	// LLMAPI URL is the endpoint for the LLM service (e.g., "https://openrouter.ai/api/v1/chat/completions")
+	// LLMAPIURL endpoint for LLM service.
 	LLMAPIURL string
-	// LLMAPIKey is the API key for the LLM service
+	// LLMAPIKey API key for LLM.
 	LLMAPIKey string
-	// Model specifies which LLM model to use (e.g., "deepseek/deepseek-chat", "openai/gpt-4")
+	// Model LLM model identifier.
 	Model string
-	// PrimaryTimeframe defines the primary timeframe interval for market data (e.g., "1m", "3m", "5m", "1h")
+	// PrimaryTimeframe primary market interval (e.g. 3m, 1h).
 	PrimaryTimeframe string
-	// HigherTimeframe defines the higher timeframe interval for multi-timeframe analysis (e.g., "15m" when primary is "3m")
-	// If not specified, defaults to "15m" for 3m primary timeframe
+	// HigherTimeframe higher interval (defaults to 15m when primary 3m).
 	HigherTimeframe string
-	// LookbackPeriods defines how many historical periods to analyze
+	// LookbackPeriods number of periods for indicators.
 	LookbackPeriods int
-	// HigherLookbackPeriods defines how many historical periods to fetch/analyze for the higher timeframe
+	// HigherLookbackPeriods periods fetched for higher timeframe.
 	HigherLookbackPeriods int
-	// MaxLeverage is the maximum leverage allowed for AI strategy trades
+	// MaxLeverage upper leverage bound for AI sizing.
 	MaxLeverage int
 }
 
@@ -101,10 +89,7 @@ var (
 	piFlag         = flag.Duration("pollpriceinterval", 5*time.Minute, "poll market price interval")
 )
 
-// Get retrieves configuration settings from either YAML file or command-line arguments.
-// If a config file path is provided via the -config flag, it reads from the YAML file.
-// Otherwise, it attempts to parse configuration from command-line flags.
-// Returns a slice of Config objects to support multiple trading configurations.
+// Get loads configuration from YAML (if -config provided) or CLI flags.
 func Get() ([]Config, error) {
 	flag.Parse()
 
