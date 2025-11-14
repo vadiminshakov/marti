@@ -12,6 +12,11 @@ import (
 	"go.uber.org/zap"
 )
 
+func setupSimStateDir(t *testing.T) {
+	t.Helper()
+	t.Setenv("MARTI_SIMULATE_STATE_DIR", t.TempDir())
+}
+
 // mockSimulatePricer is a simple pricer for testing simulation
 type mockSimulatePricer struct {
 	price decimal.Decimal
@@ -22,6 +27,7 @@ func (m *mockSimulatePricer) GetPrice(ctx context.Context, pair entity.Pair) (de
 }
 
 func TestDCAStrategy_WithSimulationTrader(t *testing.T) {
+	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 
@@ -62,6 +68,7 @@ func TestDCAStrategy_WithSimulationTrader(t *testing.T) {
 }
 
 func TestDCAStrategy_SimulationApplyTrade(t *testing.T) {
+	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 

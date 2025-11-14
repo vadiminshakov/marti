@@ -11,6 +11,11 @@ import (
 	"go.uber.org/zap"
 )
 
+func setupSimStateDir(t *testing.T) {
+	t.Helper()
+	t.Setenv("MARTI_SIMULATE_STATE_DIR", t.TempDir())
+}
+
 // mockPricer is a simple mock for the Pricer interface.
 type mockPricer struct {
 	price decimal.Decimal
@@ -21,6 +26,7 @@ func (m *mockPricer) GetPrice(ctx context.Context, pair entity.Pair) (decimal.De
 }
 
 func TestSimulateTrader_NewSimulateTrader(t *testing.T) {
+	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(50000)}
@@ -40,6 +46,7 @@ func TestSimulateTrader_NewSimulateTrader(t *testing.T) {
 }
 
 func TestSimulateTrader_Buy(t *testing.T) {
+	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(50000)}
@@ -73,6 +80,7 @@ func TestSimulateTrader_Buy(t *testing.T) {
 }
 
 func TestSimulateTrader_Sell_InsufficientBalance(t *testing.T) {
+	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(50000)}
@@ -90,6 +98,7 @@ func TestSimulateTrader_Sell_InsufficientBalance(t *testing.T) {
 }
 
 func TestSimulateTrader_Buy_InsufficientBalance(t *testing.T) {
+	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(50000)}
@@ -104,6 +113,7 @@ func TestSimulateTrader_Buy_InsufficientBalance(t *testing.T) {
 }
 
 func TestSimulateTrader_OrderExecuted_NotFound(t *testing.T) {
+	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{}
@@ -118,6 +128,7 @@ func TestSimulateTrader_OrderExecuted_NotFound(t *testing.T) {
 }
 
 func TestSimulateTrader_FullTradeCycle(t *testing.T) {
+	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{}
@@ -168,6 +179,7 @@ func TestSimulateTrader_FullTradeCycle(t *testing.T) {
 }
 
 func TestSimulateTrader_MarginTrade_ReleasesMarginAndPnl_OnLoss(t *testing.T) {
+	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(100)}
@@ -194,6 +206,7 @@ func TestSimulateTrader_MarginTrade_ReleasesMarginAndPnl_OnLoss(t *testing.T) {
 }
 
 func TestSimulateTrader_MarginTrade_ReleasesMarginAndPnl_OnProfit(t *testing.T) {
+	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(100)}
@@ -220,6 +233,7 @@ func TestSimulateTrader_MarginTrade_ReleasesMarginAndPnl_OnProfit(t *testing.T) 
 }
 
 func TestSimulateTrader_ShortTrade_ReleasesMarginAndPnl_OnProfit(t *testing.T) {
+	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(100)}
@@ -260,6 +274,7 @@ func TestSimulateTrader_ShortTrade_ReleasesMarginAndPnl_OnProfit(t *testing.T) {
 }
 
 func TestSimulateTrader_ShortTrade_ReleasesMarginAndPnl_OnLoss(t *testing.T) {
+	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(100)}
@@ -286,6 +301,7 @@ func TestSimulateTrader_ShortTrade_ReleasesMarginAndPnl_OnLoss(t *testing.T) {
 }
 
 func TestSimulateTrader_ShortTrade_NotAllowedInSpot(t *testing.T) {
+	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(100)}

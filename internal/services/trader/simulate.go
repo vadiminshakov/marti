@@ -9,6 +9,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/internal/entity"
+	"github.com/vadiminshakov/marti/internal/storage/simstate"
 	"go.uber.org/zap"
 )
 
@@ -32,6 +33,7 @@ type SimulateTrader struct {
 	// for open margin positions so that we can release the same amount plus
 	// realised PnL when the position is unwound.
 	marginUsed decimal.Decimal
+	stateStore *simstate.Store
 }
 
 type orderInfo struct {
@@ -51,13 +53,11 @@ func NewSimulateTrader(pair entity.Pair, marketType entity.MarketType, leverage 
 		leverage = 1
 	}
 	wallet := map[string]decimal.Decimal{pair.From: decimal.Zero, pair.To: decimal.NewFromInt(10000)}
-	logger.Info("simulate init",
-		zap.String("pair", pair.String()),
-		zap.String("base", wallet[pair.From].String()),
-		zap.String("quote", wallet[pair.To].String()),
-		zap.String("market_type", string(marketType)),
-		zap.Int("leverage", leverage))
-	return &SimulateTrader{
+	stateStore, err := simstate.NewStore(pair)
+	if err != nil {
+		return nil, errors.Wrap(err, "init simulate state store")
+	}
+	trader := &SimulateTrader{
 		pair:       pair,
 		logger:     logger,
 		wallet:     wallet,
@@ -66,7 +66,18 @@ func NewSimulateTrader(pair entity.Pair, marketType entity.MarketType, leverage 
 		leverage:   leverage,
 		marketType: marketType,
 		marginUsed: decimal.Zero,
-	}, nil
+		stateStore: stateStore,
+	}
+	if err := trader.restoreState(); err != nil {
+		logger.Warn("failed to restore simulate state", zap.Error(err))
+	}
+	logger.Info("simulate init",
+		zap.String("pair", pair.String()),
+		zap.String("base", trader.wallet[pair.From].String()),
+		zap.String("quote", trader.wallet[pair.To].String()),
+		zap.String("market_type", string(marketType)),
+		zap.Int("leverage", leverage))
+	return trader, nil
 }
 
 // ExecuteAction executes a trading action.
@@ -134,6 +145,7 @@ func (t *SimulateTrader) SetPositionStops(ctx context.Context, pair entity.Pair,
 	} else {
 		t.position.StopLoss = decimal.Zero
 	}
+	t.persist()
 	return nil
 }
 
@@ -161,11 +173,17 @@ func (t *SimulateTrader) buy(ctx context.Context, amount decimal.Decimal, id str
 		return errors.Wrap(err, "failed to get price for simulated buy")
 	}
 
+	var actionErr error
 	if t.position != nil && t.position.Side == entity.PositionSideShort {
-		return t.closeShortLocked(amount, id, price)
+		actionErr = t.closeShort(amount, id, price)
+	} else {
+		actionErr = t.openOrAddLong(amount, id, price)
+	}
+	if actionErr == nil {
+		t.persist()
 	}
 
-	return t.openOrAddLongLocked(amount, id, price)
+	return actionErr
 }
 
 // sell simulates a market sell order, fetching the price from its pricer.
@@ -183,18 +201,21 @@ func (t *SimulateTrader) sell(ctx context.Context, amount decimal.Decimal, id st
 		return errors.Wrap(err, "failed to get price for simulated sell")
 	}
 
+	var actionErr error
 	if t.position != nil && t.position.Side == entity.PositionSideLong {
-		return t.closeLongLocked(amount, id, price)
+		actionErr = t.closeLong(amount, id, price)
+	} else if t.marketType == entity.MarketTypeMargin {
+		actionErr = t.openOrAddShort(amount, id, price)
+	} else {
+		actionErr = t.sellSpotWithoutPosition(amount, id, price)
 	}
-
-	if t.marketType == entity.MarketTypeMargin {
-		return t.openOrAddShortLocked(amount, id, price)
+	if actionErr == nil {
+		t.persist()
 	}
-
-	return t.sellSpotWithoutPosition(amount, id, price)
+	return actionErr
 }
 
-func (t *SimulateTrader) openOrAddLongLocked(amount decimal.Decimal, id string, price decimal.Decimal) error {
+func (t *SimulateTrader) openOrAddLong(amount decimal.Decimal, id string, price decimal.Decimal) error {
 	quoteAmount := amount.Mul(price)
 	requiredQuote := t.requiredQuoteAmount(quoteAmount)
 
@@ -240,7 +261,7 @@ func (t *SimulateTrader) openOrAddLongLocked(amount decimal.Decimal, id string, 
 	return nil
 }
 
-func (t *SimulateTrader) closeLongLocked(amount decimal.Decimal, id string, price decimal.Decimal) error {
+func (t *SimulateTrader) closeLong(amount decimal.Decimal, id string, price decimal.Decimal) error {
 	if t.position == nil || t.position.Side != entity.PositionSideLong {
 		return fmt.Errorf("no long position to close")
 	}
@@ -301,7 +322,7 @@ func (t *SimulateTrader) closeLongLocked(amount decimal.Decimal, id string, pric
 	return nil
 }
 
-func (t *SimulateTrader) openOrAddShortLocked(amount decimal.Decimal, id string, price decimal.Decimal) error {
+func (t *SimulateTrader) openOrAddShort(amount decimal.Decimal, id string, price decimal.Decimal) error {
 	if t.marketType != entity.MarketTypeMargin {
 		return fmt.Errorf("short positions are supported only in margin trading mode")
 	}
@@ -348,7 +369,7 @@ func (t *SimulateTrader) openOrAddShortLocked(amount decimal.Decimal, id string,
 	return nil
 }
 
-func (t *SimulateTrader) closeShortLocked(amount decimal.Decimal, id string, price decimal.Decimal) error {
+func (t *SimulateTrader) closeShort(amount decimal.Decimal, id string, price decimal.Decimal) error {
 	if t.position == nil || t.position.Side != entity.PositionSideShort {
 		return fmt.Errorf("no short position to close")
 	}
@@ -426,4 +447,77 @@ func (t *SimulateTrader) requiredQuoteAmount(notional decimal.Decimal) decimal.D
 		leverage = 1
 	}
 	return notional.Div(decimal.NewFromInt(int64(leverage)))
+}
+
+func (t *SimulateTrader) restoreState() error {
+	if t.stateStore == nil {
+		return nil
+	}
+	state, err := t.stateStore.Load()
+	if err != nil || state == nil {
+		return err
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	wallet := make(map[string]decimal.Decimal, len(t.wallet)+len(state.Wallet))
+	for currency, balance := range t.wallet {
+		wallet[currency] = balance
+	}
+	for currency, balanceStr := range state.Wallet {
+		if balanceStr == "" {
+			wallet[currency] = decimal.Zero
+			continue
+		}
+		parsed, err := decimal.NewFromString(balanceStr)
+		if err != nil {
+			return errors.Wrapf(err, "decode %s balance", currency)
+		}
+		wallet[currency] = parsed
+	}
+	t.wallet = wallet
+
+	margin := decimal.Zero
+	if state.MarginUsed != "" {
+		margin, err = decimal.NewFromString(state.MarginUsed)
+		if err != nil {
+			return errors.Wrap(err, "decode margin used")
+		}
+	}
+	t.marginUsed = margin
+
+	if state.Position != nil {
+		pos, err := state.Position.ToPosition()
+		if err != nil {
+			return err
+		}
+		t.position = pos
+	} else {
+		t.position = nil
+	}
+
+	return nil
+}
+
+func (t *SimulateTrader) persist() {
+	if t.stateStore == nil {
+		return
+	}
+
+	state := simstate.State{
+		Pair:       t.pair.String(),
+		Wallet:     make(map[string]string, len(t.wallet)),
+		MarginUsed: t.marginUsed.String(),
+	}
+	for currency, balance := range t.wallet {
+		state.Wallet[currency] = balance.String()
+	}
+	if t.position != nil {
+		state.Position = simstate.NewStoredPosition(t.position)
+	}
+
+	if err := t.stateStore.Save(state); err != nil {
+		t.logger.Warn("failed to persist simulate state", zap.Error(err))
+	}
 }
