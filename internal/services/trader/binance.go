@@ -263,19 +263,19 @@ func (t *BinanceTrader) GetPosition(ctx context.Context, pair entity.Pair) (*ent
 
 				if totalQty.GreaterThan(decimal.Zero) {
 					avgCost := totalCost.Div(totalQty)
-							totalCost = totalCost.Sub(avgCost.Mul(reducedQty))
-						}
+					totalCost = totalCost.Sub(avgCost.Mul(reducedQty))
+				}
 
-						remainingQty := qty.Sub(reducedQty)
-						if remainingQty.GreaterThan(decimal.Zero) {
-							// flipping to short
-							totalCost = price.Mul(remainingQty)
-							entryTime = tradeTime
-						}
-					} else {
-						// adding to short position
-						totalCost = totalCost.Add(price.Mul(qty))
-					}
+				remainingQty := qty.Sub(reducedQty)
+				if remainingQty.GreaterThan(decimal.Zero) {
+					// flipping to short
+					totalCost = price.Mul(remainingQty)
+					entryTime = tradeTime
+				}
+			} else {
+				// adding to short position
+				totalCost = totalCost.Add(price.Mul(qty))
+			}
 
 			totalQty = totalQty.Sub(qty)
 
