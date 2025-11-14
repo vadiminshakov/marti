@@ -1,6 +1,6 @@
 # DCA strategy on spot market
 - pair: BTC_USDT
-  platform: binance
+  platform: binance # (bybit, hyperliquid, simulate)
   strategy: dca
   # Market type: "spot" for spot trading or "margin" for margin/futures trading (default: spot)
   market_type: spot
@@ -24,7 +24,7 @@
   strategy: dca
   market_type: spot
   leverage: 1
-  amount: 10
+  amount: 20
   pollpriceinterval: 2s
   max_dca_trades: 8
   dca_percent_threshold_buy: 1
