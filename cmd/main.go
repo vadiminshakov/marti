@@ -1,5 +1,5 @@
 // Command marti runs the cryptocurrency trading bot with DCA strategy.
-// It supports multiple exchanges (Binance, Bybit) and can be configured
+// It supports multiple exchanges (Binance, Bybit, Hyperliquid) and can be configured
 // via YAML configuration files or command-line arguments.
 //
 // Usage:
@@ -11,6 +11,7 @@
 //
 //	For Binance: BINANCE_API_KEY, BINANCE_API_SECRET
 //	For Bybit: BYBIT_API_KEY, BYBIT_API_SECRET
+//	For Hyperliquid: HYPERLIQ_PRIVATE_KEY (hex), optional HYPERLIQ_API_URL
 package main
 
 import (
@@ -96,6 +97,17 @@ func main() {
 			logger.Info("Using simulation mode - no real trades will be executed",
 				zap.String("pair", cfg.Pair.String()))
 			client = clients.NewSimulateClient()
+		case "hyperliquid":
+			pk := os.Getenv("HYPERLIQ_PRIVATE_KEY")
+			if pk == "" {
+				logger.Fatal("Missing Hyperliquid private key", zap.String("platform", cfg.Platform))
+			}
+			baseURL := os.Getenv("HYPERLIQ_API_URL") // optional; defaults to mainnet
+			hl, err := clients.NewHyperliquidClient(pk, baseURL)
+			if err != nil {
+				logger.Fatal("Failed to init Hyperliquid client", zap.Error(err))
+			}
+			client = hl
 		default:
 			logger.Fatal("Unsupported platform", zap.String("platform", cfg.Platform))
 		}

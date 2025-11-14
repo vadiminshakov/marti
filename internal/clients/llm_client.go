@@ -65,12 +65,12 @@ type message struct {
 
 // chatResponse represents the response structure from OpenAI-compatible APIs
 type chatResponse struct {
-	ID      string   `json:"id"`
-	Object  string   `json:"object"`
-	Created int64    `json:"created"`
-	Model   string   `json:"model"`
-	Choices []choice `json:"choices"`
-	Usage   usage    `json:"usage"`
+	ID      string    `json:"id"`
+	Object  string    `json:"object"`
+	Created int64     `json:"created"`
+	Model   string    `json:"model"`
+	Choices []choice  `json:"choices"`
+	Usage   usage     `json:"usage"`
 	Error   *apiError `json:"error,omitempty"`
 }
 

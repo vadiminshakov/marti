@@ -78,6 +78,19 @@ func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.
 		}
 		return traderInstance, pricerInstance, nil
 
+	case "hyperliquid":
+		hlClient, ok := client.(*clients.HyperliquidClient)
+		if !ok || hlClient == nil {
+			return nil, nil, fmt.Errorf("hyperliquid platform expects *clients.HyperliquidClient, got %T", client)
+		}
+
+		tr, err := trader.NewHyperliquidTrader(hlClient.Exchange(), hlClient.AccountAddress(), pair, marketType, leverage)
+		if err != nil {
+			return nil, nil, errors.Wrap(err, "failed to create HyperliquidTrader")
+		}
+		pr := pricer.NewHyperliquidPricer(hlClient.Exchange().Info())
+		return tr, pr, nil
+
 	default:
 		return nil, nil, fmt.Errorf("unsupported platform: %s", platform)
 	}
@@ -146,6 +159,9 @@ func createAIStrategy(
 	tradeSvc traderService,
 	client any,
 ) (TradingStrategy, error) {
+	type aiStrategyKlineProvider interface {
+		GetKlines(ctx context.Context, pair entity.Pair, interval string, limit int) ([]entity.MarketCandle, error)
+	}
 	// create PromptBuilder
 	promptBuilder := promptbuilder.NewPromptBuilder(conf.Pair, logger)
 
@@ -153,7 +169,7 @@ func createAIStrategy(
 	llmClient := clients.NewOpenAICompatibleClient(conf.LLMAPIURL, conf.LLMAPIKey, conf.Model, promptBuilder)
 
 	// create kline provider based on platform
-	var klineProvider collector.KlineProvider
+	var klineProvider aiStrategyKlineProvider
 	switch conf.Platform {
 	case "binance":
 		binanceClient, ok := client.(*binance.Client)
@@ -173,6 +189,12 @@ func createAIStrategy(
 			return nil, fmt.Errorf("simulate platform expects *clients.SimulateClient for AI strategy")
 		}
 		klineProvider = collector.NewBinanceKlineProvider(simulateClient.GetBinanceClient())
+	case "hyperliquid":
+		hlClient, ok := client.(*clients.HyperliquidClient)
+		if !ok {
+			return nil, fmt.Errorf("hyperliquid platform expects *clients.HyperliquidClient for AI strategy")
+		}
+		klineProvider = collector.NewHyperliquidKlineProvider(hlClient.Exchange().Info())
 	default:
 		return nil, fmt.Errorf("unsupported platform for AI strategy: %s", conf.Platform)
 	}
