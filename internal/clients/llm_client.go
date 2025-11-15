@@ -15,8 +15,8 @@ import (
 
 const (
 	defaultTimeout    = 60 * time.Second
-	defaultMaxRetries = 3
-	defaultRetryDelay = 2 * time.Second
+	defaultMaxRetries = 5
+	defaultRetryDelay = 5 * time.Second
 )
 
 // LLMClient defines the interface for interacting with LLM services
