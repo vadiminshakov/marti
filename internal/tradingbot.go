@@ -52,7 +52,11 @@ func NewTradingBot(logger *zap.Logger, conf config.Config, client any, balanceSt
 		leverage = conf.MaxLeverage
 	}
 
-	currentTrader, currentPricer, err := createTraderAndPricer(conf.Platform, conf.Pair, conf.MarketType, leverage, client)
+	stateKey := ""
+	if conf.Platform == "simulate" {
+		stateKey = conf.SimulationStateKey()
+	}
+	currentTrader, currentPricer, err := createTraderAndPricer(conf.Platform, conf.Pair, conf.MarketType, leverage, client, stateKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create trader and pricer")
 	}

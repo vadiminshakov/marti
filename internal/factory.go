@@ -33,7 +33,7 @@ type Pricer interface {
 }
 
 // createTraderAndPricer creates trader and pricer instances based on platform
-func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.MarketType, leverage int, client any) (traderService, Pricer, error) {
+func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.MarketType, leverage int, client any, stateKey string) (traderService, Pricer, error) {
 	switch platform {
 	case "binance":
 		binanceClient, ok := client.(*binance.Client)
@@ -72,7 +72,7 @@ func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.
 		// use logger from context or create a new one
 		logger := zap.L()
 		pricerInstance := pricer.NewSimulatePricer(simulateClient.GetBinanceClient())
-		traderInstance, err := trader.NewSimulateTrader(pair, marketType, leverage, logger, pricerInstance)
+		traderInstance, err := trader.NewSimulateTrader(pair, marketType, leverage, logger, pricerInstance, stateKey)
 		if err != nil {
 			return nil, nil, errors.Wrap(err, "failed to create SimulateTrader")
 		}

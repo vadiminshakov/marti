@@ -56,6 +56,30 @@ type Config struct {
 	MaxLeverage int
 }
 
+// SimulationStateKey returns a stable identifier used for namespacing simulator
+// persistence files. It combines the platform, pair, strategy, market type,
+// and (for AI strategies) the model so multiple bots on the same pair do not
+// overwrite each other's local state.
+func (c Config) SimulationStateKey() string {
+	var parts []string
+	if c.Platform != "" {
+		parts = append(parts, strings.ToLower(c.Platform))
+	}
+	if pair := c.Pair.String(); pair != "" {
+		parts = append(parts, strings.ToLower(pair))
+	}
+	if c.StrategyType != "" {
+		parts = append(parts, strings.ToLower(c.StrategyType))
+	}
+	if mt := string(c.MarketType); mt != "" {
+		parts = append(parts, strings.ToLower(mt))
+	}
+	if c.StrategyType == "ai" && c.Model != "" {
+		parts = append(parts, sanitizeStateKeyComponent(c.Model))
+	}
+	return strings.Join(parts, "__")
+}
+
 type ConfigTmp struct {
 	Pair              string        `yaml:"pair"`
 	Platform          string        `yaml:"platform"`
@@ -335,4 +359,29 @@ func getPairFromString(pairStr string) (entity.Pair, error) {
 		return entity.Pair{}, fmt.Errorf("invalid pair param")
 	}
 	return entity.Pair{From: pairElements[0], To: pairElements[1]}, nil
+}
+
+func sanitizeStateKeyComponent(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" {
+		return ""
+	}
+	var b strings.Builder
+	prevUnderscore := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prevUnderscore = false
+			continue
+		}
+		if !prevUnderscore {
+			b.WriteByte('_')
+			prevUnderscore = true
+		}
+	}
+	result := strings.Trim(b.String(), "_")
+	if result == "" {
+		return "default"
+	}
+	return result
 }

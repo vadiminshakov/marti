@@ -31,7 +31,7 @@ func TestSimulateTrader_NewSimulateTrader(t *testing.T) {
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(50000)}
 
-	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer)
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, "")
 	require.NoError(t, err)
 	require.NotNil(t, trader)
 	assert.NotNil(t, trader.pricer)
@@ -50,7 +50,7 @@ func TestSimulateTrader_Buy(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(50000)}
-	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer)
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, "")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -84,7 +84,7 @@ func TestSimulateTrader_Sell_InsufficientBalance(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(50000)}
-	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer)
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, "")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -102,7 +102,7 @@ func TestSimulateTrader_Buy_InsufficientBalance(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(50000)}
-	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer)
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, "")
 	require.NoError(t, err)
 
 	// try to buy more than we can afford
@@ -117,7 +117,7 @@ func TestSimulateTrader_OrderExecuted_NotFound(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{}
-	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer)
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, "")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -132,7 +132,7 @@ func TestSimulateTrader_FullTradeCycle(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{}
-	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer)
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, "")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -183,7 +183,7 @@ func TestSimulateTrader_MarginTrade_ReleasesMarginAndPnl_OnLoss(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(100)}
-	trader, err := NewSimulateTrader(pair, entity.MarketTypeMargin, 10, logger, pricer)
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeMargin, 10, logger, pricer, "")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -210,7 +210,7 @@ func TestSimulateTrader_MarginTrade_ReleasesMarginAndPnl_OnProfit(t *testing.T) 
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(100)}
-	trader, err := NewSimulateTrader(pair, entity.MarketTypeMargin, 5, logger, pricer)
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeMargin, 5, logger, pricer, "")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -237,7 +237,7 @@ func TestSimulateTrader_ShortTrade_ReleasesMarginAndPnl_OnProfit(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(100)}
-	trader, err := NewSimulateTrader(pair, entity.MarketTypeMargin, 5, logger, pricer)
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeMargin, 5, logger, pricer, "")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -278,7 +278,7 @@ func TestSimulateTrader_ShortTrade_ReleasesMarginAndPnl_OnLoss(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(100)}
-	trader, err := NewSimulateTrader(pair, entity.MarketTypeMargin, 5, logger, pricer)
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeMargin, 5, logger, pricer, "")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -305,7 +305,7 @@ func TestSimulateTrader_ShortTrade_NotAllowedInSpot(t *testing.T) {
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 	pricer := &mockPricer{price: decimal.NewFromInt(100)}
-	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer)
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, "")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -313,4 +313,33 @@ func TestSimulateTrader_ShortTrade_NotAllowedInSpot(t *testing.T) {
 	err = trader.ExecuteAction(ctx, entity.ActionOpenShort, decimal.NewFromInt(1), "short-open")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "margin")
+}
+
+func TestSimulateTrader_StateIsolationByKey(t *testing.T) {
+	setupSimStateDir(t)
+	ctx := context.Background()
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+	logger := zap.NewNop()
+	pricer := &mockPricer{price: decimal.NewFromInt(10000)}
+
+	traderA, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, "model_a")
+	require.NoError(t, err)
+	traderB, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, "model_b")
+	require.NoError(t, err)
+
+	require.NoError(t, traderA.ExecuteAction(ctx, entity.ActionOpenLong, decimal.NewFromFloat(0.1), "a1"))
+	require.NoError(t, traderB.ExecuteAction(ctx, entity.ActionOpenLong, decimal.NewFromFloat(0.2), "b1"))
+
+	traderA2, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, "model_a")
+	require.NoError(t, err)
+	traderB2, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, "model_b")
+	require.NoError(t, err)
+
+	balanceA, err := traderA2.GetBalance(ctx, "BTC")
+	require.NoError(t, err)
+	balanceB, err := traderB2.GetBalance(ctx, "BTC")
+	require.NoError(t, err)
+
+	assert.True(t, balanceA.Equal(decimal.NewFromFloat(0.1)))
+	assert.True(t, balanceB.Equal(decimal.NewFromFloat(0.2)))
 }

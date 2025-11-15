@@ -42,7 +42,7 @@ type orderInfo struct {
 }
 
 // NewSimulateTrader creates a new SimulateTrader.
-func NewSimulateTrader(pair entity.Pair, marketType entity.MarketType, leverage int, logger *zap.Logger, pricer Pricer) (*SimulateTrader, error) {
+func NewSimulateTrader(pair entity.Pair, marketType entity.MarketType, leverage int, logger *zap.Logger, pricer Pricer, stateKey string) (*SimulateTrader, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -53,7 +53,7 @@ func NewSimulateTrader(pair entity.Pair, marketType entity.MarketType, leverage 
 		leverage = 1
 	}
 	wallet := map[string]decimal.Decimal{pair.From: decimal.Zero, pair.To: decimal.NewFromInt(10000)}
-	stateStore, err := simstate.NewStore(pair)
+	stateStore, err := simstate.NewStore(pair, stateKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "init simulate state store")
 	}
