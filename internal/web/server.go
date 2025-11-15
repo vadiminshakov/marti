@@ -216,6 +216,38 @@ const indexHTML = `<!DOCTYPE html>
       grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));
       gap:1.5rem;
     }
+    .overview {
+      display:flex;
+      flex-direction:column;
+      gap:1rem;
+    }
+    .chart-card {
+      border:3px solid var(--ink);
+      padding:1.5rem;
+      background:#fff;
+      box-shadow:10px 10px 0 rgba(0,0,0,.18);
+      display:flex;
+      flex-direction:column;
+      gap:1rem;
+    }
+    .chart-card-header {
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:.5rem;
+    }
+    .chart-title {
+      font-family:'Press Start 2P','Space Mono',monospace;
+      letter-spacing:.08em;
+      margin:0;
+      font-size:.9rem;
+    }
+    .global-chart {
+      width:100%;
+      border:2px solid var(--ink);
+      background:#fff;
+      image-rendering:pixelated;
+    }
     .pair-card {
       border:3px solid var(--ink);
       padding:1.5rem;
@@ -236,12 +268,6 @@ const indexHTML = `<!DOCTYPE html>
       font-size:.9rem;
       letter-spacing:.08em;
       margin:0;
-    }
-    .pair-chart {
-      width:100%;
-      border:2px solid var(--ink);
-      background:#fff;
-      image-rendering:pixelated;
     }
     .equity {
       border:3px solid var(--ink);
@@ -309,6 +335,15 @@ const indexHTML = `<!DOCTYPE html>
       </div>
       <div id="sse-status" class="status">Connecting…</div>
     </header>
+    <section class="overview">
+      <div class="chart-card">
+        <div class="chart-card-header">
+          <h2 class="chart-title">All Pairs Funds</h2>
+          <span id="chartUpdated" class="pill muted">Waiting…</span>
+        </div>
+        <canvas id="globalChart" class="global-chart" height="320"></canvas>
+      </div>
+    </section>
     <section id="pairs" class="pair-grid">
       <div id="emptyState" class="empty-state">Waiting for balance snapshots…</div>
     </section>
@@ -317,11 +352,28 @@ const indexHTML = `<!DOCTYPE html>
 const statusEl = document.getElementById('sse-status');
 const pairContainer = document.getElementById('pairs');
 const emptyState = document.getElementById('emptyState');
+const chartUpdatedEl = document.getElementById('chartUpdated');
+const chartCanvas = document.getElementById('globalChart');
 const pairViews = new Map();
+const datasetByPair = new Map();
+const colorPalette = [
+  { line:'#111111', fill:'rgba(17,17,17,0.12)' },
+  { line:'#d7263d', fill:'rgba(215,38,61,0.15)' },
+  { line:'#1b9aaa', fill:'rgba(27,154,170,0.15)' },
+  { line:'#ff7f11', fill:'rgba(255,127,17,0.18)' },
+  { line:'#3c91e6', fill:'rgba(60,145,230,0.15)' },
+  { line:'#8e3b46', fill:'rgba(142,59,70,0.15)' },
+  { line:'#2e282a', fill:'rgba(46,40,42,0.18)' }
+];
+let colorIndex = 0;
 
 Chart.defaults.font.family = "'Space Mono', 'JetBrains Mono', monospace";
 Chart.defaults.font.size = 11;
 Chart.defaults.color = '#111111';
+
+const chartCtx = chartCanvas.getContext('2d');
+chartCtx.imageSmoothingEnabled = false;
+const globalChart = buildGlobalChart(chartCtx);
 
 const parseNum = (value) => {
   const num = parseFloat(value);
@@ -335,18 +387,9 @@ const formatTs = (ts) => {
   return date.toLocaleTimeString([], { hour12:false });
 };
 
-const buildChart = (ctx, pairLabel) => new Chart(ctx, {
+const buildGlobalChart = (ctx) => new Chart(ctx, {
   type: 'line',
-  data: { labels: [], datasets: [{
-    label: pairLabel + ' Funds',
-    data: [],
-    borderColor: '#111111',
-    backgroundColor: 'rgba(0,0,0,0.08)',
-    borderWidth: 2,
-    pointRadius: 0,
-    tension: 0.15,
-    fill: true
-  }]},
+  data: { labels: [], datasets: [] },
   options: {
     animation: false,
     responsive: true,
@@ -363,18 +406,72 @@ const buildChart = (ctx, pairLabel) => new Chart(ctx, {
     },
     elements:{ line:{ borderCapStyle:'square' } },
     plugins:{
-      legend:{ display:false },
+      legend:{ display:true, labels:{ usePointStyle:true, boxWidth:12 } },
       tooltip:{
         backgroundColor:'#ffffff',
         borderColor:'#111111',
         borderWidth:1,
         titleColor:'#111111',
         bodyColor:'#111111',
-        displayColors:false
+        displayColors:true
       }
     }
   }
 });
+
+const nextColor = () => {
+  const color = colorPalette[colorIndex % colorPalette.length];
+  colorIndex += 1;
+  return color;
+};
+
+function ensureDataset(pair){
+  const key = pair || '—';
+  if(datasetByPair.has(key)){
+    return datasetByPair.get(key);
+  }
+  const palette = nextColor();
+  const dataset = {
+    label: key,
+    data: new Array(globalChart.data.labels.length).fill(null),
+    borderColor: palette.line,
+    backgroundColor: palette.fill,
+    borderWidth: 2,
+    pointRadius: 0,
+    tension: 0.15,
+    fill: false
+  };
+  globalChart.data.datasets.push(dataset);
+  datasetByPair.set(key, dataset);
+  return dataset;
+}
+
+function appendGlobalLabel(label){
+  globalChart.data.labels.push(label);
+  globalChart.data.datasets.forEach((dataset) => {
+    dataset.data.push(null);
+  });
+  if(globalChart.data.labels.length > 600){
+    globalChart.data.labels.shift();
+    globalChart.data.datasets.forEach((dataset) => {
+      dataset.data.shift();
+    });
+  }
+}
+
+function updateGlobalChart(pair, total, ts){
+  const tsDate = ts ? new Date(ts) : new Date();
+  const labelDate = Number.isNaN(tsDate.getTime()) ? new Date() : tsDate;
+  const label = labelDate.toLocaleTimeString([], { hour12:false });
+  appendGlobalLabel(label);
+  const dataset = ensureDataset(pair);
+  dataset.data[dataset.data.length - 1] = total.numeric;
+  if(chartUpdatedEl){
+    chartUpdatedEl.textContent = label;
+    chartUpdatedEl.classList.remove('muted');
+  }
+  globalChart.update('none');
+}
 
 function ensurePairView(pair){
   const safePair = pair || '—';
@@ -399,13 +496,6 @@ function ensurePairView(pair){
   updated.textContent = 'Waiting…';
   header.append(title, updated);
 
-  const canvas = document.createElement('canvas');
-  canvas.height = 260;
-  canvas.className = 'pair-chart';
-  const ctx = canvas.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
-  const chart = buildChart(ctx, safePair);
-
   const equity = document.createElement('div');
   equity.className = 'equity';
   const label = document.createElement('div');
@@ -428,11 +518,10 @@ function ensurePairView(pair){
   meta.append(baseEl, quoteEl, priceEl);
   equity.append(label, totalValue, meta);
 
-  card.append(header, canvas, equity);
+  card.append(header, equity);
   pairContainer.appendChild(card);
 
   const view = {
-    chart,
     totalEl: totalValue,
     updatedEl: updated,
     baseEl,
@@ -463,24 +552,12 @@ function renderNumbers(view, payload, total){
   view.updatedEl.textContent = formatTs(payload.ts);
 }
 
-function updateChart(view, payload, total){
-  const ts = payload.ts ? new Date(payload.ts) : new Date();
-  const labelSource = Number.isNaN(ts.getTime()) ? new Date() : ts;
-  const label = labelSource.toLocaleTimeString([], { hour12:false });
-  view.chart.data.labels.push(label);
-  view.chart.data.datasets[0].data.push(total.numeric);
-  if(view.chart.data.labels.length > 600){
-    view.chart.data.labels.shift();
-    view.chart.data.datasets[0].data.shift();
-  }
-  view.chart.update('none');
-}
-
 function handlePayload(payload){
-  const view = ensurePairView(payload.pair);
+  const pairLabel = payload.pair || '—';
+  const view = ensurePairView(pairLabel);
   const total = deriveTotal(payload);
   renderNumbers(view, payload, total);
-  updateChart(view, payload, total);
+  updateGlobalChart(pairLabel, total, payload.ts);
 }
 
 function connectSSE(){

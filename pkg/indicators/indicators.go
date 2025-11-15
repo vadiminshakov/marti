@@ -49,7 +49,8 @@ func CalculateMACD(closes []decimal.Decimal) ([]decimal.Decimal, error) {
 	macdChan, signalChan := macd.Compute(inputChan)
 	// drain signal channel to prevent blocking
 	go func() {
-		for range signalChan {}
+		for range signalChan {
+		}
 	}()
 	macdFloat := helper.ChanToSlice(macdChan)
 

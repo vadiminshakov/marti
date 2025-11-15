@@ -11,12 +11,12 @@ import (
 	"github.com/vadiminshakov/marti/internal/entity"
 )
 
-// HyperliquidKlineProvider implements KlineProvider for Hyperliquid exchange
+// HyperliquidKlineProvider implements KlineProvider for Hyperliquid exchange.
 type HyperliquidKlineProvider struct {
 	info *hyperliquid.Info
 }
 
-// NewHyperliquidKlineProvider creates a new Hyperliquid kline provider
+// NewHyperliquidKlineProvider creates a new Hyperliquid kline provider.
 func NewHyperliquidKlineProvider(info *hyperliquid.Info) *HyperliquidKlineProvider {
 	return &HyperliquidKlineProvider{info: info}
 }
@@ -51,7 +51,7 @@ func parseIntervalToDuration(interval string) (time.Duration, error) {
 	}
 }
 
-// GetKlines fetches kline data from Hyperliquid
+// GetKlines fetches kline data from Hyperliquid.
 func (p *HyperliquidKlineProvider) GetKlines(ctx context.Context, pair entity.Pair, interval string, limit int) ([]entity.MarketCandle, error) {
 	if p.info == nil {
 		return nil, fmt.Errorf("hyperliquid info is nil")
