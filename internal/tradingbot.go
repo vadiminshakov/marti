@@ -111,7 +111,7 @@ func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
 		select {
 		case <-ctx.Done():
 			logger.Info("Context done, stopping trading bot run loop")
-			return ctx.Err()
+			return errors.Wrap(ctx.Err(), "context done")
 		case <-ticker.C:
 			tradeEvent, err := b.tradingStrategy.Trade(ctx)
 			if err != nil {
@@ -178,9 +178,9 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 	var activePosition string
 
 	if b.Config.MarketType == entity.MarketTypeMargin {
-		position, err := b.trader.GetPosition(ctx, b.Config.Pair)
-		if err != nil {
-			return errors.Wrap(err, "get position for balance snapshot")
+		position, posErr := b.trader.GetPosition(ctx, b.Config.Pair)
+		if posErr != nil {
+			return errors.Wrap(posErr, "get position for balance snapshot")
 		}
 
 		if position != nil && position.Amount.GreaterThan(decimal.Zero) {
@@ -225,7 +225,7 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 		}
 	}
 
-	return b.balanceStore.Save(entity.BalanceSnapshot{
+	err = b.balanceStore.Save(entity.BalanceSnapshot{
 		Timestamp:  time.Now().UTC(),
 		Pair:       b.Config.Pair.String(),
 		Model:      b.Config.Model,
@@ -235,4 +235,6 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 		Price:      price.String(),
 		Position:   activePosition,
 	})
+
+	return errors.Wrap(err, "failed to save balance snapshot")
 }

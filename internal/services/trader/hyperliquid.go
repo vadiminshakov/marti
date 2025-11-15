@@ -268,9 +268,7 @@ func (t *HyperliquidTrader) SetPositionStops(ctx context.Context, pair entity.Pa
 			cancels = append(cancels, hyperliquid.CancelOrderRequest{Coin: pair.From, OrderID: o.Oid})
 		}
 		if len(cancels) > 0 {
-			if _, err := t.ex.BulkCancel(ctx, cancels); err != nil {
-				// non-fatal — continue to place new stops
-			}
+			_, _ = t.ex.BulkCancel(ctx, cancels) // non-fatal — continue to place new stops
 		}
 	}
 
@@ -295,10 +293,8 @@ func (t *HyperliquidTrader) SetPositionStops(ctx context.Context, pair entity.Pa
 		}
 		priceF, _ := px.Round(8).Float64()
 		isBuy := !isLong // long -> sell; short -> buy
-		if tpsl == hyperliquid.StopLoss {
-			// SL: same side logic as TP — both close the position
-			// (HL decides direction by side of order)
-		}
+		// SL: same side logic as TP — both close the position
+		// (HL decides direction by side of order)
 		cloid := t.cloidFromID(fmt.Sprintf("%s-%s-%s", pair.Symbol(), tpsl, time.Now().UTC().Format(time.RFC3339Nano)))
 		orders = append(orders, hyperliquid.CreateOrderRequest{
 			Coin:       pair.From,

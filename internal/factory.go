@@ -21,6 +21,13 @@ import (
 	"github.com/vadiminshakov/marti/internal/services/trader"
 )
 
+const (
+	binancePlatform     = "binance"
+	bybitPlatform       = "bybit"
+	hyperliquidPlatform = "hyperliquid"
+	simulatePlatform    = "simulate"
+)
+
 type traderService interface {
 	ExecuteAction(ctx context.Context, action entity.Action, amount decimal.Decimal, clientOrderID string) error
 	OrderExecuted(ctx context.Context, clientOrderID string) (bool, decimal.Decimal, error)
@@ -36,7 +43,7 @@ type Pricer interface {
 // createTraderAndPricer creates trader and pricer instances based on platform
 func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.MarketType, leverage int, client any, stateKey string) (traderService, Pricer, error) {
 	switch platform {
-	case "binance":
+	case binancePlatform:
 		binanceClient, ok := client.(*binance.Client)
 		if !ok || binanceClient == nil {
 			return nil, nil, fmt.Errorf("binance platform expects *binance.Client, got %T", client)
@@ -51,7 +58,7 @@ func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.
 
 		return traderInstance, pricerInstance, nil
 
-	case "bybit":
+	case bybitPlatform:
 		bybitClient, ok := client.(*bybit.Client)
 		if !ok || bybitClient == nil {
 			return nil, nil, fmt.Errorf("bybit platform expects *bybit.Client, got %T", client)
@@ -66,7 +73,7 @@ func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.
 
 		return traderInstance, pricerInstance, nil
 
-	case "simulate":
+	case simulatePlatform:
 		simulateClient, ok := client.(*clients.SimulateClient)
 		if !ok || simulateClient == nil {
 			return nil, nil, fmt.Errorf("simulate platform expects *clients.SimulateClient, got %T", client)
@@ -83,7 +90,7 @@ func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.
 
 		return traderInstance, pricerInstance, nil
 
-	case "hyperliquid":
+	case hyperliquidPlatform:
 		hlClient, ok := client.(*clients.HyperliquidClient)
 		if !ok || hlClient == nil {
 			return nil, nil, fmt.Errorf("hyperliquid platform expects *clients.HyperliquidClient, got %T", client)
@@ -152,7 +159,7 @@ func createDCAStrategy(
 		dcaPercentThresholdSell,
 	)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to create DCA strategy")
 	}
 
 	return dcaStrategy, nil
@@ -179,28 +186,28 @@ func createAIStrategy(
 	var klineProvider aiStrategyKlineProvider
 
 	switch conf.Platform {
-	case "binance":
+	case binancePlatform:
 		binanceClient, ok := client.(*binance.Client)
 		if !ok {
 			return nil, fmt.Errorf("binance platform expects *binance.Client for AI strategy")
 		}
 
 		klineProvider = collector.NewBinanceKlineProvider(binanceClient)
-	case "bybit":
+	case bybitPlatform:
 		bybitClient, ok := client.(*bybit.Client)
 		if !ok {
 			return nil, fmt.Errorf("bybit platform expects *bybit.Client for AI strategy")
 		}
 
 		klineProvider = collector.NewBybitKlineProvider(bybitClient)
-	case "simulate":
+	case simulatePlatform:
 		simulateClient, ok := client.(*clients.SimulateClient)
 		if !ok {
 			return nil, fmt.Errorf("simulate platform expects *clients.SimulateClient for AI strategy")
 		}
 
 		klineProvider = collector.NewBinanceKlineProvider(simulateClient.GetBinanceClient())
-	case "hyperliquid":
+	case hyperliquidPlatform:
 		hlClient, ok := client.(*clients.HyperliquidClient)
 		if !ok {
 			return nil, fmt.Errorf("hyperliquid platform expects *clients.HyperliquidClient for AI strategy")
