@@ -40,7 +40,7 @@ type Pricer interface {
 	GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error)
 }
 
-// createTraderAndPricer creates trader and pricer instances based on platform
+// createTraderAndPricer creates trader and pricer instances based on platform.
 func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.MarketType, leverage int, client any, stateKey string) (traderService, Pricer, error) {
 	switch platform {
 	case binancePlatform:
@@ -110,7 +110,7 @@ func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.
 	}
 }
 
-// createTradingStrategy creates a trading strategy instance based on configuration
+// createTradingStrategy creates a trading strategy instance based on configuration.
 func createTradingStrategy(
 	logger *zap.Logger,
 	conf config.Config,
@@ -137,7 +137,7 @@ func createTradingStrategy(
 	}
 }
 
-// createDCAStrategy creates a DCA trading strategy
+// createDCAStrategy creates a DCA trading strategy.
 func createDCAStrategy(
 	logger *zap.Logger,
 	pair entity.Pair,
@@ -165,7 +165,7 @@ func createDCAStrategy(
 	return dcaStrategy, nil
 }
 
-// createAIStrategy creates an AI trading strategy
+// createAIStrategy creates an AI trading strategy.
 func createAIStrategy(
 	logger *zap.Logger,
 	conf config.Config,

@@ -111,11 +111,13 @@ func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
 		select {
 		case <-ctx.Done():
 			logger.Info("Context done, stopping trading bot run loop")
+
 			return errors.Wrap(ctx.Err(), "context done")
 		case <-ticker.C:
 			tradeEvent, err := b.tradingStrategy.Trade(ctx)
 			if err != nil {
 				logger.Error("Trading strategy failed", zap.Error(err))
+
 				continue
 			}
 

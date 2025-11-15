@@ -68,6 +68,7 @@ func TestNewTradingBot(t *testing.T) {
 			} else {
 				if err != nil {
 					t.Logf("Expected success but got error (this may be due to missing env vars or deps): %v", err)
+
 					return
 				}
 
