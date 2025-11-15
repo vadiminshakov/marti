@@ -7,10 +7,10 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
-	"github.com/vadiminshakov/marti/config"
-
-	"github.com/vadiminshakov/marti/internal/entity"
 	"go.uber.org/zap"
+
+	"github.com/vadiminshakov/marti/config"
+	"github.com/vadiminshakov/marti/internal/entity"
 )
 
 // TradingStrategy defines the interface that all trading strategies must implement.
@@ -27,15 +27,12 @@ type TradingStrategy interface {
 // TradingBot represents a single trading instance that manages the execution
 // of a specific trading strategy on a configured trading pair.
 type TradingBot struct {
-	// Config contains the trading configuration parameters
-	Config config.Config
-	// tradingStrategy holds the strategy implementation to be executed
 	tradingStrategy TradingStrategy
 	trader          traderService
 	pricer          Pricer
+	balanceStore    balanceSnapshotWriter
+	Config          config.Config
 	leverage        int
-	// balanceStore persists snapshots for UI/recovery.
-	balanceStore balanceSnapshotWriter
 }
 
 type balanceSnapshotWriter interface {
@@ -56,6 +53,7 @@ func NewTradingBot(logger *zap.Logger, conf config.Config, client any, balanceSt
 	if conf.Platform == "simulate" {
 		stateKey = conf.SimulationStateKey()
 	}
+
 	currentTrader, currentPricer, err := createTraderAndPricer(conf.Platform, conf.Pair, conf.MarketType, leverage, client, stateKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create trader and pricer")
@@ -123,6 +121,7 @@ func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
 
 			if tradeEvent != nil {
 				logger.Info("Trade event occurred", zap.Any("event", tradeEvent))
+
 				go func() {
 					if err := b.publishBalanceSnapshot(ctx); err != nil {
 						logger.Debug("balance snapshot skipped", zap.Error(err))
@@ -159,27 +158,31 @@ func (b *TradingBot) streamBalances(ctx context.Context, logger *zap.Logger) {
 }
 
 func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
-
 	base, err := b.trader.GetBalance(ctx, b.Config.Pair.From)
 	if err != nil {
 		return errors.Wrapf(err, "get %s balance", b.Config.Pair.From)
 	}
+
 	quote, err := b.trader.GetBalance(ctx, b.Config.Pair.To)
 	if err != nil {
 		return errors.Wrapf(err, "get %s balance", b.Config.Pair.To)
 	}
+
 	price, err := b.pricer.GetPrice(ctx, b.Config.Pair)
 	if err != nil {
 		return errors.Wrap(err, "get price for balance snapshot")
 	}
 
 	total := quote.Add(base.Mul(price))
+
 	var activePosition string
+
 	if b.Config.MarketType == entity.MarketTypeMargin {
 		position, err := b.trader.GetPosition(ctx, b.Config.Pair)
 		if err != nil {
 			return errors.Wrap(err, "get position for balance snapshot")
 		}
+
 		if position != nil && position.Amount.GreaterThan(decimal.Zero) {
 			switch position.Side {
 			case entity.PositionSideLong:
@@ -187,16 +190,19 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 			case entity.PositionSideShort:
 				activePosition = "short"
 			}
+
 			lev := b.leverage
 			if lev < 1 {
 				lev = 1
 			}
+
 			if lev > 1 {
 				notional := position.Amount.Abs().Mul(position.EntryPrice)
 				collateral := notional.Div(decimal.NewFromInt(int64(lev)))
 				pnl := position.PnL(price)
 
 				freeBase := base
+
 				switch position.Side {
 				case entity.PositionSideLong:
 					if base.GreaterThanOrEqual(position.Amount) {
@@ -208,10 +214,12 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 						freeBase = base.Sub(shortImpact)
 					}
 				}
+
 				freeBaseValue := decimal.Zero
 				if freeBase.GreaterThan(decimal.Zero) {
 					freeBaseValue = freeBase.Mul(price)
 				}
+
 				total = quote.Add(freeBaseValue).Add(collateral).Add(pnl)
 			}
 		}

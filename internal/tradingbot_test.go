@@ -26,11 +26,11 @@ func TestNewTradingBot(t *testing.T) {
 	}
 
 	tests := []struct {
+		client           any
 		name             string
 		platform         string
-		client           any
-		expectError      bool
 		expectedErrorMsg string
+		expectError      bool
 	}{
 		{
 			name:             "Unsupported Platform",
@@ -70,6 +70,7 @@ func TestNewTradingBot(t *testing.T) {
 					t.Logf("Expected success but got error (this may be due to missing env vars or deps): %v", err)
 					return
 				}
+
 				require.NotNil(t, bot)
 				assert.Equal(t, currentConf, bot.Config)
 			}

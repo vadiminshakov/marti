@@ -20,14 +20,9 @@ type Store struct {
 	path string
 }
 
-// NewStore creates a simulator state store for the given pair. Directory can be
-// overridden via MARTI_SIMULATE_STATE_DIR env var.
+// NewStore creates a simulator state store for the given pair.
 func NewStore(pair entity.Pair, scope string) (*Store, error) {
-	dir := os.Getenv("MARTI_SIMULATE_STATE_DIR")
-	if dir == "" {
-		dir = defaultStateDir
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(defaultStateDir, 0o755); err != nil {
 		return nil, errors.Wrap(err, "create simulate state dir")
 	}
 	storeFileName := sanitizeScope(scope)
@@ -35,7 +30,8 @@ func NewStore(pair entity.Pair, scope string) (*Store, error) {
 		storeFileName = strings.ToLower(pair.String())
 	}
 	fullName := fmt.Sprintf("%s.json", storeFileName)
-	return &Store{path: filepath.Join(dir, fullName)}, nil
+
+	return &Store{path: filepath.Join(defaultStateDir, fullName)}, nil
 }
 
 // State represents all persisted simulator data.

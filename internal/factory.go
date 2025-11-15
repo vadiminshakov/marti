@@ -8,6 +8,8 @@ import (
 	bybit "github.com/hirokisan/bybit/v2"
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
+	"go.uber.org/zap"
+
 	"github.com/vadiminshakov/marti/config"
 	"github.com/vadiminshakov/marti/internal/clients"
 	"github.com/vadiminshakov/marti/internal/entity"
@@ -17,7 +19,6 @@ import (
 	"github.com/vadiminshakov/marti/internal/services/strategy/ai"
 	"github.com/vadiminshakov/marti/internal/services/strategy/dca"
 	"github.com/vadiminshakov/marti/internal/services/trader"
-	"go.uber.org/zap"
 )
 
 type traderService interface {
@@ -47,6 +48,7 @@ func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.
 		}
 
 		pricerInstance := pricer.NewBinancePricer(binanceClient)
+
 		return traderInstance, pricerInstance, nil
 
 	case "bybit":
@@ -61,6 +63,7 @@ func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.
 		}
 
 		pricerInstance := pricer.NewBybitPricer(bybitClient)
+
 		return traderInstance, pricerInstance, nil
 
 	case "simulate":
@@ -72,10 +75,12 @@ func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.
 		// use logger from context or create a new one
 		logger := zap.L()
 		pricerInstance := pricer.NewSimulatePricer(simulateClient.GetBinanceClient())
+
 		traderInstance, err := trader.NewSimulateTrader(pair, marketType, leverage, logger, pricerInstance, stateKey)
 		if err != nil {
 			return nil, nil, errors.Wrap(err, "failed to create SimulateTrader")
 		}
+
 		return traderInstance, pricerInstance, nil
 
 	case "hyperliquid":
@@ -88,7 +93,9 @@ func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.
 		if err != nil {
 			return nil, nil, errors.Wrap(err, "failed to create HyperliquidTrader")
 		}
+
 		pr := pricer.NewHyperliquidPricer(hlClient.Exchange().Info())
+
 		return tr, pr, nil
 
 	default:
@@ -170,30 +177,35 @@ func createAIStrategy(
 
 	// create kline provider based on platform
 	var klineProvider aiStrategyKlineProvider
+
 	switch conf.Platform {
 	case "binance":
 		binanceClient, ok := client.(*binance.Client)
 		if !ok {
 			return nil, fmt.Errorf("binance platform expects *binance.Client for AI strategy")
 		}
+
 		klineProvider = collector.NewBinanceKlineProvider(binanceClient)
 	case "bybit":
 		bybitClient, ok := client.(*bybit.Client)
 		if !ok {
 			return nil, fmt.Errorf("bybit platform expects *bybit.Client for AI strategy")
 		}
+
 		klineProvider = collector.NewBybitKlineProvider(bybitClient)
 	case "simulate":
 		simulateClient, ok := client.(*clients.SimulateClient)
 		if !ok {
 			return nil, fmt.Errorf("simulate platform expects *clients.SimulateClient for AI strategy")
 		}
+
 		klineProvider = collector.NewBinanceKlineProvider(simulateClient.GetBinanceClient())
 	case "hyperliquid":
 		hlClient, ok := client.(*clients.HyperliquidClient)
 		if !ok {
 			return nil, fmt.Errorf("hyperliquid platform expects *clients.HyperliquidClient for AI strategy")
 		}
+
 		klineProvider = collector.NewHyperliquidKlineProvider(hlClient.Exchange().Info())
 	default:
 		return nil, fmt.Errorf("unsupported platform for AI strategy: %s", conf.Platform)
