@@ -7,10 +7,12 @@ import "time"
 type BalanceSnapshot struct {
 	Timestamp  time.Time `json:"ts"`
 	Pair       string    `json:"pair"`
+	Model      string    `json:"model,omitempty"`
 	Base       string    `json:"base"`
 	Quote      string    `json:"quote"`
 	TotalQuote string    `json:"total_quote,omitempty"`
 	Price      string    `json:"price,omitempty"`
+	Position   string    `json:"position,omitempty"`
 }
 
 // BalanceSnapshotRecord bundles a snapshot with the log index it originated from.

@@ -170,12 +170,19 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 	}
 
 	total := quote.Add(base.Mul(price))
+	var activePosition string
 	if b.Config.MarketType == entity.MarketTypeMargin {
 		position, err := b.trader.GetPosition(ctx, b.Config.Pair)
 		if err != nil {
 			return errors.Wrap(err, "get position for balance snapshot")
 		}
 		if position != nil && position.Amount.GreaterThan(decimal.Zero) {
+			switch position.Side {
+			case entity.PositionSideLong:
+				activePosition = "long"
+			case entity.PositionSideShort:
+				activePosition = "short"
+			}
 			lev := b.leverage
 			if lev < 1 {
 				lev = 1
@@ -209,9 +216,11 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 	return b.balanceStore.Save(entity.BalanceSnapshot{
 		Timestamp:  time.Now().UTC(),
 		Pair:       b.Config.Pair.String(),
+		Model:      b.Config.Model,
 		Base:       base.String(),
 		Quote:      quote.String(),
 		TotalQuote: total.StringFixed(2),
 		Price:      price.String(),
+		Position:   activePosition,
 	})
 }

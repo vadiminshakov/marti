@@ -196,12 +196,6 @@ const indexHTML = `<!DOCTYPE html>
       letter-spacing:.2em;
       margin:0;
     }
-    h1 {
-      font-family:'Press Start 2P','Space Mono',monospace;
-      font-size:1.15rem;
-      letter-spacing:.1em;
-      margin:.8rem 0 0;
-    }
     .status {
       font-size:.65rem;
       text-transform:uppercase;
@@ -216,32 +210,7 @@ const indexHTML = `<!DOCTYPE html>
       grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));
       gap:1.5rem;
     }
-    .overview {
-      display:flex;
-      flex-direction:column;
-      gap:1rem;
-    }
-    .chart-card {
-      border:3px solid var(--ink);
-      padding:1.5rem;
-      background:#fff;
-      box-shadow:10px 10px 0 rgba(0,0,0,.18);
-      display:flex;
-      flex-direction:column;
-      gap:1rem;
-    }
-    .chart-card-header {
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:.5rem;
-    }
-    .chart-title {
-      font-family:'Press Start 2P','Space Mono',monospace;
-      letter-spacing:.08em;
-      margin:0;
-      font-size:.9rem;
-    }
+    .overview { display:flex; flex-direction:column; gap:1rem; }
     .global-chart {
       width:100%;
       border:2px solid var(--ink);
@@ -262,6 +231,12 @@ const indexHTML = `<!DOCTYPE html>
       justify-content:space-between;
       align-items:center;
       gap:.5rem;
+    }
+    .pair-card-labels {
+      display:flex;
+      align-items:center;
+      gap:.6rem;
+      flex-wrap:wrap;
     }
     .pair-name {
       font-family:'Press Start 2P','Space Mono',monospace;
@@ -331,18 +306,11 @@ const indexHTML = `<!DOCTYPE html>
     <header>
       <div>
         <p class="eyebrow">marti dashboard</p>
-        <h1>Balance by Pair</h1>
       </div>
       <div id="sse-status" class="status">Connecting…</div>
     </header>
     <section class="overview">
-      <div class="chart-card">
-        <div class="chart-card-header">
-          <h2 class="chart-title">All Pairs Funds</h2>
-          <span id="chartUpdated" class="pill muted">Waiting…</span>
-        </div>
-        <canvas id="globalChart" class="global-chart" height="320"></canvas>
-      </div>
+      <canvas id="globalChart" class="global-chart" height="320"></canvas>
     </section>
     <section id="pairs" class="pair-grid">
       <div id="emptyState" class="empty-state">Waiting for balance snapshots…</div>
@@ -352,7 +320,6 @@ const indexHTML = `<!DOCTYPE html>
 const statusEl = document.getElementById('sse-status');
 const pairContainer = document.getElementById('pairs');
 const emptyState = document.getElementById('emptyState');
-const chartUpdatedEl = document.getElementById('chartUpdated');
 const chartCanvas = document.getElementById('globalChart');
 const pairViews = new Map();
 const datasetByPair = new Map();
@@ -367,25 +334,22 @@ const colorPalette = [
 ];
 let colorIndex = 0;
 
+const normalizeModel = (value) => {
+  if(typeof value !== 'string'){
+    return '';
+  }
+  return value.trim();
+};
+
+const seriesLabel = (pair, model) => {
+  const safePair = pair || '—';
+  const safeModel = normalizeModel(model);
+  return safeModel ? safePair + ' · ' + safeModel : safePair;
+};
+
 Chart.defaults.font.family = "'Space Mono', 'JetBrains Mono', monospace";
 Chart.defaults.font.size = 11;
 Chart.defaults.color = '#111111';
-
-const chartCtx = chartCanvas.getContext('2d');
-chartCtx.imageSmoothingEnabled = false;
-const globalChart = buildGlobalChart(chartCtx);
-
-const parseNum = (value) => {
-  const num = parseFloat(value);
-  return Number.isFinite(num) ? num : 0;
-};
-
-const formatTs = (ts) => {
-  if(!ts){ return 'Waiting…'; }
-  const date = new Date(ts);
-  if(Number.isNaN(date.getTime())){ return 'Waiting…'; }
-  return date.toLocaleTimeString([], { hour12:false });
-};
 
 const buildGlobalChart = (ctx) => new Chart(ctx, {
   type: 'line',
@@ -419,14 +383,30 @@ const buildGlobalChart = (ctx) => new Chart(ctx, {
   }
 });
 
+const chartCtx = chartCanvas.getContext('2d');
+chartCtx.imageSmoothingEnabled = false;
+const globalChart = buildGlobalChart(chartCtx);
+
+const parseNum = (value) => {
+  const num = parseFloat(value);
+  return Number.isFinite(num) ? num : 0;
+};
+
+const formatTs = (ts) => {
+  if(!ts){ return 'Waiting…'; }
+  const date = new Date(ts);
+  if(Number.isNaN(date.getTime())){ return 'Waiting…'; }
+  return date.toLocaleTimeString([], { hour12:false });
+};
+
 const nextColor = () => {
   const color = colorPalette[colorIndex % colorPalette.length];
   colorIndex += 1;
   return color;
 };
 
-function ensureDataset(pair){
-  const key = pair || '—';
+function ensureDataset(pair, model){
+  const key = seriesLabel(pair, model);
   if(datasetByPair.has(key)){
     return datasetByPair.get(key);
   }
@@ -449,7 +429,9 @@ function ensureDataset(pair){
 function appendGlobalLabel(label){
   globalChart.data.labels.push(label);
   globalChart.data.datasets.forEach((dataset) => {
-    dataset.data.push(null);
+    const lastIndex = dataset.data.length - 1;
+    const lastValue = lastIndex >= 0 ? dataset.data[lastIndex] : null;
+    dataset.data.push(lastValue);
   });
   if(globalChart.data.labels.length > 600){
     globalChart.data.labels.shift();
@@ -459,24 +441,22 @@ function appendGlobalLabel(label){
   }
 }
 
-function updateGlobalChart(pair, total, ts){
+function updateGlobalChart(pair, model, total, ts){
   const tsDate = ts ? new Date(ts) : new Date();
   const labelDate = Number.isNaN(tsDate.getTime()) ? new Date() : tsDate;
-  const label = labelDate.toLocaleTimeString([], { hour12:false });
-  appendGlobalLabel(label);
-  const dataset = ensureDataset(pair);
+  const tickLabel = labelDate.toLocaleTimeString([], { hour12:false });
+  appendGlobalLabel(tickLabel);
+  const dataset = ensureDataset(pair, model);
   dataset.data[dataset.data.length - 1] = total.numeric;
-  if(chartUpdatedEl){
-    chartUpdatedEl.textContent = label;
-    chartUpdatedEl.classList.remove('muted');
-  }
   globalChart.update('none');
 }
 
-function ensurePairView(pair){
+function ensurePairView(pair, model){
   const safePair = pair || '—';
-  if(pairViews.has(safePair)){
-    return pairViews.get(safePair);
+  const safeModel = normalizeModel(model);
+  const viewKey = seriesLabel(safePair, safeModel);
+  if(pairViews.has(viewKey)){
+    return pairViews.get(viewKey);
   }
 
   if(emptyState){
@@ -488,13 +468,19 @@ function ensurePairView(pair){
 
   const header = document.createElement('div');
   header.className = 'pair-card-header';
+  const labelsWrap = document.createElement('div');
+  labelsWrap.className = 'pair-card-labels';
   const title = document.createElement('h2');
   title.className = 'pair-name';
   title.textContent = safePair;
+  const modelBadge = document.createElement('span');
+  modelBadge.className = safeModel ? 'pill' : 'pill muted';
+  modelBadge.textContent = 'Model ' + (safeModel || '—');
   const updated = document.createElement('span');
   updated.className = 'pill muted';
   updated.textContent = 'Waiting…';
-  header.append(title, updated);
+  labelsWrap.append(title, modelBadge);
+  header.append(labelsWrap, updated);
 
   const equity = document.createElement('div');
   equity.className = 'equity';
@@ -515,7 +501,10 @@ function ensurePairView(pair){
   const priceEl = document.createElement('span');
   priceEl.className = 'pill muted';
   priceEl.textContent = 'Price —';
-  meta.append(baseEl, quoteEl, priceEl);
+  const positionEl = document.createElement('span');
+  positionEl.className = 'pill';
+  positionEl.style.display = 'none';
+  meta.append(baseEl, quoteEl, priceEl, positionEl);
   equity.append(label, totalValue, meta);
 
   card.append(header, equity);
@@ -527,8 +516,9 @@ function ensurePairView(pair){
     baseEl,
     quoteEl,
     priceEl,
+    positionEl,
   };
-  pairViews.set(safePair, view);
+  pairViews.set(viewKey, view);
   return view;
 }
 
@@ -550,19 +540,29 @@ function renderNumbers(view, payload, total){
   view.quoteEl.textContent = payload.quote ? 'Quote ' + payload.quote : 'Quote —';
   view.priceEl.textContent = payload.price ? 'Price ' + payload.price : 'Price —';
   view.updatedEl.textContent = formatTs(payload.ts);
+  if(view.positionEl){
+    const position = typeof payload.position === 'string' ? payload.position.trim() : '';
+    if(position){
+      view.positionEl.textContent = position;
+      view.positionEl.style.display = '';
+    }else{
+      view.positionEl.textContent = '';
+      view.positionEl.style.display = 'none';
+    }
+  }
 }
 
 function handlePayload(payload){
   const pairLabel = payload.pair || '—';
-  const view = ensurePairView(pairLabel);
+  const view = ensurePairView(pairLabel, payload.model);
   const total = deriveTotal(payload);
   renderNumbers(view, payload, total);
-  updateGlobalChart(pairLabel, total, payload.ts);
+  updateGlobalChart(pairLabel, payload.model, total, payload.ts);
 }
 
 function connectSSE(){
   const source = new EventSource('/balance/stream');
-  statusEl.textContent = 'Live: receiving data';
+  statusEl.textContent = 'Status: receiving data';
   source.addEventListener('balance', (event) => {
     try{
       const payload = JSON.parse(event.data);
