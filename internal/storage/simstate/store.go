@@ -22,7 +22,7 @@ type Store struct {
 
 // NewStore creates a simulator state store for the given pair. Directory can be
 // overridden via MARTI_SIMULATE_STATE_DIR env var.
-func NewStore(pair entity.Pair) (*Store, error) {
+func NewStore(pair entity.Pair, scope string) (*Store, error) {
 	dir := os.Getenv("MARTI_SIMULATE_STATE_DIR")
 	if dir == "" {
 		dir = defaultStateDir
@@ -30,8 +30,12 @@ func NewStore(pair entity.Pair) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, errors.Wrap(err, "create simulate state dir")
 	}
-	filename := fmt.Sprintf("%s.json", strings.ToLower(pair.String()))
-	return &Store{path: filepath.Join(dir, filename)}, nil
+	storeFileName := sanitizeScope(scope)
+	if storeFileName == "" {
+		storeFileName = strings.ToLower(pair.String())
+	}
+	fullName := fmt.Sprintf("%s.json", storeFileName)
+	return &Store{path: filepath.Join(dir, fullName)}, nil
 }
 
 // State represents all persisted simulator data.
@@ -146,4 +150,25 @@ func (sp *StoredPosition) ToPosition() (*entity.Position, error) {
 		EntryTime:    sp.EntryTime,
 		Side:         sp.Side,
 	}, nil
+}
+
+func sanitizeScope(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" {
+		return ""
+	}
+	var b strings.Builder
+	prevUnderscore := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prevUnderscore = false
+			continue
+		}
+		if !prevUnderscore {
+			b.WriteByte('_')
+			prevUnderscore = true
+		}
+	}
+	return strings.Trim(b.String(), "_")
 }
