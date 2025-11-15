@@ -5,22 +5,6 @@ run:
   issues-exit-code: 1
   # Include test files or not, default is true
   tests: true
-  # Skip directories
-  skip-dirs:
-    - vendor
-    - .git
-    - .github
-    - .idea
-    - .vscode
-    - .gitlab
-    - docs
-    - testdata
-    - internal/mock
-    - mocks
-    - scripts
-    - bin
-    - tmp
-    - _*
 
   # Exclude Go standard library
   build-constraints:
@@ -50,7 +34,6 @@ linters:
     - whitespace
     - revive
     - errcheck
-    - exportloopref
     - goconst
     - gocyclo
     - goprintffuncname
@@ -58,24 +41,17 @@ linters:
     - prealloc
     - wrapcheck
     - wsl
+    - nlreturn         # Enforces new line before return statements
+    - godot            # Enforces correct formatting of comments
+    - gofumpt          # More strict gofmt
+    - gosec
     
   # Disable specific linters that might be too strict or conflict with others
   disable:
-    - gochecknoinits   # Allow init functions
-    - gosec            # Disable for now as it requires more configuration
-    - goerr113         # Errors handling linter
-    - gomnd            # Magic number detection
-    - godox            # TODO/BUG/FIXME comments linter
-    - ifshort          # If statement with short syntax
-    - testpackage      # Test package naming
-    - nosnakecase      # Handled by revive
-    - interfacer       # Deprecated
-    - maligned         # Handled by govet fieldalignment
-    - deadcode         # Handled by unused
-    - exhaustivestruct # Too strict
-    - structcheck      # Handled by unused
-    - scopelint        # Handled by govet
-    - golint           # Replaced by revive
+    - gochecknoinits
+    - err113
+    - godox
+    - testpackage
 
 # Linter specific configurations
 linters-settings:
@@ -120,10 +96,6 @@ linters-settings:
     rules:
       - name: var-naming
         disabled: false
-        arguments:
-          - ["ID"] # Allow common initialisms like ID, API, etc.
-          - 32
-          - "^[a-z][a-zA-Z0-9]*$" # Allow both camelCase and PascalCase
         severity: warning
       - name: package-comments
         disabled: false
@@ -163,13 +135,13 @@ linters-settings:
     
   # Configuration for govet (includes fieldalignment check)
   govet:
-    check-shadowing: true
     settings:
       printf:
         funcs: ["Error", "Errorf", "Info", "Infof", "Warn", "Warnf", "Warning", "Warningf", "Fatal", "Fatalf"]
     enable-all: false
     enable:
       - fieldalignment  # Reports structs that would use less memory if their fields were sorted
+      - shadow
 
   # Configuration for the gocritic linter
   gocritic:
@@ -188,6 +160,22 @@ linters-settings:
 
 # This section provides the configuration for how golangci runs.
 issues:
+  # Exclude directories
+  exclude-dirs:
+    - vendor
+    - .git
+    - .github
+    - .idea
+    - .vscode
+    - .gitlab
+    - docs
+    - testdata
+    - internal/mock
+    - mocks
+    - scripts
+    - bin
+    - tmp
+    - _*
   # List of regexps of issue texts to exclude, empty list by default.
   # But independently from this option we use default exclude patterns,
   # it can be disabled by `exclude-use-default: false`.
@@ -199,12 +187,6 @@ issues:
         - gosec
         - dupl
         - goconst
-
-    # Exclude known test helpers from some linters
-    - path: _test\.go$
-      text: 'is in test file'
-      linters:
-        - gosec
 
     # Exclude common method required for test helpers
     - path: _test\.go$
