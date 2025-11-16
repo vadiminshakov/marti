@@ -13,8 +13,8 @@ import (
 
 const (
 	defaultAIDecisionDir   = "./wal/aidecisions"
-	aiDecisionSegmentLimit = 1000
-	aiDecisionMaxSegments  = 100
+	aiDecisionSegmentLimit = 20
+	aiDecisionMaxSegments  = 5
 	aiDecisionKeyPrefix    = "ai_decision_"
 )
 
@@ -32,7 +32,7 @@ func NewWALStore(dir string) (*WALStore, error) {
 
 	cfg := gowal.Config{
 		Dir:              dir,
-		Prefix:           "ai_decision_",
+		Prefix:           "decision_",
 		SegmentThreshold: aiDecisionSegmentLimit,
 		MaxSegments:      aiDecisionMaxSegments,
 		IsInSyncDiskMode: true,

@@ -540,6 +540,11 @@ const buildGlobalChart = (ctx) => new Chart(ctx, {
     },
     elements:{ line:{ borderCapStyle:'square' } },
     plugins:{
+      decimation:{
+        enabled:true,
+        algorithm:'lttb',
+        samples:500
+      },
       legend:{ display:true, labels:{ usePointStyle:true, boxWidth:12 } },
       tooltip:{
         backgroundColor:'#ffffff',
@@ -603,7 +608,7 @@ function appendGlobalLabel(label){
     const lastValue = lastIndex >= 0 ? dataset.data[lastIndex] : null;
     dataset.data.push(lastValue);
   });
-  if(globalChart.data.labels.length > 600){
+  if(globalChart.data.labels.length > 50000){
     globalChart.data.labels.shift();
     globalChart.data.datasets.forEach((dataset) => {
       dataset.data.shift();
@@ -784,10 +789,38 @@ function createDecisionCard(decision){
   header.append(action, time);
   card.appendChild(header);
 
+  if(decision.model){
+    const model = document.createElement('div');
+    model.style.fontWeight = '700';
+    model.style.marginBottom = '.5rem';
+    model.textContent = decision.model;
+    card.appendChild(model);
+  }
+
+  if(decision.position_side){
+    const positionSide = document.createElement('div');
+    positionSide.style.fontWeight = '700';
+    positionSide.style.marginBottom = '.5rem';
+    positionSide.style.fontSize = '.65rem';
+    positionSide.style.textTransform = 'lowercase';
+    positionSide.style.letterSpacing = '.08em';
+    positionSide.style.display = 'inline-block';
+    positionSide.style.padding = '.3rem .6rem';
+
+    // Normalize position text and set border color
+    const positionText = decision.position_side.toLowerCase().includes('short') ? 'short' : 'long';
+    const borderColor = positionText === 'short' ? '#d7263d' : '#1b9aaa';
+
+    positionSide.textContent = positionText;
+    positionSide.style.border = '2px solid ' + borderColor;
+    card.appendChild(positionSide);
+  }
+
   if(decision.pair){
     const pair = document.createElement('div');
-    pair.style.fontWeight = '700';
+    pair.style.fontSize = '.65rem';
     pair.style.marginBottom = '.5rem';
+    pair.style.color = 'var(--ink-mid)';
     pair.textContent = decision.pair;
     card.appendChild(pair);
   }

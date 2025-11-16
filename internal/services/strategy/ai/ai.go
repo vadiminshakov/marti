@@ -105,26 +105,8 @@ func NewAIStrategy(
 	}, nil
 }
 
-// Initialize prepares the AI strategy for trading (log only for AI strategy)
+// stub
 func (s *AIStrategy) Initialize(ctx context.Context) error {
-	s.logger.Info("Initializing AI strategy",
-		zap.String("pair", s.pair.String()))
-
-	fields := []zap.Field{
-		zap.String("pair", s.pair.String()),
-		zap.String("mode", s.marketType.String()),
-	}
-
-	quoteBalance, err := s.trader.GetBalance(ctx, s.pair.To)
-	if err != nil {
-		s.logger.Warn("Failed to get quote currency balance", zap.Error(err))
-	} else {
-		fields = append(fields,
-			zap.String(s.pair.To+"_balance", quoteBalance.String()))
-	}
-
-	s.logger.Info("Starting AI trading strategy", fields...)
-
 	return nil
 }
 
