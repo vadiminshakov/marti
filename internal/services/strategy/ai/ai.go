@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
@@ -38,6 +39,10 @@ type marketDataCollector interface {
 	FetchTimeframeData(ctx context.Context, interval string, lookback int) (*entity.Timeframe, error)
 }
 
+type aiDecisionWriter interface {
+	Save(event entity.AIDecisionEvent) error
+}
+
 // AIStrategy executes margin trades based on LLM decisions.
 type AIStrategy struct {
 	pair             entity.Pair
@@ -51,6 +56,8 @@ type AIStrategy struct {
 	primaryLookback  int
 	higherTimeframe  string
 	higherLookback   int
+	decisionStore    aiDecisionWriter
+	modelName        string
 }
 
 // NewAIStrategy constructs an AI strategy instance.
@@ -66,6 +73,8 @@ func NewAIStrategy(
 	higherTimeframe string,
 	primaryLookback int,
 	higherLookback int,
+	decisionStore aiDecisionWriter,
+	modelName string,
 ) (*AIStrategy, error) {
 	if marketType != entity.MarketTypeMargin {
 		return nil, fmt.Errorf("AI strategy requires margin market type, got %s", marketType)
@@ -91,6 +100,8 @@ func NewAIStrategy(
 		primaryLookback:  primaryLookback,
 		higherTimeframe:  higherTimeframe,
 		higherLookback:   higherLookback,
+		decisionStore:    decisionStore,
+		modelName:        modelName,
 	}, nil
 }
 
@@ -225,6 +236,11 @@ func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 	}
 
 	s.logger.Info("AI decision", decisionFields...)
+
+	// save decision to WAL
+	if err := s.saveDecision(decision, snapshot, position); err != nil {
+		s.logger.Warn("Failed to save AI decision event", zap.Error(err))
+	}
 
 	// execute decision
 	return s.executeDecision(ctx, decision, snapshot, position)
@@ -463,6 +479,35 @@ func (s *AIStrategy) executeCloseShort(ctx context.Context, currentPrice decimal
 	}
 
 	return tradeEvent, nil
+}
+
+// saveDecision persists the AI decision event to WAL.
+func (s *AIStrategy) saveDecision(decision *entity.Decision, snapshot entity.MarketSnapshot, position *entity.Position) error {
+	if s.decisionStore == nil {
+		return nil
+	}
+
+	event := entity.AIDecisionEvent{
+		Timestamp:             time.Now().UTC(),
+		Pair:                  s.pair.String(),
+		Model:                 s.modelName,
+		Action:                decision.Action,
+		Reasoning:             decision.Reasoning,
+		RiskPercent:           decision.RiskPercent,
+		TakeProfitPrice:       decision.ExitPlan.TakeProfitPrice,
+		StopLossPrice:         decision.ExitPlan.StopLossPrice,
+		InvalidationCondition: decision.ExitPlan.InvalidationCondition,
+		CurrentPrice:          snapshot.Price().String(),
+		QuoteBalance:          snapshot.QuoteBalance.String(),
+	}
+
+	if position != nil {
+		event.PositionAmount = position.Amount.String()
+		event.PositionSide = position.Side.String()
+		event.PositionEntryPrice = position.EntryPrice.String()
+	}
+
+	return s.decisionStore.Save(event)
 }
 
 // Close logs shutdown.

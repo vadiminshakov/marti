@@ -18,15 +18,20 @@ type balanceSnapshotReader interface {
 	SnapshotsAfter(index uint64) ([]entity.BalanceSnapshotRecord, error)
 }
 
+type aiDecisionReader interface {
+	EventsAfter(index uint64) ([]entity.AIDecisionEventRecord, error)
+}
+
 // Server exposes HTTP endpoints serving the HTML UI and an SSE stream.
 type Server struct {
-	Addr  string
-	Store balanceSnapshotReader
+	Addr            string
+	Store           balanceSnapshotReader
+	AIDecisionStore aiDecisionReader
 }
 
 // NewServer creates a new web server instance.
-func NewServer(addr string, store balanceSnapshotReader) *Server {
-	return &Server{Addr: addr, Store: store}
+func NewServer(addr string, store balanceSnapshotReader, aiDecisionStore aiDecisionReader) *Server {
+	return &Server{Addr: addr, Store: store, AIDecisionStore: aiDecisionStore}
 }
 
 // Start runs the HTTP server (blocking) and shuts it down when ctx is cancelled.
@@ -37,6 +42,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/balance/stream", s.handleBalanceStream)
+	mux.HandleFunc("/ai/decisions/stream", s.handleAIDecisionStream)
 
 	server := &http.Server{
 		Addr:              s.Addr,
@@ -128,6 +134,71 @@ func (s *Server) handleBalanceStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleAIDecisionStream(w http.ResponseWriter, r *http.Request) {
+	if s.AIDecisionStore == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		fmt.Fprint(w, "AI decision store not available")
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	heartbeat := time.NewTicker(30 * time.Second)
+	defer heartbeat.Stop()
+
+	pollTicker := time.NewTicker(snapshotPollInterval)
+	defer pollTicker.Stop()
+
+	lastIndex := uint64(0)
+	sendDecisions := func() error {
+		records, err := s.AIDecisionStore.EventsAfter(lastIndex)
+		if err != nil {
+			return err
+		}
+		if len(records) == 0 {
+			return nil
+		}
+		for _, record := range records {
+			payload, err := json.Marshal(record.Event)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(w, "event: ai_decision\n")
+			fmt.Fprintf(w, "data: %s\n\n", payload)
+			flusher.Flush()
+			lastIndex = record.Index
+		}
+		return nil
+	}
+
+	if err := sendDecisions(); err != nil {
+		http.Error(w, "failed to load AI decisions", http.StatusInternalServerError)
+		log.Printf("AI decision stream initial load: %v", err)
+		return
+	}
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-heartbeat.C:
+			fmt.Fprintf(w, ": ping\n\n")
+			flusher.Flush()
+		case <-pollTicker.C:
+			if err := sendDecisions(); err != nil {
+				log.Printf("AI decision stream poll err: %v", err)
+			}
+		}
+	}
+}
+
 // Multi-pair dashboard with a chart + stats per trading pair.
 const indexHTML = `<!DOCTYPE html>
 <html lang="en">
@@ -170,13 +241,18 @@ const indexHTML = `<!DOCTYPE html>
       pointer-events:none;
     }
     #app {
-      width:min(1180px, 96vw);
+      width:min(1400px, 96vw);
       background:var(--panel);
       border:3px solid var(--ink);
       padding:2rem;
       position:relative;
       image-rendering:pixelated;
       box-shadow:12px 12px 0 rgba(0,0,0,.15);
+      display:grid;
+      grid-template-columns:1fr 380px;
+      gap:2rem;
+    }
+    .main-content {
       display:flex;
       flex-direction:column;
       gap:2rem;
@@ -240,9 +316,11 @@ const indexHTML = `<!DOCTYPE html>
     }
     .pair-name {
       font-family:'Press Start 2P','Space Mono',monospace;
-      font-size:.9rem;
+      font-size:.75rem;
       letter-spacing:.08em;
       margin:0;
+      word-break:break-word;
+      line-height:1.3;
     }
     .equity {
       border:3px solid var(--ink);
@@ -293,28 +371,112 @@ const indexHTML = `<!DOCTYPE html>
       text-transform:uppercase;
       color:var(--ink-mid);
     }
+    .ai-decisions-sidebar {
+      display:flex;
+      flex-direction:column;
+      gap:1rem;
+      max-height:calc(100vh - 8rem);
+      overflow-y:auto;
+    }
+    .ai-decisions-sidebar::-webkit-scrollbar {
+      width:8px;
+    }
+    .ai-decisions-sidebar::-webkit-scrollbar-track {
+      background:#f6f6f6;
+    }
+    .ai-decisions-sidebar::-webkit-scrollbar-thumb {
+      background:#9c9c9c;
+      border-radius:4px;
+    }
+    .ai-decision-card {
+      border:2px solid var(--ink);
+      padding:1rem;
+      background:#fff;
+      box-shadow:4px 4px 0 rgba(0,0,0,.12);
+      font-size:.7rem;
+      line-height:1.4;
+    }
+    .ai-decision-header {
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:.8rem;
+      padding-bottom:.8rem;
+      border-bottom:1px dashed var(--ink-soft);
+    }
+    .ai-decision-action {
+      font-weight:700;
+      text-transform:uppercase;
+      letter-spacing:.1em;
+    }
+    .ai-decision-action.open_long { color:#1b9aaa; }
+    .ai-decision-action.close_long { color:#d7263d; }
+    .ai-decision-action.open_short { color:#ff7f11; }
+    .ai-decision-action.close_short { color:#3c91e6; }
+    .ai-decision-action.hold { color:#9c9c9c; }
+    .ai-decision-time {
+      font-size:.6rem;
+      color:var(--ink-mid);
+    }
+    .ai-decision-reasoning {
+      margin-top:.8rem;
+      font-size:.65rem;
+      color:var(--ink-mid);
+      font-style:italic;
+    }
+    .ai-decision-meta {
+      margin-top:.8rem;
+      display:flex;
+      flex-wrap:wrap;
+      gap:.4rem;
+    }
+    .ai-meta-pill {
+      font-size:.55rem;
+      padding:.25rem .5rem;
+      background:var(--panel);
+      border:1px solid var(--ink-soft);
+    }
+    .sidebar-title {
+      font-family:'Press Start 2P','Space Mono',monospace;
+      font-size:.6rem;
+      text-transform:uppercase;
+      letter-spacing:.15em;
+      margin-bottom:1rem;
+      padding-bottom:.8rem;
+      border-bottom:2px solid var(--ink);
+    }
     @media (max-width:640px) {
       body { padding:1rem; }
-      #app { padding:1.2rem; }
+      #app {
+        padding:1.2rem;
+        grid-template-columns:1fr;
+      }
       header { flex-direction:column; align-items:flex-start; }
       .pair-grid { grid-template-columns:1fr; }
+      .ai-decisions-sidebar { max-height:400px; }
     }
   </style>
 </head>
 <body>
   <div id="app">
-    <header>
-      <div>
-        <p class="eyebrow">marti dashboard</p>
-      </div>
-      <div id="sse-status" class="status">Connecting…</div>
-    </header>
-    <section class="overview">
-      <canvas id="globalChart" class="global-chart" height="320"></canvas>
-    </section>
-    <section id="pairs" class="pair-grid">
-      <div id="emptyState" class="empty-state">Waiting for balance snapshots…</div>
-    </section>
+    <div class="main-content">
+      <header>
+        <div>
+          <p class="eyebrow">marti dashboard</p>
+        </div>
+        <div id="sse-status" class="status">Connecting…</div>
+      </header>
+      <section class="overview">
+        <canvas id="globalChart" class="global-chart" height="320"></canvas>
+      </section>
+      <section id="pairs" class="pair-grid">
+        <div id="emptyState" class="empty-state">Waiting for balance snapshots…</div>
+      </section>
+    </div>
+    <aside class="ai-decisions-sidebar">
+      <h3 class="sidebar-title">AI Decisions</h3>
+      <div id="aiDecisions"></div>
+    </aside>
   </div>
 <script>
 const statusEl = document.getElementById('sse-status');
@@ -323,6 +485,8 @@ const emptyState = document.getElementById('emptyState');
 const chartCanvas = document.getElementById('globalChart');
 const pairViews = new Map();
 const datasetByPair = new Map();
+const modelAggregates = new Map();
+const modelPrimaryQuote = new Map();
 const colorPalette = [
   { line:'#111111', fill:'rgba(17,17,17,0.12)' },
   { line:'#d7263d', fill:'rgba(215,38,61,0.15)' },
@@ -341,10 +505,16 @@ const normalizeModel = (value) => {
   return value.trim();
 };
 
-const seriesLabel = (pair, model) => {
-  const safePair = pair || '—';
-  const safeModel = normalizeModel(model);
-  return safeModel ? safePair + ' · ' + safeModel : safePair;
+const extractQuoteCurrency = (pair) => {
+  if(!pair || typeof pair !== 'string'){ return 'UNKNOWN'; }
+  const parts = pair.split('_');
+  return parts.length > 1 ? parts[parts.length - 1] : 'UNKNOWN';
+};
+
+const shortenModelName = (model) => {
+  if(!model || typeof model !== 'string'){ return '—'; }
+  const parts = model.split('/');
+  return parts.length > 1 ? parts[parts.length - 1] : model;
 };
 
 Chart.defaults.font.family = "'Space Mono', 'JetBrains Mono', monospace";
@@ -405,14 +575,14 @@ const nextColor = () => {
   return color;
 };
 
-function ensureDataset(pair, model){
-  const key = seriesLabel(pair, model);
+function ensureDataset(model, quoteCurrency){
+  const key = model || '—';
   if(datasetByPair.has(key)){
     return datasetByPair.get(key);
   }
   const palette = nextColor();
   const dataset = {
-    label: key,
+    label: shortenModelName(key),
     data: new Array(globalChart.data.labels.length).fill(null),
     borderColor: palette.line,
     backgroundColor: palette.fill,
@@ -441,22 +611,20 @@ function appendGlobalLabel(label){
   }
 }
 
-function updateGlobalChart(pair, model, total, ts){
+function updateGlobalChart(model, quoteCurrency, totalBalance, ts){
   const tsDate = ts ? new Date(ts) : new Date();
   const labelDate = Number.isNaN(tsDate.getTime()) ? new Date() : tsDate;
   const tickLabel = labelDate.toLocaleTimeString([], { hour12:false });
   appendGlobalLabel(tickLabel);
-  const dataset = ensureDataset(pair, model);
-  dataset.data[dataset.data.length - 1] = total.numeric;
+  const dataset = ensureDataset(model, quoteCurrency);
+  dataset.data[dataset.data.length - 1] = totalBalance;
   globalChart.update('none');
 }
 
-function ensurePairView(pair, model){
-  const safePair = pair || '—';
-  const safeModel = normalizeModel(model);
-  const viewKey = seriesLabel(safePair, safeModel);
-  if(pairViews.has(viewKey)){
-    return pairViews.get(viewKey);
+function ensureModelView(model){
+  const safeModel = model || '—';
+  if(pairViews.has(safeModel)){
+    return pairViews.get(safeModel);
   }
 
   if(emptyState){
@@ -472,14 +640,11 @@ function ensurePairView(pair, model){
   labelsWrap.className = 'pair-card-labels';
   const title = document.createElement('h2');
   title.className = 'pair-name';
-  title.textContent = safePair;
-  const modelBadge = document.createElement('span');
-  modelBadge.className = safeModel ? 'pill' : 'pill muted';
-  modelBadge.textContent = 'Model ' + (safeModel || '—');
+  title.textContent = shortenModelName(safeModel);
   const updated = document.createElement('span');
   updated.className = 'pill muted';
   updated.textContent = 'Waiting…';
-  labelsWrap.append(title, modelBadge);
+  labelsWrap.append(title);
   header.append(labelsWrap, updated);
 
   const equity = document.createElement('div');
@@ -490,35 +655,16 @@ function ensurePairView(pair, model){
   const totalValue = document.createElement('div');
   totalValue.className = 'value';
   totalValue.textContent = '0';
-  const meta = document.createElement('div');
-  meta.className = 'meta';
-  const baseEl = document.createElement('span');
-  baseEl.className = 'pill';
-  baseEl.textContent = 'Base —';
-  const quoteEl = document.createElement('span');
-  quoteEl.className = 'pill';
-  quoteEl.textContent = 'Quote —';
-  const priceEl = document.createElement('span');
-  priceEl.className = 'pill muted';
-  priceEl.textContent = 'Price —';
-  const positionEl = document.createElement('span');
-  positionEl.className = 'pill';
-  positionEl.style.display = 'none';
-  meta.append(baseEl, quoteEl, priceEl, positionEl);
-  equity.append(label, totalValue, meta);
+  equity.append(label, totalValue);
 
   card.append(header, equity);
   pairContainer.appendChild(card);
 
   const view = {
     totalEl: totalValue,
-    updatedEl: updated,
-    baseEl,
-    quoteEl,
-    priceEl,
-    positionEl,
+    updatedEl: updated
   };
-  pairViews.set(viewKey, view);
+  pairViews.set(safeModel, view);
   return view;
 }
 
@@ -534,30 +680,59 @@ function deriveTotal(payload){
   return { numeric, display: numeric.toFixed(4) };
 }
 
-function renderNumbers(view, payload, total){
-  view.totalEl.textContent = total.display;
-  view.baseEl.textContent = payload.base ? 'Base ' + payload.base : 'Base —';
-  view.quoteEl.textContent = payload.quote ? 'Quote ' + payload.quote : 'Quote —';
-  view.priceEl.textContent = payload.price ? 'Price ' + payload.price : 'Price —';
-  view.updatedEl.textContent = formatTs(payload.ts);
-  if(view.positionEl){
-    const position = typeof payload.position === 'string' ? payload.position.trim() : '';
-    if(position){
-      view.positionEl.textContent = position;
-      view.positionEl.style.display = '';
-    }else{
-      view.positionEl.textContent = '';
-      view.positionEl.style.display = 'none';
+function renderModelNumbers(view, aggregate){
+  const quoteCurrency = aggregate.quoteCurrency || '';
+  view.totalEl.textContent = aggregate.totalBalance.toFixed(2) + (quoteCurrency ? ' ' + quoteCurrency : '');
+
+  let latestTimestamp = null;
+  for(const [, pairData] of aggregate.pairs){
+    if(!latestTimestamp || (pairData.timestamp && new Date(pairData.timestamp) > new Date(latestTimestamp))){
+      latestTimestamp = pairData.timestamp;
     }
   }
+  view.updatedEl.textContent = formatTs(latestTimestamp);
 }
 
 function handlePayload(payload){
   const pairLabel = payload.pair || '—';
-  const view = ensurePairView(pairLabel, payload.model);
+  const model = normalizeModel(payload.model);
+  const quoteCurrency = extractQuoteCurrency(pairLabel);
+
+  if(!modelPrimaryQuote.has(model)){
+    modelPrimaryQuote.set(model, quoteCurrency);
+  }
+
+  const primaryQuote = modelPrimaryQuote.get(model);
+  if(quoteCurrency !== primaryQuote){
+    return;
+  }
+
+  let aggregate = modelAggregates.get(model);
+  if(!aggregate){
+    aggregate = {
+      model: model,
+      quoteCurrency: quoteCurrency,
+      pairs: new Map(),
+      totalBalance: 0
+    };
+    modelAggregates.set(model, aggregate);
+  }
+
   const total = deriveTotal(payload);
-  renderNumbers(view, payload, total);
-  updateGlobalChart(pairLabel, payload.model, total, payload.ts);
+  aggregate.pairs.set(pairLabel, {
+    totalQuote: total.numeric,
+    timestamp: payload.ts
+  });
+
+  let totalBalance = 0;
+  for(const [, pairData] of aggregate.pairs){
+    totalBalance += pairData.totalQuote;
+  }
+  aggregate.totalBalance = totalBalance;
+
+  const view = ensureModelView(model);
+  renderModelNumbers(view, aggregate);
+  updateGlobalChart(model, quoteCurrency, aggregate.totalBalance, payload.ts);
 }
 
 function connectSSE(){
@@ -579,6 +754,115 @@ function connectSSE(){
 }
 
 connectSSE();
+
+// AI Decisions Stream
+const aiDecisionsContainer = document.getElementById('aiDecisions');
+const MAX_DECISIONS = 50;
+
+function formatTime(ts){
+  if(!ts) return '';
+  const date = new Date(ts);
+  if(Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString([], { hour12:false });
+}
+
+function createDecisionCard(decision){
+  const card = document.createElement('div');
+  card.className = 'ai-decision-card';
+
+  const header = document.createElement('div');
+  header.className = 'ai-decision-header';
+
+  const action = document.createElement('div');
+  action.className = 'ai-decision-action ' + decision.action;
+  action.textContent = decision.action.replace(/_/g, ' ');
+
+  const time = document.createElement('div');
+  time.className = 'ai-decision-time';
+  time.textContent = formatTime(decision.ts);
+
+  header.append(action, time);
+  card.appendChild(header);
+
+  if(decision.pair){
+    const pair = document.createElement('div');
+    pair.style.fontWeight = '700';
+    pair.style.marginBottom = '.5rem';
+    pair.textContent = decision.pair;
+    card.appendChild(pair);
+  }
+
+  const meta = document.createElement('div');
+  meta.className = 'ai-decision-meta';
+
+  if(decision.current_price){
+    const price = document.createElement('span');
+    price.className = 'ai-meta-pill';
+    price.textContent = 'Price: ' + parseFloat(decision.current_price).toFixed(2);
+    meta.appendChild(price);
+  }
+
+  if(decision.risk_percent){
+    const risk = document.createElement('span');
+    risk.className = 'ai-meta-pill';
+    risk.textContent = 'Risk: ' + decision.risk_percent.toFixed(1) + '%';
+    meta.appendChild(risk);
+  }
+
+  if(decision.take_profit_price){
+    const tp = document.createElement('span');
+    tp.className = 'ai-meta-pill';
+    tp.textContent = 'TP: ' + decision.take_profit_price.toFixed(2);
+    meta.appendChild(tp);
+  }
+
+  if(decision.stop_loss_price){
+    const sl = document.createElement('span');
+    sl.className = 'ai-meta-pill';
+    sl.textContent = 'SL: ' + decision.stop_loss_price.toFixed(2);
+    meta.appendChild(sl);
+  }
+
+  if(meta.children.length > 0){
+    card.appendChild(meta);
+  }
+
+  if(decision.reasoning){
+    const reasoning = document.createElement('div');
+    reasoning.className = 'ai-decision-reasoning';
+    reasoning.textContent = '"' + decision.reasoning + '"';
+    card.appendChild(reasoning);
+  }
+
+  return card;
+}
+
+function connectAIDecisionSSE(){
+  const source = new EventSource('/ai/decisions/stream');
+
+  source.addEventListener('ai_decision', (event) => {
+    try{
+      const decision = JSON.parse(event.data);
+      const card = createDecisionCard(decision);
+      aiDecisionsContainer.insertBefore(card, aiDecisionsContainer.firstChild);
+
+      // Limit number of displayed decisions
+      while(aiDecisionsContainer.children.length > MAX_DECISIONS){
+        aiDecisionsContainer.removeChild(aiDecisionsContainer.lastChild);
+      }
+    }catch(err){
+      console.error('AI decision parse error', err);
+    }
+  });
+
+  source.addEventListener('error', () => {
+    console.log('AI decision stream reconnecting...');
+    source.close();
+    setTimeout(connectAIDecisionSSE, 2000);
+  });
+}
+
+connectAIDecisionSSE();
 </script>
 </body>
 </html>`

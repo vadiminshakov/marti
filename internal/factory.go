@@ -117,6 +117,7 @@ func createTradingStrategy(
 	pricer Pricer,
 	tradeSvc traderService,
 	client any,
+	decisionStore aiDecisionWriter,
 ) (TradingStrategy, error) {
 	switch conf.StrategyType {
 	case "dca":
@@ -131,7 +132,7 @@ func createTradingStrategy(
 			conf.DcaPercentThresholdSell,
 		)
 	case "ai":
-		return createAIStrategy(logger, conf, pricer, tradeSvc, client)
+		return createAIStrategy(logger, conf, pricer, tradeSvc, client, decisionStore)
 	default:
 		return nil, fmt.Errorf("unsupported strategy type: %s", conf.StrategyType)
 	}
@@ -172,6 +173,7 @@ func createAIStrategy(
 	pricer Pricer,
 	tradeSvc traderService,
 	client any,
+	decisionStore aiDecisionWriter,
 ) (TradingStrategy, error) {
 	type aiStrategyKlineProvider interface {
 		GetKlines(ctx context.Context, pair entity.Pair, interval string, limit int) ([]entity.MarketCandle, error)
@@ -241,6 +243,8 @@ func createAIStrategy(
 		conf.HigherTimeframe,
 		conf.LookbackPeriods,
 		conf.HigherLookbackPeriods,
+		decisionStore,
+		conf.Model,
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create AI strategy")

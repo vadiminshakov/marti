@@ -39,10 +39,14 @@ type balanceSnapshotWriter interface {
 	Save(snapshot entity.BalanceSnapshot) error
 }
 
+type aiDecisionWriter interface {
+	Save(event entity.AIDecisionEvent) error
+}
+
 // NewTradingBot creates a new trading bot instance with the specified configuration, exchange client, and logger.
 // It initializes the appropriate trader and pricer components based on the platform specified in the config,
 // and sets up the trading strategy with the provided parameters.
-func NewTradingBot(logger *zap.Logger, conf config.Config, client any, balanceStore balanceSnapshotWriter) (*TradingBot, error) {
+func NewTradingBot(logger *zap.Logger, conf config.Config, client any, balanceStore balanceSnapshotWriter, decisionStore aiDecisionWriter) (*TradingBot, error) {
 	// for AI strategy, use MaxLeverage; for DCA strategy, use Leverage
 	leverage := conf.Leverage
 	if conf.StrategyType == "ai" {
@@ -69,6 +73,7 @@ func NewTradingBot(logger *zap.Logger, conf config.Config, client any, balanceSt
 		currentPricer,
 		currentTrader,
 		client,
+		decisionStore,
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create trading strategy")

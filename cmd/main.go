@@ -25,6 +25,7 @@ import (
 	"github.com/vadiminshakov/marti/config"
 	"github.com/vadiminshakov/marti/internal"
 	"github.com/vadiminshakov/marti/internal/clients"
+	"github.com/vadiminshakov/marti/internal/storage/aidecisions"
 	"github.com/vadiminshakov/marti/internal/storage/balancesnapshots"
 	"github.com/vadiminshakov/marti/internal/web"
 	"go.uber.org/zap"
@@ -53,6 +54,16 @@ func main() {
 	defer func() {
 		if err := snapshotStore.Close(); err != nil {
 			logger.Warn("Failed to close snapshot store", zap.Error(err))
+		}
+	}()
+
+	aiDecisionStore, err := aidecisions.NewWALStore("")
+	if err != nil {
+		logger.Fatal("Failed to initialize AI decision store", zap.Error(err))
+	}
+	defer func() {
+		if err := aiDecisionStore.Close(); err != nil {
+			logger.Warn("Failed to close AI decision store", zap.Error(err))
 		}
 	}()
 
@@ -117,7 +128,7 @@ func main() {
 			zap.String("pair", cfg.Pair.String()),
 		)
 
-		bot, err := internal.NewTradingBot(botLogger, cfg, client, snapshotStore)
+		bot, err := internal.NewTradingBot(botLogger, cfg, client, snapshotStore, aiDecisionStore)
 		if err != nil {
 			botLogger.Fatal("Failed to create trading bot", zap.Error(err))
 		}
@@ -139,7 +150,7 @@ func main() {
 			defer wg.Done()
 			webLogger := logger.With(zap.String("component", "web"))
 			webLogger.Info("Starting web UI", zap.String("addr", webAddr))
-			srv := web.NewServer(webAddr, snapshotStore)
+			srv := web.NewServer(webAddr, snapshotStore, aiDecisionStore)
 			if err := srv.Start(ctx); err != nil && ctx.Err() == nil {
 				webLogger.Error("Web server exited", zap.Error(err))
 			}
