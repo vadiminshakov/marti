@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -33,11 +34,12 @@ type OpenAICompatibleClient struct {
 	promptBuilder *promptbuilder.PromptBuilder
 	maxRetries    int
 	retryDelay    time.Duration
+	customHeaders map[string]string
 }
 
 // NewOpenAICompatibleClient creates a new client for OpenAI-compatible APIs
 func NewOpenAICompatibleClient(apiURL, apiKey, model string, promptBuilder *promptbuilder.PromptBuilder) *OpenAICompatibleClient {
-	return &OpenAICompatibleClient{
+	client := &OpenAICompatibleClient{
 		apiURL:        apiURL,
 		apiKey:        apiKey,
 		model:         model,
@@ -45,17 +47,44 @@ func NewOpenAICompatibleClient(apiURL, apiKey, model string, promptBuilder *prom
 		httpClient: &http.Client{
 			Timeout: defaultTimeout,
 		},
-		maxRetries: defaultMaxRetries,
-		retryDelay: defaultRetryDelay,
+		maxRetries:    defaultMaxRetries,
+		retryDelay:    defaultRetryDelay,
+		customHeaders: make(map[string]string),
+	}
+
+	client.setProviderSpecificHeaders()
+
+	return client
+}
+
+// setProviderSpecificHeaders configures provider-specific headers and settings
+func (c *OpenAICompatibleClient) setProviderSpecificHeaders() {
+	if strings.Contains(c.apiURL, "yandex") || strings.Contains(c.apiURL, "yandex.net") {
+		// For Yandex GPT, extract folder ID from model name like "gpt://folder/model"
+		if strings.HasPrefix(c.model, "gpt://") {
+			parts := strings.SplitN(strings.TrimPrefix(c.model, "gpt://"), "/", 2)
+			if len(parts) >= 1 {
+				c.customHeaders["OpenAI-Project"] = parts[0]
+			}
+		}
 	}
 }
 
 // chatRequest represents the request structure for OpenAI-compatible APIs
 type chatRequest struct {
 	Model       string    `json:"model"`
-	Messages    []message `json:"messages"`
+	Messages    []message `json:"messages,omitempty"`
 	Temperature float64   `json:"temperature,omitempty"`
 	MaxTokens   int       `json:"max_tokens,omitempty"`
+}
+
+// yandexRequest represents the request structure for Yandex GPT API
+type yandexRequest struct {
+	Model           string  `json:"model"`
+	Instructions    string  `json:"instructions"`
+	Input           string  `json:"input"`
+	Temperature     float64 `json:"temperature,omitempty"`
+	MaxOutputTokens int     `json:"max_output_tokens,omitempty"`
 }
 
 type message struct {
@@ -92,6 +121,11 @@ type apiError struct {
 	Code    string `json:"code"`
 }
 
+// isYandexAPI checks if the API endpoint is Yandex GPT
+func (c *OpenAICompatibleClient) isYandexAPI() bool {
+	return strings.Contains(c.apiURL, "yandex") || strings.Contains(c.apiURL, "yandex.net")
+}
+
 // GetDecision builds prompts, sends a chat request to the LLM API, and returns the response
 func (c *OpenAICompatibleClient) GetDecision(ctx context.Context, marketContext promptbuilder.MarketContext) (string, error) {
 	if c.apiKey == "" {
@@ -100,6 +134,38 @@ func (c *OpenAICompatibleClient) GetDecision(ctx context.Context, marketContext 
 
 	userPrompt := c.promptBuilder.BuildUserPrompt(marketContext)
 
+	var lastErr error
+	for attempt := 0; attempt < c.maxRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(c.retryDelay):
+			}
+		}
+
+		var response string
+		var err error
+
+		if c.isYandexAPI() {
+			response, err = c.getYandexDecision(ctx, userPrompt)
+		} else {
+			response, err = c.getOpenAIDecision(ctx, userPrompt)
+		}
+
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		return response, nil
+	}
+
+	return "", errors.Wrapf(lastErr, "failed after %d retries", c.maxRetries)
+}
+
+// getOpenAIDecision handles standard OpenAI-compatible API requests
+func (c *OpenAICompatibleClient) getOpenAIDecision(ctx context.Context, userPrompt string) (string, error) {
 	reqBody := chatRequest{
 		Model: c.model,
 		Messages: []message{
@@ -113,29 +179,21 @@ func (c *OpenAICompatibleClient) GetDecision(ctx context.Context, marketContext 
 			},
 		},
 		Temperature: 0.0, // deterministic responses for trading decisions
-		MaxTokens:   18000,
+		MaxTokens:   8000,
 	}
+	return c.sendRequest(ctx, reqBody)
+}
 
-	var lastErr error
-	for attempt := 0; attempt < c.maxRetries; attempt++ {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return "", ctx.Err()
-			case <-time.After(c.retryDelay):
-			}
-		}
-
-		response, err := c.sendRequest(ctx, reqBody)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		return response, nil
+// getYandexDecision handles Yandex GPT API requests
+func (c *OpenAICompatibleClient) getYandexDecision(ctx context.Context, userPrompt string) (string, error) {
+	reqBody := yandexRequest{
+		Model:           c.model,
+		Instructions:    promptbuilder.SystemPrompt,
+		Input:           userPrompt,
+		Temperature:     0.0, // deterministic responses for trading decisions
+		MaxOutputTokens: 8000,
 	}
-
-	return "", errors.Wrapf(lastErr, "failed after %d retries", c.maxRetries)
+	return c.sendYandexRequest(ctx, reqBody)
 }
 
 func (c *OpenAICompatibleClient) sendRequest(ctx context.Context, reqBody chatRequest) (string, error) {
@@ -151,6 +209,11 @@ func (c *OpenAICompatibleClient) sendRequest(ctx context.Context, reqBody chatRe
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
+
+	// Add custom headers for specific providers
+	for key, value := range c.customHeaders {
+		req.Header.Set(key, value)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -182,4 +245,85 @@ func (c *OpenAICompatibleClient) sendRequest(ctx context.Context, reqBody chatRe
 	}
 
 	return chatResp.Choices[0].Message.Content, nil
+}
+
+func (c *OpenAICompatibleClient) sendYandexRequest(ctx context.Context, reqBody yandexRequest) (string, error) {
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to marshal Yandex request")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.apiURL+"/responses", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", errors.Wrap(err, "failed to create Yandex HTTP request")
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
+
+	// Add custom headers for Yandex
+	for key, value := range c.customHeaders {
+		req.Header.Set(key, value)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", errors.Wrap(err, "Yandex API request failed")
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to read Yandex response body")
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Yandex API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var yandexResp yandexResponse
+	if err := json.Unmarshal(body, &yandexResp); err != nil {
+		return "", errors.Wrap(err, "failed to unmarshal Yandex response")
+	}
+
+	if yandexResp.Error != nil {
+		return "", fmt.Errorf("Yandex API error: %s (type: %s, code: %s)",
+			yandexResp.Error.Message, yandexResp.Error.Type, yandexResp.Error.Code)
+	}
+
+	// Extract the response text from the output array
+	if len(yandexResp.Output) == 0 || len(yandexResp.Output[0].Content) == 0 {
+		return "", errors.New("Yandex API returned empty output")
+	}
+
+	// Clean up the response - remove markdown code blocks if present
+	responseText := yandexResp.Output[0].Content[0].Text
+	responseText = strings.TrimSpace(responseText)
+
+	// Remove markdown code blocks
+	if strings.HasPrefix(responseText, "```json") {
+		responseText = strings.TrimPrefix(responseText, "```json")
+	}
+	if strings.HasPrefix(responseText, "```") && !strings.HasPrefix(responseText, "```json") {
+		responseText = strings.TrimPrefix(responseText, "```")
+	}
+	if strings.HasSuffix(responseText, "```") {
+		responseText = strings.TrimSuffix(responseText, "```")
+	}
+
+	return strings.TrimSpace(responseText), nil
+}
+
+// yandexResponse represents the response structure from Yandex GPT API
+type yandexResponse struct {
+	Output []struct {
+		Content []struct {
+			Text string `json:"text"`
+			Type string `json:"type"`
+		} `json:"content"`
+		Role   string `json:"role"`
+		Status string `json:"status"`
+		Type   string `json:"type"`
+	} `json:"output,omitempty"`
+	Error *apiError `json:"error,omitempty"`
 }
