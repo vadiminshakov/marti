@@ -35,8 +35,8 @@ func TestDCAStrategy_WithSimulationTrader(t *testing.T) {
 	price := decimal.NewFromInt(50000)
 	pr := &mockSimulatePricer{price: price}
 
-	// create simulation trader
-	simTrader, err := trader.NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pr, "")
+	// create simulation trader with unique stateKey
+	simTrader, err := trader.NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pr, t.Name())
 	require.NoError(t, err)
 
 	// verify initial balances
@@ -75,7 +75,7 @@ func TestDCAStrategy_SimulationApplyTrade(t *testing.T) {
 	// pricer for simulation
 	pr := &mockSimulatePricer{}
 
-	simTrader, err := trader.NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pr, "")
+	simTrader, err := trader.NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pr, t.Name())
 	require.NoError(t, err)
 
 	// test buy with 5000 USDT (0.1 BTC at 50000)
