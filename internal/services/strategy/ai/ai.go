@@ -469,25 +469,29 @@ func (s *AIStrategy) saveDecision(decision *entity.Decision, snapshot entity.Mar
 		return nil
 	}
 
-	event := entity.AIDecisionEvent{
-		Timestamp:             time.Now().UTC(),
-		Pair:                  s.pair.String(),
-		Model:                 s.modelName,
-		Action:                decision.Action,
-		Reasoning:             decision.Reasoning,
-		RiskPercent:           decision.RiskPercent,
-		TakeProfitPrice:       decision.ExitPlan.TakeProfitPrice,
-		StopLossPrice:         decision.ExitPlan.StopLossPrice,
-		InvalidationCondition: decision.ExitPlan.InvalidationCondition,
-		CurrentPrice:          snapshot.Price().String(),
-		QuoteBalance:          snapshot.QuoteBalance.String(),
+	var positionAmount, positionSide, positionEntryPrice string
+	if position != nil {
+		positionAmount = position.Amount.String()
+		positionSide = position.Side.String()
+		positionEntryPrice = position.EntryPrice.String()
 	}
 
-	if position != nil {
-		event.PositionAmount = position.Amount.String()
-		event.PositionSide = position.Side.String()
-		event.PositionEntryPrice = position.EntryPrice.String()
-	}
+	event := entity.NewAIDecisionEvent(
+		time.Now().UTC(),
+		s.pair.String(),
+		s.modelName,
+		decision.Action,
+		decision.Reasoning,
+		decision.RiskPercent,
+		decision.ExitPlan.TakeProfitPrice,
+		decision.ExitPlan.StopLossPrice,
+		decision.ExitPlan.InvalidationCondition,
+		snapshot.Price().String(),
+		snapshot.QuoteBalance.String(),
+		positionAmount,
+		positionSide,
+		positionEntryPrice,
+	)
 
 	return s.decisionStore.Save(event)
 }
