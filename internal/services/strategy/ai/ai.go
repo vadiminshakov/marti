@@ -113,60 +113,51 @@ func (s *AIStrategy) Initialize(ctx context.Context) error {
 // Trade performs one AI evaluation and potential action.
 func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 	// collect market data and indicators
+	snapshot, position, err := s.gatherMarketData(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	s.logMarketState(snapshot, position)
+
+	// get decision from LLM
+	decision, err := s.getAndValidateDecision(ctx, snapshot, position)
+	if err != nil {
+		return nil, err
+	}
+
+	// save decision to WAL
+	if err := s.saveDecision(decision, snapshot, position); err != nil {
+		s.logger.Warn("Failed to save AI decision event", zap.Error(err))
+	}
+
+	// execute decision
+	return s.executeDecision(ctx, decision, snapshot, position)
+}
+
+func (s *AIStrategy) gatherMarketData(ctx context.Context) (entity.MarketSnapshot, *entity.Position, error) {
 	primaryFrame, err := s.marketData.FetchTimeframeData(ctx, s.primaryTimeframe, s.primaryLookback)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to get market data")
+		return entity.MarketSnapshot{}, nil, errors.Wrap(err, "failed to get market data")
 	}
 
 	if primaryFrame == nil || len(primaryFrame.Candles) == 0 {
-		return nil, errors.New("insufficient market data")
+		return entity.MarketSnapshot{}, nil, errors.New("insufficient market data")
 	}
 
 	if len(primaryFrame.Indicators) == 0 || primaryFrame.Summary == nil {
-		return nil, errors.New("insufficient indicator data for primary timeframe")
+		return entity.MarketSnapshot{}, nil, errors.New("insufficient indicator data for primary timeframe")
 	}
-
-	currentPrice := primaryFrame.Summary.Price
 
 	quoteBalance, err := s.trader.GetBalance(ctx, s.pair.To)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to get margin balance")
+		return entity.MarketSnapshot{}, nil, errors.Wrap(err, "failed to get margin balance")
 	}
 
 	position, err := s.trader.GetPosition(ctx, s.pair)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to get position")
+		return entity.MarketSnapshot{}, nil, errors.Wrap(err, "failed to get position")
 	}
-
-	baseBalance, baseErr := s.trader.GetBalance(ctx, s.pair.From)
-	if baseErr != nil {
-		s.logger.Warn("Failed to get base currency balance for logs",
-			zap.Error(baseErr),
-			zap.String("currency", s.pair.From))
-	}
-
-	logFields := []zap.Field{
-		zap.String("price", currentPrice.StringFixed(2)),
-		zap.String(s.pair.To+"_balance", quoteBalance.StringFixed(2)),
-	}
-
-	if position != nil {
-		logFields = append(logFields,
-			zap.String("position_amount", position.Amount.StringFixed(8)),
-			zap.String("position_entry", position.EntryPrice.StringFixed(2)))
-	}
-
-	if baseErr == nil {
-		logFields = append(logFields,
-			zap.String(s.pair.From+"_balance", baseBalance.StringFixed(2)))
-	}
-
-	if position != nil {
-		logFields = append(logFields,
-			zap.String("position_pnl", position.PnL(currentPrice).StringFixed(2)))
-	}
-
-	s.logger.Info("Market analysis", logFields...)
 
 	// fetch higher timeframe data for multi-timeframe analysis
 	higherTimeframeData, err := s.marketData.FetchTimeframeData(ctx, s.higherTimeframe, s.higherLookback)
@@ -187,14 +178,37 @@ func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 		HigherTimeFrame:  higherTimeframeData,
 	}
 
-	// get decision from LLM
+	return snapshot, position, nil
+}
+
+func (s *AIStrategy) logMarketState(snapshot entity.MarketSnapshot, position *entity.Position) {
+	currentPrice := snapshot.Price()
+	logFields := []zap.Field{
+		zap.String("price", currentPrice.StringFixed(2)),
+		zap.String(s.pair.To+"_balance", snapshot.QuoteBalance.StringFixed(2)),
+	}
+
+	if position != nil {
+		logFields = append(logFields,
+			zap.String("position_amount", position.Amount.StringFixed(8)),
+			zap.String("position_entry", position.EntryPrice.StringFixed(2)),
+			zap.String("position_pnl", position.PnL(currentPrice).StringFixed(2)))
+	}
+
+	s.logger.Info("Market analysis", logFields...)
+}
+
+func (s *AIStrategy) getAndValidateDecision(
+	ctx context.Context,
+	snapshot entity.MarketSnapshot,
+	position *entity.Position,
+) (*entity.Decision, error) {
 	response, err := s.llmClient.GetDecision(ctx, s.buildMarketContext(snapshot, position))
 	if err != nil {
 		s.logger.Error("Failed to get AI response", zap.Error(err))
 		return nil, errors.Wrap(err, "failed to get AI decision")
 	}
 
-	// parse and validate decision
 	decision, err := entity.NewDecision(response)
 	if err != nil {
 		s.logger.Error("Decision validation failed",
@@ -219,13 +233,7 @@ func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 
 	s.logger.Info("AI decision", decisionFields...)
 
-	// save decision to WAL
-	if err := s.saveDecision(decision, snapshot, position); err != nil {
-		s.logger.Warn("Failed to save AI decision event", zap.Error(err))
-	}
-
-	// execute decision
-	return s.executeDecision(ctx, decision, snapshot, position)
+	return decision, nil
 }
 
 // buildMarketContext assembles data passed to LLM.
@@ -248,13 +256,13 @@ func (s *AIStrategy) executeDecision(
 ) (*entity.TradeEvent, error) {
 	switch decision.Action {
 	case "open_long":
-		return s.executeBuy(ctx, decision, snapshot, position)
+		return s.executeEntry(ctx, entity.PositionSideLong, decision, snapshot, position)
 	case "close_long":
-		return s.executeSell(ctx, snapshot.Price(), position)
+		return s.executeExit(ctx, entity.PositionSideLong, position, snapshot.Price())
 	case "open_short":
-		return s.executeOpenShort(ctx, decision, snapshot, position)
+		return s.executeEntry(ctx, entity.PositionSideShort, decision, snapshot, position)
 	case "close_short":
-		return s.executeCloseShort(ctx, snapshot.Price(), position)
+		return s.executeExit(ctx, entity.PositionSideShort, position, snapshot.Price())
 	case "hold":
 		return nil, nil
 	default:
@@ -262,38 +270,53 @@ func (s *AIStrategy) executeDecision(
 	}
 }
 
-// executeBuy opens or adds to long position.
-func (s *AIStrategy) executeBuy(
+// executeEntry opens or adds to a position.
+func (s *AIStrategy) executeEntry(
 	ctx context.Context,
+	side entity.PositionSide,
 	decision *entity.Decision,
 	snapshot entity.MarketSnapshot,
 	position *entity.Position,
 ) (*entity.TradeEvent, error) {
+	// Validate position side
+	if position != nil && position.Side != side {
+		s.logger.Warn("Cannot open position: opposite position already exists",
+			zap.String("existing_side", position.Side.String()),
+			zap.String("requested_side", side.String()))
+		return nil, nil
+	}
+
 	if position != nil {
-		s.logger.Info("Adding to existing long position")
+		s.logger.Info("Adding to existing position", zap.String("side", side.String()))
 	} else {
-		s.logger.Info("Opening new long position")
+		s.logger.Info("Opening new position", zap.String("side", side.String()))
 	}
 
 	// calculate position size based on risk percent
 	budget := entity.NewRiskBudget(decision.RiskPercent)
 	positionValue, amount := budget.Allocate(snapshot.QuoteBalance, snapshot.Price())
 	if amount.LessThanOrEqual(decimal.Zero) {
-		s.logger.Warn("Calculated position amount is zero; skipping buy execution",
+		s.logger.Warn("Calculated position amount is zero; skipping execution",
 			zap.String("quote_balance", snapshot.QuoteBalance.String()))
 		return nil, nil
 	}
 
 	orderID := uuid.New().String()
 
-	s.logger.Info("Executing AI buy order",
+	s.logger.Info("Executing AI entry order",
+		zap.String("side", side.String()),
 		zap.String("amount", amount.String()),
 		zap.String("price", snapshot.Price().String()),
 		zap.String("position_value", positionValue.StringFixed(2)),
 		zap.String("order_id", orderID))
 
-	if err := s.trader.ExecuteAction(ctx, entity.ActionOpenLong, amount, orderID); err != nil {
-		return nil, errors.Wrap(err, "failed to execute buy order")
+	action := entity.ActionOpenLong
+	if side == entity.PositionSideShort {
+		action = entity.ActionOpenShort
+	}
+
+	if err := s.trader.ExecuteAction(ctx, action, amount, orderID); err != nil {
+		return nil, errors.Wrapf(err, "failed to execute %s order", action)
 	}
 
 	exitPlan := decision.ExitPlan
@@ -312,155 +335,62 @@ func (s *AIStrategy) executeBuy(
 	}
 
 	return &entity.TradeEvent{
-		Action: entity.ActionOpenLong,
+		Action: action,
 		Amount: amount,
 		Pair:   s.pair,
 		Price:  snapshot.Price(),
 	}, nil
 }
 
-// executeSell closes long position.
-func (s *AIStrategy) executeSell(ctx context.Context, currentPrice decimal.Decimal, position *entity.Position) (*entity.TradeEvent, error) {
+// executeExit closes a position.
+func (s *AIStrategy) executeExit(
+	ctx context.Context,
+	side entity.PositionSide,
+	position *entity.Position,
+	currentPrice decimal.Decimal,
+) (*entity.TradeEvent, error) {
 	if position == nil {
-		s.logger.Warn("Received 'sell' action without an open position, treating as HOLD")
+		s.logger.Warn("Received exit action without an open position, treating as HOLD")
 		return nil, nil
 	}
 
-	if position.Side != entity.PositionSideLong {
-		s.logger.Warn("Cannot close long: position is not long",
-			zap.String("position_side", position.Side.String()))
+	if position.Side != side {
+		s.logger.Warn("Cannot close position: position side mismatch",
+			zap.String("position_side", position.Side.String()),
+			zap.String("requested_side", side.String()))
 		return nil, nil
 	}
 
 	orderID := uuid.New().String()
 
-	s.logger.Info("Closing long position",
+	s.logger.Info("Closing position",
+		zap.String("side", side.String()),
 		zap.String("entry_price", position.EntryPrice.String()),
 		zap.String("current_price", currentPrice.String()),
 		zap.String("amount", position.Amount.String()),
 		zap.String("order_id", orderID))
 
-	if err := s.trader.ExecuteAction(ctx, entity.ActionCloseLong, position.Amount, orderID); err != nil {
-		return nil, errors.Wrap(err, "failed to execute sell order")
+	action := entity.ActionCloseLong
+	if side == entity.PositionSideShort {
+		action = entity.ActionCloseShort
+	}
+
+	if err := s.trader.ExecuteAction(ctx, action, position.Amount, orderID); err != nil {
+		return nil, errors.Wrapf(err, "failed to execute %s order", action)
 	}
 
 	// calculate P&L
 	pnl := position.PnL(currentPrice)
-	s.logger.Info("Long position closed",
+	s.logger.Info("Position closed",
+		zap.String("side", side.String()),
 		zap.String("pnl", pnl.String()))
-
-	tradeEvent := &entity.TradeEvent{
-		Action: entity.ActionCloseLong,
-		Amount: position.Amount,
-		Pair:   s.pair,
-		Price:  currentPrice,
-	}
-
-	return tradeEvent, nil
-}
-
-// executeOpenShort opens or adds to short position.
-func (s *AIStrategy) executeOpenShort(
-	ctx context.Context,
-	decision *entity.Decision,
-	snapshot entity.MarketSnapshot,
-	position *entity.Position,
-) (*entity.TradeEvent, error) {
-	if position != nil && position.Side == entity.PositionSideLong {
-		s.logger.Warn("Cannot open short: long position already exists")
-		return nil, nil
-	}
-
-	if position != nil && position.Side == entity.PositionSideShort {
-		s.logger.Info("Adding to existing short position")
-	} else {
-		s.logger.Info("Opening new short position")
-	}
-
-	// calculate position size based on risk percent
-	budget := entity.NewRiskBudget(decision.RiskPercent)
-	positionValue, amount := budget.Allocate(snapshot.QuoteBalance, snapshot.Price())
-	if amount.LessThanOrEqual(decimal.Zero) {
-		s.logger.Warn("Calculated position amount is zero; skipping short execution",
-			zap.String("quote_balance", snapshot.QuoteBalance.String()))
-		return nil, nil
-	}
-
-	orderID := uuid.New().String()
-
-	s.logger.Info("Executing AI open short order",
-		zap.String("amount", amount.String()),
-		zap.String("price", snapshot.Price().String()),
-		zap.String("position_value", positionValue.StringFixed(2)),
-		zap.String("order_id", orderID))
-
-	// use ExecuteAction for opening short
-	if err := s.trader.ExecuteAction(ctx, entity.ActionOpenShort, amount, orderID); err != nil {
-		return nil, errors.Wrap(err, "failed to execute open short order")
-	}
-
-	exitPlan := decision.ExitPlan
-	takeProfit := decimal.NewFromFloat(exitPlan.TakeProfitPrice)
-	stopLoss := decimal.NewFromFloat(exitPlan.StopLossPrice)
-
-	if takeProfit.GreaterThan(decimal.Zero) || stopLoss.GreaterThan(decimal.Zero) {
-		if err := s.trader.SetPositionStops(ctx, s.pair, takeProfit, stopLoss); err != nil {
-			s.logger.Warn("Failed to update position stops on exchange", zap.Error(err))
-		} else {
-			s.logger.Info("Updated position stops",
-				zap.String("pair", s.pair.Symbol()),
-				zap.String("take_profit", takeProfit.String()),
-				zap.String("stop_loss", stopLoss.String()))
-		}
-	}
 
 	return &entity.TradeEvent{
-		Action: entity.ActionOpenShort,
-		Amount: amount,
-		Pair:   s.pair,
-		Price:  snapshot.Price(),
-	}, nil
-}
-
-// executeCloseShort closes short position.
-func (s *AIStrategy) executeCloseShort(ctx context.Context, currentPrice decimal.Decimal, position *entity.Position) (*entity.TradeEvent, error) {
-	if position == nil {
-		s.logger.Warn("Received 'close_short' action without an open position")
-		return nil, nil
-	}
-
-	if position.Side != entity.PositionSideShort {
-		s.logger.Warn("Cannot close short: position is not short",
-			zap.String("position_side", position.Side.String()))
-		return nil, nil
-	}
-
-	orderID := uuid.New().String()
-
-	s.logger.Info("Closing short position",
-		zap.String("entry_price", position.EntryPrice.String()),
-		zap.String("current_price", currentPrice.String()),
-		zap.String("amount", position.Amount.String()),
-		zap.String("order_id", orderID))
-
-	// use ExecuteAction for closing short (buy to close)
-	if err := s.trader.ExecuteAction(ctx, entity.ActionCloseShort, position.Amount, orderID); err != nil {
-		return nil, errors.Wrap(err, "failed to execute close short order")
-	}
-
-	// calculate P&L (for short: profit when price goes down)
-	pnl := position.PnL(currentPrice)
-	s.logger.Info("Short position closed",
-		zap.String("pnl", pnl.String()))
-
-	tradeEvent := &entity.TradeEvent{
-		Action: entity.ActionCloseShort,
+		Action: action,
 		Amount: position.Amount,
 		Pair:   s.pair,
 		Price:  currentPrice,
-	}
-
-	return tradeEvent, nil
+	}, nil
 }
 
 // saveDecision persists the AI decision event to WAL.

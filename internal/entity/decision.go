@@ -36,23 +36,8 @@ func NewDecision(raw string) (*Decision, error) {
 		return nil, errors.Wrap(err, "JSON unmarshal error")
 	}
 
-	if err := validateDecisionRequiredFields(&decision); err != nil {
-		return nil, errors.Wrap(err, "missing required fields")
-	}
-
-	if err := validateDecisionAction(&decision); err != nil {
+	if err := decision.Validate(); err != nil {
 		return nil, err
-	}
-
-	if err := validateDecisionRiskPercent(&decision); err != nil {
-		return nil, err
-	}
-
-	// exit plan is required for opening positions (open_long, open_short)
-	if decision.Action == "open_long" || decision.Action == "open_short" {
-		if err := validateDecisionExitPlan(&decision); err != nil {
-			return nil, errors.Wrap(err, "exit plan validation error")
-		}
 	}
 
 	return &decision, nil
@@ -66,17 +51,41 @@ func sanitizeDecisionPayload(raw string) string {
 	return strings.TrimSpace(response)
 }
 
-func validateDecisionRequiredFields(decision *Decision) error {
-	if decision.Action == "" {
+// Validate checks if the decision is valid.
+func (d *Decision) Validate() error {
+	if err := d.validateRequiredFields(); err != nil {
+		return errors.Wrap(err, "missing required fields")
+	}
+
+	if err := d.validateAction(); err != nil {
+		return err
+	}
+
+	if err := d.validateRiskPercent(); err != nil {
+		return err
+	}
+
+	// exit plan is required for opening positions (open_long, open_short)
+	if d.Action == "open_long" || d.Action == "open_short" {
+		if err := d.validateExitPlan(); err != nil {
+			return errors.Wrap(err, "exit plan validation error")
+		}
+	}
+
+	return nil
+}
+
+func (d *Decision) validateRequiredFields() error {
+	if d.Action == "" {
 		return errors.New("action field is required")
 	}
-	if decision.Reasoning == "" {
+	if d.Reasoning == "" {
 		return errors.New("reasoning field is required")
 	}
 	return nil
 }
 
-func validateDecisionAction(decision *Decision) error {
+func (d *Decision) validateAction() error {
 	validActions := map[string]bool{
 		"hold":        true,
 		"open_long":   true,
@@ -84,21 +93,21 @@ func validateDecisionAction(decision *Decision) error {
 		"open_short":  true,
 		"close_short": true,
 	}
-	if !validActions[decision.Action] {
-		return fmt.Errorf("Invalid action: %s", decision.Action)
+	if !validActions[d.Action] {
+		return fmt.Errorf("Invalid action: %s", d.Action)
 	}
 	return nil
 }
 
-func validateDecisionRiskPercent(decision *Decision) error {
-	if decision.RiskPercent < 0 || decision.RiskPercent > 15 {
-		return fmt.Errorf("Invalid risk_percent: %f (must be 0.0-15.0)", decision.RiskPercent)
+func (d *Decision) validateRiskPercent() error {
+	if d.RiskPercent < 0 || d.RiskPercent > 15 {
+		return fmt.Errorf("Invalid risk_percent: %f (must be 0.0-15.0)", d.RiskPercent)
 	}
 	return nil
 }
 
-func validateDecisionExitPlan(decision *Decision) error {
-	exitPlan := decision.ExitPlan
+func (d *Decision) validateExitPlan() error {
+	exitPlan := d.ExitPlan
 
 	if exitPlan.StopLossPrice <= 0 {
 		return errors.New("stop_loss_price must be greater than 0")
@@ -112,7 +121,7 @@ func validateDecisionExitPlan(decision *Decision) error {
 		return errors.New("invalidation_condition is required")
 	}
 
-	switch decision.Action {
+	switch d.Action {
 	case "open_long":
 		if exitPlan.StopLossPrice >= exitPlan.TakeProfitPrice {
 			return errors.New("stop_loss_price must be less than take_profit_price for long positions")
