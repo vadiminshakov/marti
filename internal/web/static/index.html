@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Marti</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="preload" href="style.css" as="style">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <div class="main-content">
+      <header>
+        <div>
+          <p class="eyebrow">marti dashboard</p>
+        </div>
+        <div id="sse-status" class="status">Connecting…</div>
+      </header>
+      <section class="overview">
+        <canvas id="globalChart" class="global-chart" height="320"></canvas>
+      </section>
+      <section id="pairs" class="pair-grid">
+        <div id="emptyState" class="empty-state">Waiting for balance snapshots…</div>
+      </section>
+    </div>
+    <aside class="ai-decisions-sidebar">
+      <h3 class="sidebar-title">AI Decisions</h3>
+      <div id="aiDecisions"></div>
+    </aside>
+  </div>
+<script src="script.js" defer></script>
+</body>
+</html>
