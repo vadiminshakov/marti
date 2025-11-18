@@ -218,10 +218,12 @@ func (s *AIStrategy) getAndValidateDecision(
 	}
 
 	s.logger.Info("Decision validation passed",
+		zap.String("model", s.modelName),
 		zap.String("action", decision.Action),
 		zap.Float64("risk_percent", decision.RiskPercent))
 
 	decisionFields := []zap.Field{
+		zap.String("model", s.modelName),
 		zap.String("action", strings.ToUpper(decision.Action)),
 		zap.String("reasoning", decision.Reasoning),
 	}
@@ -287,9 +289,13 @@ func (s *AIStrategy) executeEntry(
 	}
 
 	if position != nil {
-		s.logger.Info("Adding to existing position", zap.String("side", side.String()))
+		s.logger.Info("Adding to existing position", 
+			zap.String("model", s.modelName),
+			zap.String("side", side.String()))
 	} else {
-		s.logger.Info("Opening new position", zap.String("side", side.String()))
+		s.logger.Info("Opening new position", 
+			zap.String("model", s.modelName),
+			zap.String("side", side.String()))
 	}
 
 	// calculate position size based on risk percent
@@ -304,6 +310,7 @@ func (s *AIStrategy) executeEntry(
 	orderID := uuid.New().String()
 
 	s.logger.Info("Executing AI entry order",
+		zap.String("model", s.modelName),
 		zap.String("side", side.String()),
 		zap.String("amount", amount.String()),
 		zap.String("price", snapshot.Price().String()),
@@ -364,6 +371,7 @@ func (s *AIStrategy) executeExit(
 	orderID := uuid.New().String()
 
 	s.logger.Info("Closing position",
+		zap.String("model", s.modelName),
 		zap.String("side", side.String()),
 		zap.String("entry_price", position.EntryPrice.String()),
 		zap.String("current_price", currentPrice.String()),
@@ -382,6 +390,7 @@ func (s *AIStrategy) executeExit(
 	// calculate P&L
 	pnl := position.PnL(currentPrice)
 	s.logger.Info("Position closed",
+		zap.String("model", s.modelName),
 		zap.String("side", side.String()),
 		zap.String("pnl", pnl.String()))
 
