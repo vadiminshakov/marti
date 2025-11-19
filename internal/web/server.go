@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vadiminshakov/marti/internal/entity"
+	"github.com/vadiminshakov/marti/internal/domain"
 )
 
 const snapshotPollInterval = 3 * time.Second

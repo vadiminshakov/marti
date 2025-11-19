@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/vadiminshakov/gowal"
-	"github.com/vadiminshakov/marti/internal/entity"
+	"github.com/vadiminshakov/marti/internal/domain"
 	pricerMock "github.com/vadiminshakov/marti/mocks/pricer"
 	traderMock "github.com/vadiminshakov/marti/mocks/trader"
 	"go.uber.org/zap"

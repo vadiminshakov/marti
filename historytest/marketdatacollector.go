@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/adshao/go-binance/v2"
-	"github.com/vadiminshakov/marti/internal/entity"
+	"github.com/vadiminshakov/marti/internal/domain"
 )
 
 // DataCollectorFactory creates a market data collector function for the specified trading pair.

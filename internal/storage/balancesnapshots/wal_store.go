@@ -8,7 +8,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/vadiminshakov/gowal"
-	"github.com/vadiminshakov/marti/internal/entity"
+	"github.com/vadiminshakov/marti/internal/domain"
 )
 
 const (

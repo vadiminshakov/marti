@@ -6,7 +6,7 @@ import (
 
 	"github.com/adshao/go-binance/v2"
 	"github.com/shopspring/decimal"
-	"github.com/vadiminshakov/marti/internal/entity"
+	"github.com/vadiminshakov/marti/internal/domain"
 )
 
 // SimulatePricer fetches real market prices from Binance public API

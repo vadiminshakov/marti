@@ -11,7 +11,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	hyperliquid "github.com/sonirico/go-hyperliquid"
-	"github.com/vadiminshakov/marti/internal/entity"
+	"github.com/vadiminshakov/marti/internal/domain"
 )
 
 type HyperliquidTrader struct {

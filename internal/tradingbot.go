@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/vadiminshakov/marti/config"
-	"github.com/vadiminshakov/marti/internal/entity"
+	"github.com/vadiminshakov/marti/internal/domain"
 )
 
 // TradingStrategy defines the interface that all trading strategies must implement.
@@ -47,6 +47,15 @@ type aiDecisionWriter interface {
 // It initializes the appropriate trader and pricer components based on the platform specified in the config,
 // and sets up the trading strategy with the provided parameters.
 func NewTradingBot(logger *zap.Logger, conf config.Config, client any, balanceStore balanceSnapshotWriter, decisionStore aiDecisionWriter) (*TradingBot, error) {
+	if logger == nil {
+		logger = zap.L()
+	}
+
+	provider, err := NewServiceProvider(client, logger)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create service provider")
+	}
+
 	// for AI strategy, use MaxLeverage; for DCA strategy, use Leverage
 	leverage := conf.Leverage
 	if conf.StrategyType == "ai" {
@@ -58,13 +67,14 @@ func NewTradingBot(logger *zap.Logger, conf config.Config, client any, balanceSt
 		stateKey = conf.SimulationStateKey()
 	}
 
-	currentTrader, currentPricer, err := createTraderAndPricer(conf.Platform, conf.Pair, conf.MarketType, leverage, client, stateKey)
+	currentTrader, err := provider.Trader(conf.Pair, conf.MarketType, leverage, stateKey)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create trader and pricer")
+		return nil, errors.Wrap(err, "failed to create trader")
 	}
 
-	if logger == nil {
-		logger = zap.L()
+	currentPricer, err := provider.Pricer()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create pricer")
 	}
 
 	tradingStrategy, err := createTradingStrategy(
@@ -72,7 +82,7 @@ func NewTradingBot(logger *zap.Logger, conf config.Config, client any, balanceSt
 		conf,
 		currentPricer,
 		currentTrader,
-		client,
+		provider,
 		decisionStore,
 	)
 	if err != nil {

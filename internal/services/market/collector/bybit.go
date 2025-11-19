@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	bybit "github.com/hirokisan/bybit/v2"
-	"github.com/vadiminshakov/marti/internal/entity"
+	"github.com/vadiminshakov/marti/internal/domain"
 )
 
 // BybitKlineProvider implements KlineProvider for Bybit exchange.

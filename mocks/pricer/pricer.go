@@ -6,7 +6,7 @@ import (
 	"context"
 
 	decimal "github.com/shopspring/decimal"
-	"github.com/vadiminshakov/marti/internal/entity"
+	"github.com/vadiminshakov/marti/internal/domain"
 
 	mock "github.com/stretchr/testify/mock"
 )

@@ -13,7 +13,7 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 	"github.com/vadiminshakov/marti/internal"
-	"github.com/vadiminshakov/marti/internal/entity"
+	"github.com/vadiminshakov/marti/internal/domain"
 	"github.com/vadiminshakov/marti/internal/services/strategy/dca"
 	"go.uber.org/zap"
 )

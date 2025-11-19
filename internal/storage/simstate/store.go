@@ -10,7 +10,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
-	"github.com/vadiminshakov/marti/internal/entity"
+	"github.com/vadiminshakov/marti/internal/domain"
 )
 
 const defaultStateDir = "./wal/simulate"
@@ -20,9 +20,17 @@ type Store struct {
 	path string
 }
 
+func getStateDir() string {
+	if stateDir := os.Getenv("MARTI_SIMULATE_STATE_DIR"); stateDir != "" {
+		return stateDir
+	}
+	return defaultStateDir
+}
+
 // NewStore creates a simulator state store for the given pair.
 func NewStore(pair entity.Pair, scope string) (*Store, error) {
-	if err := os.MkdirAll(defaultStateDir, 0o755); err != nil {
+	stateDir := getStateDir()
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return nil, errors.Wrap(err, "create simulate state dir")
 	}
 
@@ -33,7 +41,7 @@ func NewStore(pair entity.Pair, scope string) (*Store, error) {
 
 	fullName := fmt.Sprintf("%s.json", storeFileName)
 
-	return &Store{path: filepath.Join(defaultStateDir, fullName)}, nil
+	return &Store{path: filepath.Join(stateDir, fullName)}, nil
 }
 
 // State represents all persisted simulator data.

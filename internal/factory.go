@@ -13,7 +13,7 @@ import (
 
 	"github.com/vadiminshakov/marti/config"
 	"github.com/vadiminshakov/marti/internal/clients"
-	"github.com/vadiminshakov/marti/internal/entity"
+	"github.com/vadiminshakov/marti/internal/domain"
 	"github.com/vadiminshakov/marti/internal/services/market/collector"
 	"github.com/vadiminshakov/marti/internal/services/pricer"
 	"github.com/vadiminshakov/marti/internal/services/promptbuilder"
