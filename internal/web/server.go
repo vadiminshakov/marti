@@ -15,7 +15,7 @@ import (
 	"github.com/vadiminshakov/marti/internal/entity"
 )
 
-const snapshotPollInterval = 30 * time.Second
+const snapshotPollInterval = 3 * time.Second
 
 type balanceSnapshotReader interface {
 	SnapshotsAfter(index uint64) ([]entity.BalanceSnapshotRecord, error)
@@ -90,6 +90,7 @@ func (s *Server) handleBalanceStream(w http.ResponseWriter, r *http.Request) {
 	defer pollTicker.Stop()
 
 	lastIndex := uint64(0)
+	isFirstLoad := true
 	sendSnapshots := func() error {
 		records, err := s.Store.SnapshotsAfter(lastIndex)
 		if err != nil {
@@ -98,7 +99,20 @@ func (s *Server) handleBalanceStream(w http.ResponseWriter, r *http.Request) {
 		if len(records) == 0 {
 			return nil
 		}
-		for _, record := range records {
+
+		// Apply exponential thinning on first load for large datasets
+		recordsToSend := records
+		if isFirstLoad && len(records) > 100 {
+			recordsToSend = thinRecords(records)
+		}
+
+		// Send records with throttling
+		sendDelay := 0 * time.Millisecond
+		if isFirstLoad && len(recordsToSend) > 50 {
+			sendDelay = 10 * time.Millisecond
+		}
+
+		for _, record := range recordsToSend {
 			payload, err := json.Marshal(record.Snapshot)
 			if err != nil {
 				return err
@@ -107,7 +121,12 @@ func (s *Server) handleBalanceStream(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "data: %s\n\n", payload)
 			flusher.Flush()
 			lastIndex = record.Index
+
+			if sendDelay > 0 {
+				time.Sleep(sendDelay)
+			}
 		}
+		isFirstLoad = false
 		return nil
 	}
 
@@ -206,8 +225,6 @@ func (s *Server) staticHandler() http.Handler {
 			assetPath = "/index.html"
 		}
 
-		setStaticCacheHeader(w, assetPath)
-
 		if !shouldCompress(assetPath) || !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 			fileServer.ServeHTTP(w, r)
 			return
@@ -251,13 +268,28 @@ func shouldCompress(p string) bool {
 	}
 }
 
-func setStaticCacheHeader(w http.ResponseWriter, assetPath string) {
-	cacheValue := "public, max-age=300"
-	switch strings.ToLower(path.Ext(assetPath)) {
-	case ".css", ".js":
-		cacheValue = "public, max-age=604800, immutable"
-	case ".html":
-		cacheValue = "public, max-age=60"
+// thinRecords applies exponential thinning to keep last 100 records fully, thin the rest
+func thinRecords(records []entity.BalanceSnapshotRecord) []entity.BalanceSnapshotRecord {
+	if len(records) <= 100 {
+		return records
 	}
-	w.Header().Set("Cache-Control", cacheValue)
+
+	keepLast := 100
+	older := records[:len(records)-keepLast]
+	var thinned []entity.BalanceSnapshotRecord
+
+	// exponentially thin older records
+	skip := 1 // start by skipping 1 (send every 2nd)
+	for i := len(older) - 1; i >= 0; i-- {
+		thinned = append([]entity.BalanceSnapshotRecord{older[i]}, thinned...)
+		// skip next 'skip' records
+		i -= skip
+		// double skip every 10 records (exponential)
+		if (len(older) - 1 - i) % 10 == 0 {
+			skip *= 2
+		}
+	}
+
+	// append last 100 records as is
+	return append(thinned, records[len(records)-keepLast:]...)
 }

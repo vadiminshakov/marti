@@ -158,6 +158,127 @@ header { display:flex; justify-content:space-between; align-items:flex-start; ga
   letter-spacing:.12em;
   text-transform:uppercase;
   color:var(--ink-mid);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:.8rem;
+}
+.pixel-loader {
+  width:6px;
+  height:6px;
+  background:var(--ink);
+  box-shadow:
+    0 -12px 0 var(--ink),
+    12px -12px 0 var(--ink),
+    12px 0 0 var(--ink),
+    12px 12px 0 var(--ink),
+    0 12px 0 var(--ink),
+    -12px 12px 0 var(--ink),
+    -12px 0 0 var(--ink),
+    -12px -12px 0 var(--ink);
+  animation:pixel-spin 0.8s linear infinite;
+  image-rendering:pixelated;
+}
+@keyframes pixel-spin {
+  0% {
+    box-shadow:
+      0 -12px 0 var(--ink),
+      12px -12px 0 rgba(0,0,0,.2),
+      12px 0 0 rgba(0,0,0,.2),
+      12px 12px 0 rgba(0,0,0,.2),
+      0 12px 0 rgba(0,0,0,.2),
+      -12px 12px 0 rgba(0,0,0,.2),
+      -12px 0 0 rgba(0,0,0,.2),
+      -12px -12px 0 rgba(0,0,0,.2);
+  }
+  12.5% {
+    box-shadow:
+      0 -12px 0 rgba(0,0,0,.2),
+      12px -12px 0 var(--ink),
+      12px 0 0 rgba(0,0,0,.2),
+      12px 12px 0 rgba(0,0,0,.2),
+      0 12px 0 rgba(0,0,0,.2),
+      -12px 12px 0 rgba(0,0,0,.2),
+      -12px 0 0 rgba(0,0,0,.2),
+      -12px -12px 0 rgba(0,0,0,.2);
+  }
+  25% {
+    box-shadow:
+      0 -12px 0 rgba(0,0,0,.2),
+      12px -12px 0 rgba(0,0,0,.2),
+      12px 0 0 var(--ink),
+      12px 12px 0 rgba(0,0,0,.2),
+      0 12px 0 rgba(0,0,0,.2),
+      -12px 12px 0 rgba(0,0,0,.2),
+      -12px 0 0 rgba(0,0,0,.2),
+      -12px -12px 0 rgba(0,0,0,.2);
+  }
+  37.5% {
+    box-shadow:
+      0 -12px 0 rgba(0,0,0,.2),
+      12px -12px 0 rgba(0,0,0,.2),
+      12px 0 0 rgba(0,0,0,.2),
+      12px 12px 0 var(--ink),
+      0 12px 0 rgba(0,0,0,.2),
+      -12px 12px 0 rgba(0,0,0,.2),
+      -12px 0 0 rgba(0,0,0,.2),
+      -12px -12px 0 rgba(0,0,0,.2);
+  }
+  50% {
+    box-shadow:
+      0 -12px 0 rgba(0,0,0,.2),
+      12px -12px 0 rgba(0,0,0,.2),
+      12px 0 0 rgba(0,0,0,.2),
+      12px 12px 0 rgba(0,0,0,.2),
+      0 12px 0 var(--ink),
+      -12px 12px 0 rgba(0,0,0,.2),
+      -12px 0 0 rgba(0,0,0,.2),
+      -12px -12px 0 rgba(0,0,0,.2);
+  }
+  62.5% {
+    box-shadow:
+      0 -12px 0 rgba(0,0,0,.2),
+      12px -12px 0 rgba(0,0,0,.2),
+      12px 0 0 rgba(0,0,0,.2),
+      12px 12px 0 rgba(0,0,0,.2),
+      0 12px 0 rgba(0,0,0,.2),
+      -12px 12px 0 var(--ink),
+      -12px 0 0 rgba(0,0,0,.2),
+      -12px -12px 0 rgba(0,0,0,.2);
+  }
+  75% {
+    box-shadow:
+      0 -12px 0 rgba(0,0,0,.2),
+      12px -12px 0 rgba(0,0,0,.2),
+      12px 0 0 rgba(0,0,0,.2),
+      12px 12px 0 rgba(0,0,0,.2),
+      0 12px 0 rgba(0,0,0,.2),
+      -12px 12px 0 rgba(0,0,0,.2),
+      -12px 0 0 var(--ink),
+      -12px -12px 0 rgba(0,0,0,.2);
+  }
+  87.5% {
+    box-shadow:
+      0 -12px 0 rgba(0,0,0,.2),
+      12px -12px 0 rgba(0,0,0,.2),
+      12px 0 0 rgba(0,0,0,.2),
+      12px 12px 0 rgba(0,0,0,.2),
+      0 12px 0 rgba(0,0,0,.2),
+      -12px 12px 0 rgba(0,0,0,.2),
+      -12px 0 0 rgba(0,0,0,.2),
+      -12px -12px 0 var(--ink);
+  }
+  100% {
+    box-shadow:
+      0 -12px 0 var(--ink),
+      12px -12px 0 rgba(0,0,0,.2),
+      12px 0 0 rgba(0,0,0,.2),
+      12px 12px 0 rgba(0,0,0,.2),
+      0 12px 0 rgba(0,0,0,.2),
+      -12px 12px 0 rgba(0,0,0,.2),
+      -12px 0 0 rgba(0,0,0,.2),
+      -12px -12px 0 rgba(0,0,0,.2);
+  }
 }
 .ai-decisions-sidebar {
   display:flex;

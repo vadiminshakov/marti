@@ -145,14 +145,20 @@ function updateGlobalChart(model, quoteCurrency, totalBalance, ts){
   globalChart.update('none');
 }
 
+let emptyStateRemoveTimeout = null;
+
 function ensureModelView(model){
   const safeModel = model || '—';
   if(pairViews.has(safeModel)){
     return pairViews.get(safeModel);
   }
 
-  if(emptyState){
-    emptyState.remove();
+  if(emptyState && !emptyStateRemoveTimeout){
+    emptyStateRemoveTimeout = setTimeout(() => {
+      if(emptyState){
+        emptyState.remove();
+      }
+    }, 500);
   }
 
   const card = document.createElement('article');
