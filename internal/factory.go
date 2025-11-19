@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	binance "github.com/adshao/go-binance/v2"
 	bybit "github.com/hirokisan/bybit/v2"
@@ -21,13 +22,6 @@ import (
 	"github.com/vadiminshakov/marti/internal/services/trader"
 )
 
-const (
-	binancePlatform     = "binance"
-	bybitPlatform       = "bybit"
-	hyperliquidPlatform = "hyperliquid"
-	simulatePlatform    = "simulate"
-)
-
 type traderService interface {
 	ExecuteAction(ctx context.Context, action entity.Action, amount decimal.Decimal, clientOrderID string) error
 	OrderExecuted(ctx context.Context, clientOrderID string) (bool, decimal.Decimal, error)
@@ -40,74 +34,98 @@ type Pricer interface {
 	GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error)
 }
 
-// createTraderAndPricer creates trader and pricer instances based on platform.
-func createTraderAndPricer(platform string, pair entity.Pair, marketType entity.MarketType, leverage int, client any, stateKey string) (traderService, Pricer, error) {
-	switch platform {
-	case binancePlatform:
-		binanceClient, ok := client.(*binance.Client)
-		if !ok || binanceClient == nil {
-			return nil, nil, fmt.Errorf("binance platform expects *binance.Client, got %T", client)
-		}
+type klineProvider interface {
+	GetKlines(ctx context.Context, pair entity.Pair, interval string, limit int) ([]entity.MarketCandle, error)
+}
 
-		traderInstance, err := trader.NewBinanceTrader(binanceClient, pair, marketType, leverage)
-		if err != nil {
-			return nil, nil, errors.Wrap(err, "failed to create BinanceTrader")
-		}
+// ServiceProvider defines a factory interface for creating platform-specific services.
+type ServiceProvider interface {
+	Trader(pair entity.Pair, marketType entity.MarketType, leverage int, stateKey string) (traderService, error)
+	Pricer() (Pricer, error)
+	KlineProvider() (klineProvider, error)
+}
 
-		pricerInstance := pricer.NewBinancePricer(binanceClient)
-
-		return traderInstance, pricerInstance, nil
-
-	case bybitPlatform:
-		bybitClient, ok := client.(*bybit.Client)
-		if !ok || bybitClient == nil {
-			return nil, nil, fmt.Errorf("bybit platform expects *bybit.Client, got %T", client)
-		}
-
-		traderInstance, err := trader.NewBybitTrader(bybitClient, pair, marketType, leverage)
-		if err != nil {
-			return nil, nil, errors.Wrap(err, "failed to create BybitTrader")
-		}
-
-		pricerInstance := pricer.NewBybitPricer(bybitClient)
-
-		return traderInstance, pricerInstance, nil
-
-	case simulatePlatform:
-		simulateClient, ok := client.(*clients.SimulateClient)
-		if !ok || simulateClient == nil {
-			return nil, nil, fmt.Errorf("simulate platform expects *clients.SimulateClient, got %T", client)
-		}
-
-		// use logger from context or create a new one
-		logger := zap.L()
-		pricerInstance := pricer.NewSimulatePricer(simulateClient.GetBinanceClient())
-
-		traderInstance, err := trader.NewSimulateTrader(pair, marketType, leverage, logger, pricerInstance, stateKey)
-		if err != nil {
-			return nil, nil, errors.Wrap(err, "failed to create SimulateTrader")
-		}
-
-		return traderInstance, pricerInstance, nil
-
-	case hyperliquidPlatform:
-		hlClient, ok := client.(*clients.HyperliquidClient)
-		if !ok || hlClient == nil {
-			return nil, nil, fmt.Errorf("hyperliquid platform expects *clients.HyperliquidClient, got %T", client)
-		}
-
-		tr, err := trader.NewHyperliquidTrader(hlClient.Exchange(), hlClient.AccountAddress(), pair, marketType, leverage)
-		if err != nil {
-			return nil, nil, errors.Wrap(err, "failed to create HyperliquidTrader")
-		}
-
-		pr := pricer.NewHyperliquidPricer(hlClient.Exchange().Info())
-
-		return tr, pr, nil
-
+// NewServiceProvider creates a new service provider based on the client type.
+// This is the single point of truth for dispatching to platform-specific implementations.
+func NewServiceProvider(client any, logger *zap.Logger) (ServiceProvider, error) {
+	switch c := client.(type) {
+	case *binance.Client:
+		return &binanceProvider{client: c}, nil
+	case *bybit.Client:
+		return &bybitProvider{client: c}, nil
+	case *clients.SimulateClient:
+		return &simulateProvider{client: c, logger: logger}, nil
+	case *clients.HyperliquidClient:
+		return &hyperliquidProvider{client: c}, nil
 	default:
-		return nil, nil, fmt.Errorf("unsupported platform: %s", platform)
+		return nil, fmt.Errorf("unsupported client type: %T", client)
 	}
+}
+
+type binanceProvider struct {
+	client *binance.Client
+}
+
+func (p *binanceProvider) Trader(pair entity.Pair, marketType entity.MarketType, leverage int, _ string) (traderService, error) {
+	return trader.NewBinanceTrader(p.client, pair, marketType, leverage)
+}
+func (p *binanceProvider) Pricer() (Pricer, error) {
+	return pricer.NewBinancePricer(p.client), nil
+}
+func (p *binanceProvider) KlineProvider() (klineProvider, error) {
+	return collector.NewBinanceKlineProvider(p.client), nil
+}
+
+type bybitProvider struct {
+	client *bybit.Client
+}
+
+func (p *bybitProvider) Trader(pair entity.Pair, marketType entity.MarketType, leverage int, _ string) (traderService, error) {
+	return trader.NewBybitTrader(p.client, pair, marketType, leverage)
+}
+func (p *bybitProvider) Pricer() (Pricer, error) {
+	return pricer.NewBybitPricer(p.client), nil
+}
+func (p *bybitProvider) KlineProvider() (klineProvider, error) {
+	return collector.NewBybitKlineProvider(p.client), nil
+}
+
+type simulateProvider struct {
+	client     *clients.SimulateClient
+	logger     *zap.Logger
+	pricer     Pricer
+	pricerOnce sync.Once
+}
+
+func (p *simulateProvider) getPricer() Pricer {
+	p.pricerOnce.Do(func() {
+		p.pricer = pricer.NewSimulatePricer(p.client.GetBinanceClient())
+	})
+	return p.pricer
+}
+
+func (p *simulateProvider) Trader(pair entity.Pair, marketType entity.MarketType, leverage int, stateKey string) (traderService, error) {
+	return trader.NewSimulateTrader(pair, marketType, leverage, p.logger, p.getPricer(), stateKey)
+}
+func (p *simulateProvider) Pricer() (Pricer, error) {
+	return p.getPricer(), nil
+}
+func (p *simulateProvider) KlineProvider() (klineProvider, error) {
+	return collector.NewBinanceKlineProvider(p.client.GetBinanceClient()), nil
+}
+
+type hyperliquidProvider struct {
+	client *clients.HyperliquidClient
+}
+
+func (p *hyperliquidProvider) Trader(pair entity.Pair, marketType entity.MarketType, leverage int, _ string) (traderService, error) {
+	return trader.NewHyperliquidTrader(p.client.Exchange(), p.client.AccountAddress(), pair, marketType, leverage)
+}
+func (p *hyperliquidProvider) Pricer() (Pricer, error) {
+	return pricer.NewHyperliquidPricer(p.client.Exchange().Info()), nil
+}
+func (p *hyperliquidProvider) KlineProvider() (klineProvider, error) {
+	return collector.NewHyperliquidKlineProvider(p.client.Exchange().Info()), nil
 }
 
 // createTradingStrategy creates a trading strategy instance based on configuration.
@@ -116,7 +134,7 @@ func createTradingStrategy(
 	conf config.Config,
 	pricer Pricer,
 	tradeSvc traderService,
-	client any,
+	provider ServiceProvider,
 	decisionStore aiDecisionWriter,
 ) (TradingStrategy, error) {
 	switch conf.StrategyType {
@@ -132,7 +150,7 @@ func createTradingStrategy(
 			conf.DcaPercentThresholdSell,
 		)
 	case "ai":
-		return createAIStrategy(logger, conf, pricer, tradeSvc, client, decisionStore)
+		return createAIStrategy(logger, conf, pricer, tradeSvc, provider, decisionStore)
 	default:
 		return nil, fmt.Errorf("unsupported strategy type: %s", conf.StrategyType)
 	}
@@ -172,52 +190,19 @@ func createAIStrategy(
 	conf config.Config,
 	pricer Pricer,
 	tradeSvc traderService,
-	client any,
+	provider ServiceProvider,
 	decisionStore aiDecisionWriter,
 ) (TradingStrategy, error) {
-	type aiStrategyKlineProvider interface {
-		GetKlines(ctx context.Context, pair entity.Pair, interval string, limit int) ([]entity.MarketCandle, error)
-	}
 	// create PromptBuilder
 	promptBuilder := promptbuilder.NewPromptBuilder(conf.Pair, logger)
 
 	// create LLM client
 	llmClient := clients.NewOpenAICompatibleClient(conf.LLMAPIURL, conf.LLMAPIKey, conf.Model, promptBuilder)
 
-	// create kline provider based on platform
-	var klineProvider aiStrategyKlineProvider
-
-	switch conf.Platform {
-	case binancePlatform:
-		binanceClient, ok := client.(*binance.Client)
-		if !ok {
-			return nil, fmt.Errorf("binance platform expects *binance.Client for AI strategy")
-		}
-
-		klineProvider = collector.NewBinanceKlineProvider(binanceClient)
-	case bybitPlatform:
-		bybitClient, ok := client.(*bybit.Client)
-		if !ok {
-			return nil, fmt.Errorf("bybit platform expects *bybit.Client for AI strategy")
-		}
-
-		klineProvider = collector.NewBybitKlineProvider(bybitClient)
-	case simulatePlatform:
-		simulateClient, ok := client.(*clients.SimulateClient)
-		if !ok {
-			return nil, fmt.Errorf("simulate platform expects *clients.SimulateClient for AI strategy")
-		}
-
-		klineProvider = collector.NewBinanceKlineProvider(simulateClient.GetBinanceClient())
-	case hyperliquidPlatform:
-		hlClient, ok := client.(*clients.HyperliquidClient)
-		if !ok {
-			return nil, fmt.Errorf("hyperliquid platform expects *clients.HyperliquidClient for AI strategy")
-		}
-
-		klineProvider = collector.NewHyperliquidKlineProvider(hlClient.Exchange().Info())
-	default:
-		return nil, fmt.Errorf("unsupported platform for AI strategy: %s", conf.Platform)
+	// create kline provider using the provider
+	klineProvider, err := provider.KlineProvider()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create kline provider")
 	}
 
 	// create market data collector

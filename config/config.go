@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
-	"github.com/vadiminshakov/marti/internal/entity"
+	"github.com/vadiminshakov/marti/internal/domain"
 	"gopkg.in/yaml.v3"
 )
 
@@ -172,187 +173,194 @@ func getYaml(path string) ([]Config, error) {
 	}
 
 	for _, c := range configsTmp {
-		pair, err := getPairFromString(c.Pair)
+		newConfig, err := parseConfig(c)
 		if err != nil {
-			return nil, fmt.Errorf("incorrect 'pair' param in yaml config: %s, error: %w", c.Pair, err)
+			return nil, err
 		}
-
-		// Determine strategy type (default to "dca" for backward compatibility)
-		strategyType := c.Strategy
-		if strategyType == "" {
-			strategyType = "dca"
-		}
-
-		// parse market_type (default to "spot")
-		marketType := entity.MarketType(c.MarketTypeStr)
-		if c.MarketTypeStr == "" {
-			marketType = entity.MarketTypeSpot
-		}
-		if !marketType.IsValid() {
-			return nil, fmt.Errorf("invalid market_type '%s' in yaml config (must be 'spot' or 'margin')", c.MarketTypeStr)
-		}
-
-		// parse leverage (default to 1)
-		leverage := 1
-		if c.LeverageStr != "" {
-			var err error
-			leverage, err = strconv.Atoi(c.LeverageStr)
-			if err != nil {
-				return nil, fmt.Errorf("incorrect 'leverage' param in yaml config (must be an integer), error: %w", err)
-			}
-			if leverage < 1 {
-				return nil, fmt.Errorf("leverage must be at least 1, got %d", leverage)
-			}
-		}
-
-		// Validate: spot trading cannot use leverage > 1
-		if marketType == entity.MarketTypeSpot && leverage > 1 {
-			return nil, fmt.Errorf("leverage > 1 is not allowed for spot trading (market_type: spot). Use market_type: margin for leverage trading")
-		}
-
-		// Initialize newConfig correctly for each iteration
-		newConfig := Config{
-			Platform:          c.Platform,
-			Pair:              pair,
-			StrategyType:      strategyType,
-			PollPriceInterval: c.PollPriceInterval,
-			MarketType:        marketType,
-			Leverage:          leverage,
-		}
-
-		// Parse common or DCA-specific fields
-		if strategyType == "dca" {
-			// amount is required for DCA strategy
-			if c.Amount == "" {
-				return nil, fmt.Errorf("'amount' is required for DCA strategy")
-			}
-			amount, err := decimal.NewFromString(c.Amount)
-			if err != nil {
-				return nil, fmt.Errorf("incorrect 'amount' param in yaml config (must be a number between 1 and 100), error: %w", err)
-			}
-			if amount.LessThan(decimal.NewFromInt(1)) || amount.GreaterThan(decimal.NewFromInt(100)) {
-				return nil, fmt.Errorf("amount must be between 1 and 100 percent, got %s", amount.String())
-			}
-			newConfig.AmountPercent = amount
-
-			// Parse MaxDcaTrades
-			if c.MaxDcaTradesStr == "" {
-				newConfig.MaxDcaTrades = 15 // Default value
-			} else {
-				maxDcaTrades, err := strconv.Atoi(c.MaxDcaTradesStr)
-				if err != nil {
-					return nil, fmt.Errorf("incorrect 'max_dca_trades' param in yaml config (must be an integer), error: %w", err)
-				}
-				newConfig.MaxDcaTrades = maxDcaTrades
-			}
-
-			// Parse DcaPercentThresholdBuy
-			if c.DcaPercentThresholdBuyStr == "" {
-				newConfig.DcaPercentThresholdBuy = decimal.NewFromInt(1) // Default value
-			} else {
-				dcaBuyThreshold, err := decimal.NewFromString(c.DcaPercentThresholdBuyStr)
-				if err != nil {
-					return nil, fmt.Errorf("incorrect 'dca_percent_threshold_buy' param in yaml config (must be a decimal), error: %w", err)
-				}
-				newConfig.DcaPercentThresholdBuy = dcaBuyThreshold
-			}
-
-			// Parse DcaPercentThresholdSell
-			if c.DcaPercentThresholdSellStr == "" {
-				newConfig.DcaPercentThresholdSell = decimal.NewFromInt(7) // Default value
-			} else {
-				dcaSellThreshold, err := decimal.NewFromString(c.DcaPercentThresholdSellStr)
-				if err != nil {
-					return nil, fmt.Errorf("incorrect 'dca_percent_threshold_sell' param in yaml config (must be a decimal), error: %w", err)
-				}
-				newConfig.DcaPercentThresholdSell = dcaSellThreshold
-			}
-		} else if strategyType == "ai" {
-			// Parse AI strategy fields
-			if c.LLMAPIKey == "" {
-				return nil, fmt.Errorf("'llm_api_key' is required for AI strategy")
-			}
-			newConfig.LLMAPIKey = c.LLMAPIKey
-
-			if c.LLMAPIURL == "" {
-				newConfig.LLMAPIURL = "https://openrouter.ai/api/v1/chat/completions" // Default to OpenRouter
-			} else {
-				newConfig.LLMAPIURL = c.LLMAPIURL
-			}
-
-			if c.Model == "" {
-				newConfig.Model = "deepseek/deepseek-chat" // Default model for OpenRouter
-			} else {
-				newConfig.Model = c.Model
-			}
-
-			if c.PrimaryTimeframe == "" {
-				newConfig.PrimaryTimeframe = "3m" // Default interval
-			} else {
-				newConfig.PrimaryTimeframe = c.PrimaryTimeframe
-			}
-
-			// Parse HigherTimeframe (defaults to "15m" for multi-timeframe analysis)
-			if c.HigherTimeframe == "" {
-				newConfig.HigherTimeframe = "15m" // Default higher timeframe
-			} else {
-				newConfig.HigherTimeframe = c.HigherTimeframe
-			}
-
-			// Resolve primary lookback value (new name: primary_lookback_periods; old name: lookback_periods)
-			primaryLookbackRaw := c.PrimaryLookbackPeriodsStr
-			// fallback to legacy field if new one not set
-			if primaryLookbackRaw == "" {
-				primaryLookbackRaw = c.LookbackPeriodsStr
-			}
-			if primaryLookbackRaw == "" {
-				newConfig.LookbackPeriods = 50 // Default: enough for indicators
-			} else {
-				lookback, err := strconv.Atoi(primaryLookbackRaw)
-				if err != nil {
-					return nil, fmt.Errorf("incorrect 'primary_lookback_periods' (or legacy 'lookback_periods') param in yaml config (must be an integer), error: %w", err)
-				}
-				if lookback < 50 {
-					return nil, fmt.Errorf("primary_lookback_periods must be at least 50 for indicator calculation, got %d", lookback)
-				}
-				newConfig.LookbackPeriods = lookback
-			}
-
-			// Parse HigherLookbackPeriods (applies to higher timeframe fetch)
-			if c.HigherLookbackPeriodsStr == "" {
-				newConfig.HigherLookbackPeriods = 60 // Default: aligns with previous constant
-			} else {
-				hLookback, err := strconv.Atoi(c.HigherLookbackPeriodsStr)
-				if err != nil {
-					return nil, fmt.Errorf("incorrect 'higher_lookback_periods' param in yaml config (must be an integer), error: %w", err)
-				}
-				if hLookback < 20 { // minimal sensible amount for higher timeframe summary + indicators
-					return nil, fmt.Errorf("higher_lookback_periods must be at least 20, got %d", hLookback)
-				}
-				newConfig.HigherLookbackPeriods = hLookback
-			}
-
-			// Parse MaxLeverage
-			if c.MaxLeverageStr == "" {
-				newConfig.MaxLeverage = 10 // Default leverage
-			} else {
-				maxLeverage, err := strconv.Atoi(c.MaxLeverageStr)
-				if err != nil {
-					return nil, fmt.Errorf("incorrect 'max_leverage' param in yaml config (must be an integer), error: %w", err)
-				}
-				if maxLeverage < 1 {
-					return nil, fmt.Errorf("max_leverage must be at least 1, got %d", maxLeverage)
-				}
-				newConfig.MaxLeverage = maxLeverage
-			}
-		} else {
-			return nil, fmt.Errorf("unsupported strategy type: %s (must be 'dca' or 'ai')", strategyType)
-		}
-
-		configs = append(configs, newConfig)
+		configs = append(configs, *newConfig)
 	}
 	return configs, nil
 }
+
+func parseConfig(c ConfigTmp) (*Config, error) {
+	pair, err := getPairFromString(c.Pair)
+	if err != nil {
+		return nil, fmt.Errorf("incorrect 'pair' param in yaml config: %s, error: %w", c.Pair, err)
+	}
+
+	strategyType := c.Strategy
+	if strategyType == "" {
+		strategyType = "dca"
+	}
+
+	marketType := entity.MarketType(c.MarketTypeStr)
+	if c.MarketTypeStr == "" {
+		marketType = entity.MarketTypeSpot
+	}
+	if !marketType.IsValid() {
+		return nil, fmt.Errorf("invalid market_type '%s' in yaml config (must be 'spot' or 'margin')", c.MarketTypeStr)
+	}
+
+	leverage := 1
+	if c.LeverageStr != "" {
+		leverage, err = strconv.Atoi(c.LeverageStr)
+		if err != nil {
+			return nil, fmt.Errorf("incorrect 'leverage' param in yaml config (must be an integer), error: %w", err)
+		}
+		if leverage < 1 {
+			return nil, fmt.Errorf("leverage must be at least 1, got %d", leverage)
+		}
+	}
+
+	if marketType == entity.MarketTypeSpot && leverage > 1 {
+		return nil, fmt.Errorf("leverage > 1 is not allowed for spot trading. Use market_type: margin")
+	}
+
+	newConfig := &Config{
+		Platform:          c.Platform,
+		Pair:              pair,
+		StrategyType:      strategyType,
+		PollPriceInterval: c.PollPriceInterval,
+		MarketType:        marketType,
+		Leverage:          leverage,
+	}
+
+	switch strategyType {
+	case "dca":
+		if err := parseDCAConfig(&c, newConfig); err != nil {
+			return nil, err
+		}
+	case "ai":
+		if err := parseAIConfig(&c, newConfig); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unsupported strategy type: %s (must be 'dca' or 'ai')", strategyType)
+	}
+
+	return newConfig, nil
+}
+
+func parseDCAConfig(c *ConfigTmp, cfg *Config) error {
+	if c.Amount == "" {
+		return errors.New("'amount' is required for DCA strategy")
+	}
+	amount, err := decimal.NewFromString(c.Amount)
+	if err != nil {
+		return errors.Wrap(err, "incorrect 'amount' param in yaml config (must be a number between 1 and 100)")
+	}
+	if amount.LessThan(decimal.NewFromInt(1)) || amount.GreaterThan(decimal.NewFromInt(100)) {
+		return fmt.Errorf("amount must be between 1 and 100 percent, got %s", amount.String())
+	}
+	cfg.AmountPercent = amount
+
+	if c.MaxDcaTradesStr == "" {
+		cfg.MaxDcaTrades = 15
+	} else {
+		maxTrades, err := strconv.Atoi(c.MaxDcaTradesStr)
+		if err != nil {
+			return errors.Wrap(err, "incorrect 'max_dca_trades' param in yaml config (must be an integer)")
+		}
+		cfg.MaxDcaTrades = maxTrades
+	}
+
+	if c.DcaPercentThresholdBuyStr == "" {
+		cfg.DcaPercentThresholdBuy = decimal.NewFromInt(1)
+	} else {
+		buyThreshold, err := decimal.NewFromString(c.DcaPercentThresholdBuyStr)
+		if err != nil {
+			return errors.Wrap(err, "incorrect 'dca_percent_threshold_buy' param in yaml config (must be a decimal)")
+		}
+		cfg.DcaPercentThresholdBuy = buyThreshold
+	}
+
+	if c.DcaPercentThresholdSellStr == "" {
+		cfg.DcaPercentThresholdSell = decimal.NewFromInt(7)
+	} else {
+		sellThreshold, err := decimal.NewFromString(c.DcaPercentThresholdSellStr)
+		if err != nil {
+			return errors.Wrap(err, "incorrect 'dca_percent_threshold_sell' param in yaml config (must be a decimal)")
+		}
+		cfg.DcaPercentThresholdSell = sellThreshold
+	}
+	return nil
+}
+
+func parseAIConfig(c *ConfigTmp, cfg *Config) error {
+	if c.LLMAPIKey == "" {
+		return errors.New("'llm_api_key' is required for AI strategy")
+	}
+	cfg.LLMAPIKey = c.LLMAPIKey
+
+	if c.LLMAPIURL == "" {
+		cfg.LLMAPIURL = "https://openrouter.ai/api/v1/chat/completions"
+	} else {
+		cfg.LLMAPIURL = c.LLMAPIURL
+	}
+
+	if c.Model == "" {
+		cfg.Model = "deepseek/deepseek-chat"
+	} else {
+		cfg.Model = c.Model
+	}
+
+	if c.PrimaryTimeframe == "" {
+		cfg.PrimaryTimeframe = "3m"
+	} else {
+		cfg.PrimaryTimeframe = c.PrimaryTimeframe
+	}
+
+	if c.HigherTimeframe == "" {
+		cfg.HigherTimeframe = "15m"
+	} else {
+		cfg.HigherTimeframe = c.HigherTimeframe
+	}
+
+	primaryLookbackRaw := c.PrimaryLookbackPeriodsStr
+	if primaryLookbackRaw == "" {
+		primaryLookbackRaw = c.LookbackPeriodsStr
+	}
+	if primaryLookbackRaw == "" {
+		cfg.LookbackPeriods = 50
+	} else {
+		lookback, err := strconv.Atoi(primaryLookbackRaw)
+		if err != nil {
+			return errors.Wrap(err, "incorrect 'primary_lookback_periods' (or legacy 'lookback_periods') param")
+		}
+		if lookback < 50 {
+			return fmt.Errorf("primary_lookback_periods must be at least 50, got %d", lookback)
+		}
+		cfg.LookbackPeriods = lookback
+	}
+
+	if c.HigherLookbackPeriodsStr == "" {
+		cfg.HigherLookbackPeriods = 60
+	} else {
+		hLookback, err := strconv.Atoi(c.HigherLookbackPeriodsStr)
+		if err != nil {
+			return errors.Wrap(err, "incorrect 'higher_lookback_periods' param")
+		}
+		if hLookback < 20 {
+			return fmt.Errorf("higher_lookback_periods must be at least 20, got %d", hLookback)
+		}
+		cfg.HigherLookbackPeriods = hLookback
+	}
+
+	if c.MaxLeverageStr == "" {
+		cfg.MaxLeverage = 10
+	} else {
+		maxLeverage, err := strconv.Atoi(c.MaxLeverageStr)
+		if err != nil {
+			return errors.Wrap(err, "incorrect 'max_leverage' param")
+		}
+		if maxLeverage < 1 {
+			return fmt.Errorf("max_leverage must be at least 1, got %d", maxLeverage)
+		}
+		cfg.MaxLeverage = maxLeverage
+	}
+	return nil
+}
+
 func getPairFromString(pairStr string) (entity.Pair, error) {
 	pairElements := strings.Split(pairStr, "_")
 	if len(pairElements) != 2 {
