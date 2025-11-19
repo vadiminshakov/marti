@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/vadiminshakov/marti/config"
-	"github.com/vadiminshakov/marti/internal/domain"
+	entity "github.com/vadiminshakov/marti/internal/domain"
 )
 
 // TradingStrategy defines the interface that all trading strategies must implement.
@@ -29,7 +29,7 @@ type TradingStrategy interface {
 type TradingBot struct {
 	tradingStrategy TradingStrategy
 	trader          traderService
-	pricer          Pricer
+	pricer          priceService
 	balanceStore    balanceSnapshotWriter
 	Config          config.Config
 	leverage        int
@@ -51,7 +51,7 @@ func NewTradingBot(logger *zap.Logger, conf config.Config, client any, balanceSt
 		logger = zap.L()
 	}
 
-	provider, err := NewServiceProvider(client, logger)
+	provider, err := newServiceProvider(client, logger)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create service provider")
 	}
@@ -77,8 +77,8 @@ func NewTradingBot(logger *zap.Logger, conf config.Config, client any, balanceSt
 		return nil, errors.Wrap(err, "failed to create pricer")
 	}
 
-	tradingStrategy, err := createTradingStrategy(
-		logger,
+	factory := newStrategyFactory(logger)
+	tradingStrategy, err := factory.createTradingStrategy(
 		conf,
 		currentPricer,
 		currentTrader,
@@ -208,37 +208,7 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 				activePosition = "short"
 			}
 
-			lev := b.leverage
-			if lev < 1 {
-				lev = 1
-			}
-
-			if lev > 1 {
-				notional := position.Amount.Abs().Mul(position.EntryPrice)
-				collateral := notional.Div(decimal.NewFromInt(int64(lev)))
-				pnl := position.PnL(price)
-
-				freeBase := base
-
-				switch position.Side {
-				case entity.PositionSideLong:
-					if base.GreaterThanOrEqual(position.Amount) {
-						freeBase = base.Sub(position.Amount)
-					}
-				case entity.PositionSideShort:
-					shortImpact := position.Amount.Neg()
-					if base.LessThanOrEqual(shortImpact) {
-						freeBase = base.Sub(shortImpact)
-					}
-				}
-
-				freeBaseValue := decimal.Zero
-				if freeBase.GreaterThan(decimal.Zero) {
-					freeBaseValue = freeBase.Mul(price)
-				}
-
-				total = quote.Add(freeBaseValue).Add(collateral).Add(pnl)
-			}
+			total = position.CalculateTotalEquity(price, base, quote, b.leverage)
 		}
 	}
 

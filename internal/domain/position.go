@@ -102,3 +102,46 @@ func (p *Position) PnL(currentPrice decimal.Decimal) decimal.Decimal {
 func (p *Position) IsPositive() bool {
 	return p != nil && p.Amount.IsPositive()
 }
+
+// CalculateTotalEquity calculates the total equity including collateral and PnL.
+func (p *Position) CalculateTotalEquity(currentPrice decimal.Decimal, baseBalance, quoteBalance decimal.Decimal, leverage int) decimal.Decimal {
+	if p == nil || !p.IsPositive() {
+		return quoteBalance.Add(baseBalance.Mul(currentPrice))
+	}
+
+	lev := int64(leverage)
+	if lev < 1 {
+		lev = 1
+	}
+
+	// Calculate collateral and PnL
+	notional := p.Amount.Abs().Mul(p.EntryPrice)
+	collateral := notional.Div(decimal.NewFromInt(lev))
+	pnl := p.PnL(currentPrice)
+
+	// Calculate free base balance
+	freeBase := baseBalance
+	switch p.Side {
+	case PositionSideLong:
+		collateralAmount := p.Amount.Div(decimal.NewFromInt(lev))
+		if baseBalance.GreaterThanOrEqual(collateralAmount) {
+			freeBase = baseBalance.Sub(collateralAmount)
+		}
+	case PositionSideShort:
+		// If position.Amount is 1.0. shortImpact is -1.0.
+		// If base is 0.5. 0.5 <= -1.0 is False.
+		// If base is -2.0. -2.0 <= -1.0 is True. freeBase = -2.0 - (-1.0) = -1.0.
+		// This looks like it handles negative balances (borrowed funds).
+		shortImpact := p.Amount.Neg()
+		if baseBalance.LessThanOrEqual(shortImpact) {
+			freeBase = baseBalance.Sub(shortImpact)
+		}
+	}
+
+	freeBaseValue := decimal.Zero
+	if freeBase.GreaterThan(decimal.Zero) {
+		freeBaseValue = freeBase.Mul(currentPrice)
+	}
+
+	return quoteBalance.Add(freeBaseValue).Add(collateral).Add(pnl)
+}
