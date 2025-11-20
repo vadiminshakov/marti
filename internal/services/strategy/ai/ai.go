@@ -280,7 +280,7 @@ func (s *AIStrategy) executeEntry(
 	snapshot entity.MarketSnapshot,
 	position *entity.Position,
 ) (*entity.TradeEvent, error) {
-	// Validate position side
+	// validate position side
 	if position != nil && position.Side != side {
 		s.logger.Warn("Cannot open position: opposite position already exists",
 			zap.String("existing_side", position.Side.String()),
