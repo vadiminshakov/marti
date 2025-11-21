@@ -110,7 +110,6 @@ func (b *TradingBot) Close() {
 // Trade method at regular intervals defined by PollPriceInterval.
 // The method blocks until the context is cancelled or an unrecoverable error occurs.
 func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
-	// initialize trading strategy (handles initial buy if needed)
 	if err := b.tradingStrategy.Initialize(ctx); err != nil {
 		return errors.Wrap(err, "failed to initialize trading strategy")
 	}

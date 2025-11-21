@@ -136,6 +136,14 @@ func (s *Server) handleBalanceStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// after initial load, if no snapshots were sent, let client know
+	// so it can update UI from 'loading' to 'no data yet' state.
+	if lastIndex == 0 {
+		fmt.Fprintf(w, "event: no_data\n")
+		fmt.Fprintf(w, "data: {}\n\n")
+		flusher.Flush()
+	}
+
 	for {
 		select {
 		case <-r.Context().Done():
