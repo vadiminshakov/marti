@@ -19,22 +19,38 @@ import (
 	"flag"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 
 	"github.com/vadiminshakov/marti/config"
+	"github.com/vadiminshakov/marti/dashboard"
 	"github.com/vadiminshakov/marti/internal"
 	"github.com/vadiminshakov/marti/internal/clients"
 	"github.com/vadiminshakov/marti/internal/storage/aidecisions"
 	"github.com/vadiminshakov/marti/internal/storage/balancesnapshots"
-	"github.com/vadiminshakov/marti/internal/web"
 	"go.uber.org/zap"
 )
 
 func main() {
 	var webAddr string
-	flag.StringVar(&webAddr, "web", ":8080", "address for web UI (disable with empty string)")
+	var tlsDomainsArg string
+	var tlsCacheDir string
+
+	flag.StringVar(&webAddr, "web", ":8000", "address for web UI (disable with empty string)")
+	flag.StringVar(&tlsDomainsArg, "tls-domain", "", "comma-separated list of domains for automatic TLS via ACME (e.g. Let's Encrypt); requires ports 80 and 443")
+	flag.StringVar(&tlsCacheDir, "tls-cache-dir", "cert-cache", "directory to cache automatic TLS certificates")
 	flag.Parse()
+
+	var tlsDomains []string
+	if tlsDomainsArg != "" {
+		for _, d := range strings.Split(tlsDomainsArg, ",") {
+			d = strings.TrimSpace(d)
+			if d != "" {
+				tlsDomains = append(tlsDomains, d)
+			}
+		}
+	}
 	cfg := zap.NewProductionConfig()
 	cfg.DisableStacktrace = true
 	logger := zap.Must(cfg.Build())
@@ -149,10 +165,20 @@ func main() {
 		go func() {
 			defer wg.Done()
 			webLogger := logger.With(zap.String("component", "web"))
-			webLogger.Info("Starting web UI", zap.String("addr", webAddr))
-			srv := web.NewServer(webAddr, snapshotStore, aiDecisionStore)
-			if err := srv.Start(ctx); err != nil && ctx.Err() == nil {
-				webLogger.Error("Web server exited", zap.Error(err))
+			srv := dashboard.NewServer(webAddr, snapshotStore, aiDecisionStore)
+			if len(tlsDomains) > 0 {
+				webLogger.Info("Starting web UI with automatic TLS",
+					zap.String("addr", webAddr),
+					zap.String("domains", strings.Join(tlsDomains, ",")),
+				)
+				if err := srv.StartWithAutoTLS(ctx, tlsDomains, tlsCacheDir); err != nil && ctx.Err() == nil {
+					webLogger.Error("Web server (automatic TLS) exited", zap.Error(err))
+				}
+			} else {
+				webLogger.Info("Starting web UI", zap.String("addr", webAddr))
+				if err := srv.Start(ctx); err != nil && ctx.Err() == nil {
+					webLogger.Error("Web server exited", zap.Error(err))
+				}
 			}
 		}()
 	}
