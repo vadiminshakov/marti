@@ -26,7 +26,7 @@ func main() {
 		headerAccept string
 	)
 
-	flag.StringVar(&targetURL, "url", "http://localhost:8080/balance/stream", "SSE endpoint URL")
+	flag.StringVar(&targetURL, "url", "http://localhost:8000/balance/stream", "SSE endpoint URL")
 	flag.IntVar(&connections, "conns", 1000, "number of concurrent connections to open")
 	flag.DurationVar(&testDuration, "dur", 60*time.Second, "test duration (0 for until interrupted)")
 	flag.DurationVar(&rampUp, "ramp", 0, "ramp-up duration (spread connection starts across this window)")
@@ -35,6 +35,15 @@ func main() {
 
 	if connections <= 0 {
 		log.Fatalf("invalid conns: %d", connections)
+	}
+
+	if rampUp == 0 && connections > 100 {
+		// Default ramp-up: 1 second per 500 connections
+		rampUp = time.Duration(connections/500) * time.Second
+		if rampUp < 1*time.Second {
+			rampUp = 1 * time.Second
+		}
+		log.Printf("No ramp-up specified for high connection count. Using default ramp-up: %s", rampUp)
 	}
 
 	log.Printf("starting SSE load: url=%s conns=%d duration=%s ramp=%s", targetURL, connections, testDuration, rampUp)
@@ -67,7 +76,7 @@ func main() {
 		case <-ctx.Done():
 			return
 		}
-		
+
 		cancel()
 	}()
 
@@ -93,14 +102,29 @@ func main() {
 	)
 
 	var wg sync.WaitGroup
-	wg.Add(connections)
 
 	start := time.Now()
+
+	var interval time.Duration
+	if rampUp > 0 && connections > 0 {
+		interval = rampUp / time.Duration(connections)
+	}
+
 	for i := 0; i < connections; i++ {
-		if rampUp > 0 {
-			delay := time.Duration(float64(rampUp) / float64(connections) * float64(i))
-			time.Sleep(delay)
+		if ctx.Err() != nil {
+			break
 		}
+		if i > 0 && interval > 0 {
+			select {
+			case <-ctx.Done():
+			case <-time.After(interval):
+			}
+		}
+		if ctx.Err() != nil {
+			break
+		}
+
+		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
