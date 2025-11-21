@@ -12,12 +12,14 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/vadiminshakov/marti/internal/services/promptbuilder"
+	"github.com/vadiminshakov/marti/pkg/retrier"
 )
 
 const (
 	defaultTimeout    = 60 * time.Second
-	defaultMaxRetries = 5
-	defaultRetryDelay = 5 * time.Second
+	defaultMaxRetries = 7
+	defaultRetryDelay = 2 * time.Second
+	defaultMaxDelay   = 1 * time.Minute
 )
 
 // LLMClient defines the interface for interacting with LLM services
@@ -32,8 +34,7 @@ type OpenAICompatibleClient struct {
 	model         string
 	httpClient    *http.Client
 	promptBuilder *promptbuilder.PromptBuilder
-	maxRetries    int
-	retryDelay    time.Duration
+	retrier       *retrier.Retrier
 	customHeaders map[string]string
 }
 
@@ -47,8 +48,12 @@ func NewOpenAICompatibleClient(apiURL, apiKey, model string, promptBuilder *prom
 		httpClient: &http.Client{
 			Timeout: defaultTimeout,
 		},
-		maxRetries:    defaultMaxRetries,
-		retryDelay:    defaultRetryDelay,
+		retrier: retrier.New(
+			retrier.WithMaxRetries(defaultMaxRetries),
+			retrier.WithInitialInterval(defaultRetryDelay),
+			retrier.WithMaxInterval(defaultMaxDelay),
+			retrier.WithJitter(0.1),
+		),
 		customHeaders: make(map[string]string),
 	}
 
@@ -134,34 +139,12 @@ func (c *OpenAICompatibleClient) GetDecision(ctx context.Context, marketContext 
 
 	userPrompt := c.promptBuilder.BuildUserPrompt(marketContext)
 
-	var lastErr error
-	for attempt := 0; attempt < c.maxRetries; attempt++ {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return "", ctx.Err()
-			case <-time.After(c.retryDelay):
-			}
-		}
-
-		var response string
-		var err error
-
+	return retrier.DoWithData(c.retrier, ctx, func(ctx context.Context) (string, error) {
 		if c.isYandexAPI() {
-			response, err = c.getYandexDecision(ctx, userPrompt)
-		} else {
-			response, err = c.getOpenAIDecision(ctx, userPrompt)
+			return c.getYandexDecision(ctx, userPrompt)
 		}
-
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		return response, nil
-	}
-
-	return "", errors.Wrapf(lastErr, "failed after %d retries", c.maxRetries)
+		return c.getOpenAIDecision(ctx, userPrompt)
+	})
 }
 
 // getOpenAIDecision handles standard OpenAI-compatible API requests
