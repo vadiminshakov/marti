@@ -9,13 +9,10 @@ import (
 
 //go:generate stringer -type=PositionSide
 
-// PositionSide represents the direction of a trading position
 type PositionSide int
 
 const (
-	// PositionSideLong represents a long position (buy to open)
 	PositionSideLong PositionSide = iota
-	// PositionSideShort represents a short position (sell to open)
 	PositionSideShort
 )
 
@@ -114,34 +111,26 @@ func (p *Position) CalculateTotalEquity(currentPrice decimal.Decimal, baseBalanc
 		lev = 1
 	}
 
-	// Calculate collateral and PnL
+	// calculate collateral and PnL
 	notional := p.Amount.Abs().Mul(p.EntryPrice)
 	collateral := notional.Div(decimal.NewFromInt(lev))
 	pnl := p.PnL(currentPrice)
 
-	// Calculate free base balance
-	freeBase := baseBalance
+	// calculate free base balance
+	// for longs: freeBase = baseBalance - Amount (can be negative if deficit)
+	// for shorts: freeBase = baseBalance + Amount (can be positive if surplus)
+	var freeBase decimal.Decimal
 	switch p.Side {
 	case PositionSideLong:
-		collateralAmount := p.Amount.Div(decimal.NewFromInt(lev))
-		if baseBalance.GreaterThanOrEqual(collateralAmount) {
-			freeBase = baseBalance.Sub(collateralAmount)
+		freeBase = baseBalance.Sub(p.Amount)
+		if freeBase.LessThan(decimal.Zero) {
+			freeBase = decimal.Zero
 		}
 	case PositionSideShort:
-		// If position.Amount is 1.0. shortImpact is -1.0.
-		// If base is 0.5. 0.5 <= -1.0 is False.
-		// If base is -2.0. -2.0 <= -1.0 is True. freeBase = -2.0 - (-1.0) = -1.0.
-		// This looks like it handles negative balances (borrowed funds).
-		shortImpact := p.Amount.Neg()
-		if baseBalance.LessThanOrEqual(shortImpact) {
-			freeBase = baseBalance.Sub(shortImpact)
-		}
+		freeBase = baseBalance.Add(p.Amount)
 	}
 
-	freeBaseValue := decimal.Zero
-	if freeBase.GreaterThan(decimal.Zero) {
-		freeBaseValue = freeBase.Mul(currentPrice)
-	}
+	freeBaseValue := freeBase.Mul(currentPrice)
 
 	return quoteBalance.Add(freeBaseValue).Add(collateral).Add(pnl)
 }

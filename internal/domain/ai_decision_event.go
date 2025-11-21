@@ -8,20 +8,20 @@ import (
 // AIDecisionEvent represents a trading decision made by AI for a trading pair.
 // String fields avoid precision issues when rendered in UI layers.
 type AIDecisionEvent struct {
-	Timestamp               time.Time `json:"ts"`
-	Pair                    string    `json:"pair"`
-	Model                   string    `json:"model,omitempty"`
-	Action                  string    `json:"action"`
-	Reasoning               string    `json:"reasoning"`
-	RiskPercent             float64   `json:"risk_percent,omitempty"`
-	TakeProfitPrice         float64   `json:"take_profit_price,omitempty"`
-	StopLossPrice           float64   `json:"stop_loss_price,omitempty"`
-	InvalidationCondition   string    `json:"invalidation_condition,omitempty"`
-	CurrentPrice            string    `json:"current_price,omitempty"`
-	QuoteBalance            string    `json:"quote_balance,omitempty"`
-	PositionAmount          string    `json:"position_amount,omitempty"`
-	PositionSide            string    `json:"position_side,omitempty"`
-	PositionEntryPrice      string    `json:"position_entry_price,omitempty"`
+	Timestamp             time.Time `json:"ts"`
+	Pair                  string    `json:"pair"`
+	Model                 string    `json:"model,omitempty"`
+	Action                string    `json:"action"`
+	Reasoning             string    `json:"reasoning"`
+	RiskPercent           float64   `json:"risk_percent,omitempty"`
+	TakeProfitPrice       float64   `json:"take_profit_price,omitempty"`
+	StopLossPrice         float64   `json:"stop_loss_price,omitempty"`
+	InvalidationCondition string    `json:"invalidation_condition,omitempty"`
+	CurrentPrice          string    `json:"current_price,omitempty"`
+	QuoteBalance          string    `json:"quote_balance,omitempty"`
+	PositionAmount        string    `json:"position_amount,omitempty"`
+	PositionSide          string    `json:"position_side,omitempty"`
+	PositionEntryPrice    string    `json:"position_entry_price,omitempty"`
 }
 
 // NewAIDecisionEvent creates a new AIDecisionEvent with normalized model name.
@@ -42,12 +42,16 @@ func NewAIDecisionEvent(
 	positionSide string,
 	positionEntryPrice string,
 ) AIDecisionEvent {
-	// Normalize model name by removing gpt://folder_id/ prefix
+	// normalize model name by removing gpt://folder_id/ prefix
 	normalizedModel := model
 	if idx := strings.Index(normalizedModel, "gpt://"); idx >= 0 {
 		remainder := normalizedModel[idx+6:] // skip "gpt://"
 		if slashIdx := strings.Index(remainder, "/"); slashIdx >= 0 {
-			normalizedModel = remainder[slashIdx+1:] // take everything after the slash
+			normalizedModel = remainder[slashIdx+1:] // take everything after the folder ID
+			// if there are more slashes (e.g. yandexgpt/rc), take only the first part
+			if nextSlashIdx := strings.Index(normalizedModel, "/"); nextSlashIdx >= 0 {
+				normalizedModel = normalizedModel[:nextSlashIdx]
+			}
 		}
 	}
 
