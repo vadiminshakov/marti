@@ -149,184 +149,184 @@ const buildGlobalChart = (ctx) => {
   };
 
   const chart = new Chart(ctx, {
-  type: 'line',
-  data: { labels: [], datasets: [] },
-  options: {
-    animation: false,
-    responsive: true,
-    interaction: { intersect: false, mode: 'index' },
-    layout: {
-      padding: {
-        right: 50
-      }
-    },
-    onHover: (event, activeElements) => {
-      const chart = event.chart;
-      const canvasPosition = Chart.helpers.getRelativePosition(event, chart);
-
-      // Find which dataset line is being hovered based on proximity to line segments
-      const newHoveredIndex = findHoveredDataset(chart, canvasPosition);
-
-      if (newHoveredIndex !== hoveredDatasetIndex) {
-        applyHoverStyles(chart, newHoveredIndex);
-      }
-    },
-    scales: {
-      x: {
-        ticks: { color: '#666666', maxRotation: 0, autoSkip: true, font: { size: 10 } },
-        grid: { color: 'rgba(0,0,0,0.05)', borderColor: 'rgba(0,0,0,0.05)', borderDash: [4, 4] }
+    type: 'line',
+    data: { labels: [], datasets: [] },
+    options: {
+      animation: false,
+      responsive: true,
+      interaction: { intersect: false, mode: 'index' },
+      layout: {
+        padding: {
+          right: 50
+        }
       },
-      y: {
-        ticks: { color: '#666666', font: { size: 10 } },
-        grid: { color: 'rgba(0,0,0,0.05)', borderColor: 'rgba(0,0,0,0.05)', borderDash: [4, 4] }
+      onHover: (event, activeElements) => {
+        const chart = event.chart;
+        const canvasPosition = Chart.helpers.getRelativePosition(event, chart);
+
+        // Find which dataset line is being hovered based on proximity to line segments
+        const newHoveredIndex = findHoveredDataset(chart, canvasPosition);
+
+        if (newHoveredIndex !== hoveredDatasetIndex) {
+          applyHoverStyles(chart, newHoveredIndex);
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#888888', maxRotation: 0, autoSkip: true, font: { size: 10 } },
+          grid: { display: false, drawBorder: false }
+        },
+        y: {
+          ticks: { color: '#888888', font: { size: 10 } },
+          grid: { color: 'rgba(0,0,0,0.03)', borderDash: [4, 4], drawBorder: false }
+        }
+      },
+      elements: { line: { borderCapStyle: 'round' } },
+      plugins: {
+        decimation: {
+          enabled: true,
+          algorithm: 'lttb',
+          samples: 500
+        },
+        legend: { display: true, labels: { usePointStyle: true, boxWidth: 8, font: { size: 10 } } },
+        tooltip: {
+          backgroundColor: 'rgba(255, 255, 255, 0.95)',
+          borderColor: 'rgba(0, 0, 0, 0.1)',
+          borderWidth: 1,
+          titleColor: '#111111',
+          bodyColor: '#444444',
+          displayColors: true,
+          padding: 10,
+          cornerRadius: 4,
+          titleFont: { size: 11, weight: 'bold' },
+          bodyFont: { size: 11 }
+        }
       }
     },
-    elements: { line: { borderCapStyle: 'round' } },
-    plugins: {
-      decimation: {
-        enabled: true,
-        algorithm: 'lttb',
-        samples: 500
-      },
-      legend: { display: true, labels: { usePointStyle: true, boxWidth: 8, font: { size: 10 } } },
-      tooltip: {
-        backgroundColor: 'rgba(255, 255, 255, 0.95)',
-        borderColor: 'rgba(0, 0, 0, 0.1)',
-        borderWidth: 1,
-        titleColor: '#111111',
-        bodyColor: '#444444',
-        displayColors: true,
-        padding: 10,
-        cornerRadius: 4,
-        titleFont: { size: 11, weight: 'bold' },
-        bodyFont: { size: 11 }
-      }
-    }
-  },
-  plugins: [{
-    id: 'logoPlugin',
-    afterDraw: (chart) => {
-      const ctx = chart.ctx;
-      const xAxis = chart.scales.x;
-      const yAxis = chart.scales.y;
+    plugins: [{
+      id: 'logoPlugin',
+      afterDraw: (chart) => {
+        const ctx = chart.ctx;
+        const xAxis = chart.scales.x;
+        const yAxis = chart.scales.y;
 
-      // Map of model keywords to logo filenames
-      const modelLogos = {
-        'yandex': 'yandex.webp',
-        'deepseek': 'deepseek.webp',
-        'qwen': 'qwen.webp',
-        'moonshot': 'moonshot.webp',
-        'deepcogito': 'deepcogito.webp'
-      };
+        // Map of model keywords to logo filenames
+        const modelLogos = {
+          'yandex': 'yandex.webp',
+          'deepseek': 'deepseek.webp',
+          'qwen': 'qwen.webp',
+          'moonshot': 'moonshot.webp',
+          'deepcogito': 'deepcogito.webp'
+        };
 
-      // Cache for preloaded images
-      if (!chart.logoImages) {
-        chart.logoImages = {};
-        let loadedCount = 0;
-        const totalLogos = Object.keys(modelLogos).length;
-        Object.entries(modelLogos).forEach(([key, filename]) => {
-          const img = new Image();
-          img.src = filename;
-          img.onload = () => {
-            loadedCount++;
-            console.log(`Logo loaded: ${filename} (${loadedCount}/${totalLogos})`);
-            // Only update once when all logos are loaded
-            if (loadedCount === totalLogos) {
-              setTimeout(() => chart.update('none'), 100);
+        // Cache for preloaded images
+        if (!chart.logoImages) {
+          chart.logoImages = {};
+          let loadedCount = 0;
+          const totalLogos = Object.keys(modelLogos).length;
+          Object.entries(modelLogos).forEach(([key, filename]) => {
+            const img = new Image();
+            img.src = filename;
+            img.onload = () => {
+              loadedCount++;
+              console.log(`Logo loaded: ${filename} (${loadedCount}/${totalLogos})`);
+              // Only update once when all logos are loaded
+              if (loadedCount === totalLogos) {
+                setTimeout(() => chart.update('none'), 100);
+              }
+            };
+            img.onerror = () => {
+              console.error(`Failed to load logo: ${filename}`);
+            };
+            chart.logoImages[key] = img;
+          });
+        }
+
+        // Collect all logo positions to prevent overlap
+        const logoPositions = [];
+
+        // Get hovered dataset index from the chart instance
+        const hoveredIndex = chart.hoveredDatasetIndex;
+
+        chart.data.datasets.forEach((dataset, i) => {
+          const meta = chart.getDatasetMeta(i);
+          if (meta.hidden) return;
+
+          // Find the last non-null data point
+          let lastIndex = -1;
+          for (let j = dataset.data.length - 1; j >= 0; j--) {
+            if (dataset.data[j] !== null && dataset.data[j] !== undefined) {
+              lastIndex = j;
+              break;
             }
-          };
-          img.onerror = () => {
-            console.error(`Failed to load logo: ${filename}`);
-          };
-          chart.logoImages[key] = img;
+          }
+
+          if (lastIndex === -1) return;
+
+          // Use the right edge of the chart area instead of last point's x position
+          const x = xAxis.right;
+          let y = yAxis.getPixelForValue(dataset.data[lastIndex]);
+
+          // Skip if coordinates are invalid
+          if (!isFinite(x) || !isFinite(y)) return;
+
+          // Determine which logo to use based on dataset label or internal model key
+          let logoImg = null;
+          const modelKey = dataset.modelKey ? dataset.modelKey.toLowerCase() : '';
+
+          for (const [key, img] of Object.entries(chart.logoImages)) {
+            if (modelKey.includes(key)) {
+              logoImg = img;
+              break;
+            }
+          }
+
+          const size = 32;
+
+          // Check for overlap with existing logos and adjust y position
+          for (const pos of logoPositions) {
+            const xDist = Math.abs(x - pos.x);
+            const yDist = Math.abs(y - pos.y);
+
+            // If logos are close, offset vertically
+            if (xDist < size + 5 && yDist < size + 5) {
+              y = pos.y + size + 8;
+            }
+          }
+
+          logoPositions.push({ x, y });
+
+          ctx.save();
+
+          const logoX = x + 5;
+          const logoY = y - size / 2;
+
+          // Determine opacity based on hover state
+          let opacity = 1.0;
+          if (hoveredIndex !== null && hoveredIndex !== undefined) {
+            opacity = i === hoveredIndex ? 1.0 : 0.3;
+          }
+
+          if (logoImg && logoImg.complete && logoImg.naturalHeight !== 0) {
+            // Draw logo with appropriate opacity
+            ctx.globalAlpha = opacity;
+            ctx.imageSmoothingEnabled = true;
+            ctx.drawImage(logoImg, logoX, logoY, size, size);
+
+            console.log(`Drew logo for ${modelKey} at (${logoX}, ${logoY}) with opacity ${opacity}`);
+          } else {
+            // Draw bold dot as fallback
+            ctx.globalAlpha = opacity;
+            ctx.beginPath();
+            ctx.arc(x, y, 4, 0, 2 * Math.PI);
+            ctx.fillStyle = dataset.borderColor;
+            ctx.fill();
+          }
+          ctx.restore();
         });
       }
-
-      // Collect all logo positions to prevent overlap
-      const logoPositions = [];
-
-      // Get hovered dataset index from the chart instance
-      const hoveredIndex = chart.hoveredDatasetIndex;
-
-      chart.data.datasets.forEach((dataset, i) => {
-        const meta = chart.getDatasetMeta(i);
-        if (meta.hidden) return;
-
-        // Find the last non-null data point
-        let lastIndex = -1;
-        for (let j = dataset.data.length - 1; j >= 0; j--) {
-          if (dataset.data[j] !== null && dataset.data[j] !== undefined) {
-            lastIndex = j;
-            break;
-          }
-        }
-
-        if (lastIndex === -1) return;
-
-        // Use the right edge of the chart area instead of last point's x position
-        const x = xAxis.right;
-        let y = yAxis.getPixelForValue(dataset.data[lastIndex]);
-
-        // Skip if coordinates are invalid
-        if (!isFinite(x) || !isFinite(y)) return;
-
-        // Determine which logo to use based on dataset label or internal model key
-        let logoImg = null;
-        const modelKey = dataset.modelKey ? dataset.modelKey.toLowerCase() : '';
-
-        for (const [key, img] of Object.entries(chart.logoImages)) {
-          if (modelKey.includes(key)) {
-            logoImg = img;
-            break;
-          }
-        }
-
-        const size = 32;
-
-        // Check for overlap with existing logos and adjust y position
-        for (const pos of logoPositions) {
-          const xDist = Math.abs(x - pos.x);
-          const yDist = Math.abs(y - pos.y);
-
-          // If logos are close, offset vertically
-          if (xDist < size + 5 && yDist < size + 5) {
-            y = pos.y + size + 8;
-          }
-        }
-
-        logoPositions.push({ x, y });
-
-        ctx.save();
-
-        const logoX = x + 5;
-        const logoY = y - size / 2;
-
-        // Determine opacity based on hover state
-        let opacity = 1.0;
-        if (hoveredIndex !== null && hoveredIndex !== undefined) {
-          opacity = i === hoveredIndex ? 1.0 : 0.3;
-        }
-
-        if (logoImg && logoImg.complete && logoImg.naturalHeight !== 0) {
-          // Draw logo with appropriate opacity
-          ctx.globalAlpha = opacity;
-          ctx.imageSmoothingEnabled = true;
-          ctx.drawImage(logoImg, logoX, logoY, size, size);
-
-          console.log(`Drew logo for ${modelKey} at (${logoX}, ${logoY}) with opacity ${opacity}`);
-        } else {
-          // Draw bold dot as fallback
-          ctx.globalAlpha = opacity;
-          ctx.beginPath();
-          ctx.arc(x, y, 4, 0, 2 * Math.PI);
-          ctx.fillStyle = dataset.borderColor;
-          ctx.fill();
-        }
-        ctx.restore();
-      });
-    }
-  }]
-});
+    }]
+  });
 
   chart.applyHoverStyles = (newHoveredIndex) => applyHoverStyles(chart, newHoveredIndex);
   return chart;
@@ -362,8 +362,8 @@ const nextColor = () => {
 };
 
 function createGradient(ctx, color) {
-  const gradient = ctx.createLinearGradient(0, 0, 0, 320);
-  gradient.addColorStop(0, color.replace('0.15)', '0.2)').replace('0.12)', '0.2)').replace('0.18)', '0.2)')); // Slightly more opaque at top
+  const gradient = ctx.createLinearGradient(0, 0, 0, 640);
+  gradient.addColorStop(0, color.replace('0.15)', '0.1)').replace('0.12)', '0.1)').replace('0.18)', '0.1)')); // Lighter fill
   gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
   return gradient;
 }
