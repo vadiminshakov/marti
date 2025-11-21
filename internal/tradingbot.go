@@ -214,7 +214,7 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 	err = b.balanceStore.Save(entity.BalanceSnapshot{
 		Timestamp:  time.Now().UTC(),
 		Pair:       b.Config.Pair.String(),
-		Model:      b.Config.Model,
+		Model:      entity.NormalizeModelName(b.Config.Model),
 		Base:       base.String(),
 		Quote:      quote.String(),
 		TotalQuote: total.StringFixed(2),

@@ -1,7 +1,6 @@
 package entity
 
 import (
-	"strings"
 	"time"
 )
 
@@ -43,17 +42,7 @@ func NewAIDecisionEvent(
 	positionEntryPrice string,
 ) AIDecisionEvent {
 	// normalize model name by removing gpt://folder_id/ prefix
-	normalizedModel := model
-	if idx := strings.Index(normalizedModel, "gpt://"); idx >= 0 {
-		remainder := normalizedModel[idx+6:] // skip "gpt://"
-		if slashIdx := strings.Index(remainder, "/"); slashIdx >= 0 {
-			normalizedModel = remainder[slashIdx+1:] // take everything after the folder ID
-			// if there are more slashes (e.g. yandexgpt/rc), take only the first part
-			if nextSlashIdx := strings.Index(normalizedModel, "/"); nextSlashIdx >= 0 {
-				normalizedModel = normalizedModel[:nextSlashIdx]
-			}
-		}
-	}
+	normalizedModel := NormalizeModelName(model)
 
 	return AIDecisionEvent{
 		Timestamp:             timestamp,
