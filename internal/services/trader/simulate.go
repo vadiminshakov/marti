@@ -8,7 +8,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
-	"github.com/vadiminshakov/marti/internal/domain"
+	entity "github.com/vadiminshakov/marti/internal/domain"
 	"github.com/vadiminshakov/marti/internal/storage/simstate"
 	"go.uber.org/zap"
 )
@@ -159,7 +159,7 @@ func (t *SimulateTrader) UnrealizedPnL(ctx context.Context, price decimal.Decima
 }
 
 // buy simulates a market buy order, fetching the price from its pricer.
-// The 'amount' is expected to be in the base currency (e.g., BTC for BTC/USDT).
+// the 'amount' is expected to be in the base currency (e.g., BTC for BTC/USDT).
 func (t *SimulateTrader) buy(ctx context.Context, amount decimal.Decimal, id string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -187,7 +187,7 @@ func (t *SimulateTrader) buy(ctx context.Context, amount decimal.Decimal, id str
 }
 
 // sell simulates a market sell order, fetching the price from its pricer.
-// The 'amount' is expected to be in the base currency (e.g., BTC for BTC/USDT).
+// the 'amount' is expected to be in the base currency (e.g., BTC for BTC/USDT).
 func (t *SimulateTrader) sell(ctx context.Context, amount decimal.Decimal, id string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -230,8 +230,9 @@ func (t *SimulateTrader) openOrAddLong(amount decimal.Decimal, id string, price 
 	t.wallet[t.pair.To] = t.wallet[t.pair.To].Sub(requiredQuote)
 	if t.marketType == entity.MarketTypeMargin {
 		t.marginUsed = t.marginUsed.Add(requiredQuote)
+	} else {
+		t.wallet[t.pair.From] = t.wallet[t.pair.From].Add(amount)
 	}
-	t.wallet[t.pair.From] = t.wallet[t.pair.From].Add(amount)
 
 	if t.position == nil {
 		pos, err := entity.NewPositionFromExternalSnapshot(amount, price, time.Now(), entity.PositionSideLong)
@@ -277,14 +278,16 @@ func (t *SimulateTrader) closeLong(amount decimal.Decimal, id string, price deci
 		return fmt.Errorf("close amount must be positive, got %s", closeAmount.String())
 	}
 
-	if t.wallet[t.pair.From].LessThan(closeAmount) {
+	if t.marketType != entity.MarketTypeMargin && t.wallet[t.pair.From].LessThan(closeAmount) {
 		return fmt.Errorf("insufficient %s balance: have %s need %s",
 			t.pair.From,
 			t.wallet[t.pair.From].String(),
 			closeAmount.String())
 	}
 
-	t.wallet[t.pair.From] = t.wallet[t.pair.From].Sub(closeAmount)
+	if t.marketType != entity.MarketTypeMargin {
+		t.wallet[t.pair.From] = t.wallet[t.pair.From].Sub(closeAmount)
+	}
 
 	prevAmount := t.position.Amount
 	entryPrice := t.position.EntryPrice
