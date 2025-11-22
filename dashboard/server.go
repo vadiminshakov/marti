@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -162,14 +163,17 @@ func (s *Server) handleBalanceStream(w http.ResponseWriter, r *http.Request) {
 	pollTicker := time.NewTicker(snapshotPollInterval)
 	defer pollTicker.Stop()
 
-	lastIndex := uint64(0)
-	isFirstLoad := true
+	lastIndex := parseLastEventID(r.Header.Get("Last-Event-ID"), r.URL.Query().Get("last_event_id"))
+	isFirstLoad := lastIndex == 0
 	sendSnapshots := func() error {
 		records, err := s.Store.SnapshotsAfter(lastIndex)
 		if err != nil {
 			return err
 		}
 		if len(records) == 0 {
+			if isFirstLoad {
+				isFirstLoad = false
+			}
 			return nil
 		}
 
@@ -190,6 +194,7 @@ func (s *Server) handleBalanceStream(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
+			fmt.Fprintf(w, "id: %d\n", record.Index)
 			fmt.Fprintf(w, "event: balance\n")
 			fmt.Fprintf(w, "data: %s\n\n", payload)
 			flusher.Flush()
@@ -199,7 +204,9 @@ func (s *Server) handleBalanceStream(w http.ResponseWriter, r *http.Request) {
 				time.Sleep(sendDelay)
 			}
 		}
-		isFirstLoad = false
+		if isFirstLoad {
+			isFirstLoad = false
+		}
 		return nil
 	}
 
@@ -254,7 +261,7 @@ func (s *Server) handleAIDecisionStream(w http.ResponseWriter, r *http.Request) 
 	pollTicker := time.NewTicker(snapshotPollInterval)
 	defer pollTicker.Stop()
 
-	lastIndex := uint64(0)
+	lastIndex := parseLastEventID(r.Header.Get("Last-Event-ID"), r.URL.Query().Get("last_event_id"))
 	sendDecisions := func() error {
 		records, err := s.AIDecisionStore.EventsAfter(lastIndex)
 		if err != nil {
@@ -268,6 +275,7 @@ func (s *Server) handleAIDecisionStream(w http.ResponseWriter, r *http.Request) 
 			if err != nil {
 				return err
 			}
+			fmt.Fprintf(w, "id: %d\n", record.Index)
 			fmt.Fprintf(w, "event: ai_decision\n")
 			fmt.Fprintf(w, "data: %s\n\n", payload)
 			flusher.Flush()
@@ -347,6 +355,25 @@ func shouldCompress(p string) bool {
 	default:
 		return false
 	}
+}
+
+// parseLastEventID extracts an SSE event ID from either the Last-Event-ID header or a query parameter.
+// The header is preferred; the query parameter allows manual reconnects to resume from a known index.
+func parseLastEventID(headerVal, queryVal string) uint64 {
+	idStr := strings.TrimSpace(headerVal)
+	if idStr == "" {
+		idStr = strings.TrimSpace(queryVal)
+	}
+	if idStr == "" {
+		return 0
+	}
+
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		log.Printf("invalid last event id %q: %v", idStr, err)
+		return 0
+	}
+	return id
 }
 
 // thinRecords applies exponential thinning to keep last 100 records fully, thin the rest
