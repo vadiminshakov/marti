@@ -1,5 +1,4 @@
-package entity
-
+package domain
 import "github.com/shopspring/decimal"
 
 const (

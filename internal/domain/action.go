@@ -1,4 +1,4 @@
-package entity
+package domain
 
 //go:generate stringer -type=Action
 

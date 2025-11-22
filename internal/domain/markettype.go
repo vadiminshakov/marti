@@ -1,5 +1,5 @@
 // Package entity defines core data structures used throughout the trading bot.
-package entity
+package domain
 
 // MarketType represents the type of market for trading (spot or margin).
 type MarketType string
