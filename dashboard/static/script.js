@@ -1,4 +1,4 @@
-const statusEl = document.getElementById('sse-status');
+
 const pairContainer = document.getElementById('pairs');
 const emptyState = document.getElementById('emptyState');
 const chartCanvas = document.getElementById('globalChart');
@@ -110,11 +110,56 @@ const buildGlobalChart = (ctx) => {
         dataset.borderWidth = 1.5;
         const rgb = hexToRgb(dataset._originalColor);
         dataset.borderColor = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.25)`;
-        dataset.backgroundColor = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.05)`;
+        dataset.backgroundColor = 'rgba(0, 0, 0, 0)';
       }
     });
 
     chart.update('none');
+  };
+
+  const crosshairPlugin = {
+    id: 'crosshair',
+    afterDraw: (chart) => {
+      if (chart.tooltip?._active?.length) {
+        const ctx = chart.ctx;
+        const x = chart.tooltip._active[0].element.x;
+        const topY = chart.scales.y.top;
+        const bottomY = chart.scales.y.bottom;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(x, topY);
+        ctx.lineTo(x, bottomY);
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+        ctx.setLineDash([]);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+  };
+
+  const lineGlowPlugin = {
+    id: 'lineGlow',
+    beforeDatasetDraw: (chart, args) => {
+      const { ctx } = chart;
+      const { index } = args;
+      if (chart.hoveredDatasetIndex === index) {
+        const dataset = chart.data.datasets[index];
+        ctx.save();
+        ctx.shadowColor = dataset.borderColor;
+        ctx.shadowBlur = 10;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+      }
+    },
+    afterDatasetDraw: (chart, args) => {
+      const { ctx } = chart;
+      const { index } = args;
+      if (chart.hoveredDatasetIndex === index) {
+        ctx.restore();
+      }
+    }
   };
 
   const findHoveredDataset = (chart, pos) => {
@@ -177,8 +222,14 @@ const buildGlobalChart = (ctx) => {
           grid: { display: false, drawBorder: false }
         },
         y: {
-          ticks: { color: '#888888', font: { size: 10 } },
-          grid: { color: 'rgba(0,0,0,0.03)', borderDash: [4, 4], drawBorder: false }
+          ticks: {
+            color: '#888888',
+            font: { size: 10 },
+            callback: function (value) {
+              return value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+            }
+          },
+          grid: { color: 'rgba(0,0,0,0.03)', borderDash: [], drawBorder: false }
         }
       },
       elements: { line: { borderCapStyle: 'round' } },
@@ -186,6 +237,8 @@ const buildGlobalChart = (ctx) => {
 
         legend: { display: true, labels: { usePointStyle: true, boxWidth: 8, font: { size: 10 } } },
         tooltip: {
+          enabled: false, // Disable tooltip rendering
+          external: () => { }, // Ensure no external tooltip is triggered
           backgroundColor: 'rgba(255, 255, 255, 0.95)',
           borderColor: 'rgba(0, 0, 0, 0.1)',
           borderWidth: 1,
@@ -195,16 +248,26 @@ const buildGlobalChart = (ctx) => {
           padding: 10,
           cornerRadius: 4,
           titleFont: { size: 11, weight: 'bold' },
-          bodyFont: { size: 11 }
+          bodyFont: { size: 11 },
+          callbacks: {
+            label: function (context) {
+              let label = context.dataset.label || '';
+              if (label) {
+                label += ': ';
+              }
+              if (context.parsed.y !== null) {
+                label += context.parsed.y.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+              }
+              return label;
+            }
+          }
         }
       }
     },
-    plugins: [{
+    plugins: [lineGlowPlugin, {
       id: 'logoPlugin',
       afterDraw: (chart) => {
         const ctx = chart.ctx;
-        const xAxis = chart.scales.x;
-        const yAxis = chart.scales.y;
 
         // Map of model keywords to logo filenames
         const modelLogos = {
@@ -212,7 +275,10 @@ const buildGlobalChart = (ctx) => {
           'deepseek': 'deepseek.webp',
           'qwen': 'qwen.webp',
           'moonshot': 'moonshot.webp',
-          'deepcogito': 'deepcogito.webp'
+          'openai': 'openai.webp',
+          'gemini': 'gemini.webp',
+          'anthropic': 'anthropic.webp',
+          'grok': 'grok.webp'
         };
 
         // Cache for preloaded images
@@ -225,7 +291,6 @@ const buildGlobalChart = (ctx) => {
             img.src = filename;
             img.onload = () => {
               loadedCount++;
-              console.log(`Logo loaded: ${filename} (${loadedCount}/${totalLogos})`);
               // Only update once when all logos are loaded
               if (loadedCount === totalLogos) {
                 setTimeout(() => chart.update('none'), 100);
@@ -237,9 +302,6 @@ const buildGlobalChart = (ctx) => {
             chart.logoImages[key] = img;
           });
         }
-
-        // Collect all logo positions to prevent overlap
-        const logoPositions = [];
 
         // Get hovered dataset index from the chart instance
         const hoveredIndex = chart.hoveredDatasetIndex;
@@ -259,9 +321,10 @@ const buildGlobalChart = (ctx) => {
 
           if (lastIndex === -1) return;
 
-          // Use the right edge of the chart area instead of last point's x position
-          const x = xAxis.right;
-          let y = yAxis.getPixelForValue(dataset.data[lastIndex]);
+          const point = meta.data[lastIndex];
+          if (!point) return;
+
+          const { x, y } = point;
 
           // Skip if coordinates are invalid
           if (!isFinite(x) || !isFinite(y)) return;
@@ -282,28 +345,25 @@ const buildGlobalChart = (ctx) => {
 
           const size = 32;
 
-          // Check for overlap with existing logos and adjust y position
-          for (const pos of logoPositions) {
-            const xDist = Math.abs(x - pos.x);
-            const yDist = Math.abs(y - pos.y);
-
-            // If logos are close, offset vertically
-            if (xDist < size + 5 && yDist < size + 5) {
-              y = pos.y + size + 8;
-            }
-          }
-
-          logoPositions.push({ x, y });
-
           ctx.save();
 
-          const logoX = x + 5;
+          const logoX = x - size / 2;
           const logoY = y - size / 2;
 
           // Determine opacity based on hover state
           let opacity = 1.0;
+          let isHovered = false;
           if (hoveredIndex !== null && hoveredIndex !== undefined) {
             opacity = i === hoveredIndex ? 1.0 : 0.3;
+            isHovered = i === hoveredIndex;
+          }
+
+          // Apply glow if hovered
+          if (isHovered) {
+            ctx.shadowColor = dataset.borderColor;
+            ctx.shadowBlur = 20;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
           }
 
           if (logoImg && logoImg.complete && logoImg.naturalHeight !== 0) {
@@ -311,8 +371,6 @@ const buildGlobalChart = (ctx) => {
             ctx.globalAlpha = opacity;
             ctx.imageSmoothingEnabled = true;
             ctx.drawImage(logoImg, logoX, logoY, size, size);
-
-            console.log(`Drew logo for ${modelKey} at (${logoX}, ${logoY}) with opacity ${opacity}`);
           } else {
             // Draw bold dot as fallback
             ctx.globalAlpha = opacity;
@@ -324,7 +382,7 @@ const buildGlobalChart = (ctx) => {
           ctx.restore();
         });
       }
-    }]
+    }, crosshairPlugin]
   });
 
   chart.applyHoverStyles = (newHoveredIndex) => applyHoverStyles(chart, newHoveredIndex);
@@ -379,15 +437,15 @@ function ensureDataset(model) {
     label: shortenModelName(key),
     data: new Array(globalChart.data.labels.length).fill(null),
     borderColor: palette.line,
-    backgroundColor: palette.line,
+    backgroundColor: createGradient(globalChart.ctx, palette.fill),
     borderWidth: 2,
-    pointRadius: 1,
+    pointRadius: 0,
     pointHoverRadius: 4,
     pointBackgroundColor: '#ffffff',
     pointBorderColor: palette.line,
     pointBorderWidth: 2,
     tension: 0.3,
-    fill: false,
+    fill: true,
     spanGaps: true
   };
   globalChart.data.datasets.push(dataset);
@@ -540,11 +598,19 @@ function handlePayload(payload) {
   updateGlobalChart(model, quoteCurrency, aggregate.totalBalance, payload.ts);
 }
 
-function connectSSE() {
-  const source = new EventSource('/balance/stream');
-  statusEl.textContent = 'Status: receiving data';
+let balanceSource = null;
 
-  source.addEventListener('no_data', () => {
+function connectSSE() {
+  if (balanceSource) {
+    balanceSource.close();
+  }
+
+  balanceSource = new EventSource('/balance/stream');
+
+
+
+
+  balanceSource.addEventListener('no_data', () => {
     if (datasetByPair.size === 0) {
       const emptyState = document.getElementById('emptyState');
       if (emptyState) {
@@ -559,7 +625,7 @@ function connectSSE() {
     }
   });
 
-  source.addEventListener('balance', (event) => {
+  balanceSource.addEventListener('balance', (event) => {
     try {
       const payload = JSON.parse(event.data);
       handlePayload(payload);
@@ -567,18 +633,66 @@ function connectSSE() {
       console.error('payload parse', err);
     }
   });
-  source.addEventListener('error', () => {
-    statusEl.textContent = 'Reconnecting…';
-    source.close();
-    setTimeout(connectSSE, 2000);
-  });
+
+
 }
 
 connectSSE();
 
 // AI Decisions Stream
 const aiDecisionsContainer = document.getElementById('aiDecisions');
+const modelFiltersContainer = document.getElementById('modelFilters');
 const MAX_DECISIONS = 50;
+let currentFilter = null;
+
+const knownModels = [
+  'yandex', 'deepseek', 'qwen', 'moonshot',
+  'openai', 'gemini', 'anthropic', 'grok'
+];
+
+function filterDecisions(model) {
+  if (currentFilter === model) {
+    currentFilter = null; // Toggle off
+  } else {
+    currentFilter = model;
+  }
+
+  // Update buttons
+  const buttons = modelFiltersContainer.querySelectorAll('.filter-btn');
+  buttons.forEach(btn => {
+    if (btn.dataset.model === currentFilter) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  });
+
+  // Filter existing cards
+  const cards = aiDecisionsContainer.querySelectorAll('.ai-decision-card');
+  cards.forEach(card => {
+    const cardModel = card.dataset.model;
+    if (!currentFilter || (cardModel && cardModel.includes(currentFilter))) {
+      card.style.display = 'block';
+    } else {
+      card.style.display = 'none';
+    }
+  });
+}
+
+function renderFilterButtons() {
+  if (!modelFiltersContainer) return;
+
+  knownModels.forEach(model => {
+    const btn = document.createElement('button');
+    btn.className = 'filter-btn';
+    btn.textContent = model;
+    btn.dataset.model = model;
+    btn.onclick = () => filterDecisions(model);
+    modelFiltersContainer.appendChild(btn);
+  });
+}
+
+renderFilterButtons();
 
 function formatTime(ts) {
   if (!ts) return '';
@@ -590,6 +704,16 @@ function formatTime(ts) {
 function createDecisionCard(decision) {
   const card = document.createElement('div');
   card.className = 'ai-decision-card';
+
+  // Store model for filtering
+  if (decision.model) {
+    card.dataset.model = normalizeModel(decision.model).toLowerCase();
+  }
+
+  // Apply initial filter state
+  if (currentFilter && card.dataset.model && !card.dataset.model.includes(currentFilter)) {
+    card.style.display = 'none';
+  }
 
   const header = document.createElement('div');
   header.className = 'ai-decision-header';
@@ -686,10 +810,16 @@ function createDecisionCard(decision) {
   return card;
 }
 
-function connectAIDecisionSSE() {
-  const source = new EventSource('/ai/decisions/stream');
+let aiDecisionSource = null;
 
-  source.addEventListener('ai_decision', (event) => {
+function connectAIDecisionSSE() {
+  if (aiDecisionSource) {
+    aiDecisionSource.close();
+  }
+
+  aiDecisionSource = new EventSource('/ai/decisions/stream');
+
+  aiDecisionSource.addEventListener('ai_decision', (event) => {
     try {
       const decision = JSON.parse(event.data);
       const card = createDecisionCard(decision);
@@ -704,10 +834,8 @@ function connectAIDecisionSSE() {
     }
   });
 
-  source.addEventListener('error', () => {
+  aiDecisionSource.addEventListener('error', () => {
     console.log('AI decision stream reconnecting...');
-    source.close();
-    setTimeout(connectAIDecisionSSE, 2000);
   });
 }
 

@@ -2,16 +2,6 @@
 <html lang="en">
 
 <head>
-  <script type="text/javascript">
-    (function (m, e, t, r, i, k, a) {
-      m[i] = m[i] || function () { (m[i].a = m[i].a || []).push(arguments) };
-      m[i].l = 1 * new Date();
-      for (var j = 0; j < document.scripts.length; j++) { if (document.scripts[j].src === r) { return; } }
-      k = e.createElement(t), a = e.getElementsByTagName(t)[0], k.async = 1, k.src = r, a.parentNode.insertBefore(k, a)
-    })(window, document, 'script', 'https://mc.yandex.ru/metrika/tag.js?id=105454001', 'ym');
-
-    ym(105454001, 'init', { ssr: true, clickmap: true, ecommerce: "dataLayer", accurateTrackBounce: true, trackLinks: true });
-  </script>
   <noscript>
     <div><img src="https://mc.yandex.ru/watch/105454001" style="position:absolute; left:-9999px;" alt="" /></div>
   </noscript>
@@ -37,7 +27,7 @@
           <p class="eyebrow">POWERED BY <a href="https://github.com/vadiminshakov/marti" target="_blank"
               style="color: inherit; text-decoration: none; border-bottom: 1px solid currentColor;">MARTI</a></p>
         </div>
-        <div id="sse-status" class="status">Connecting…</div>
+
       </header>
       <section class="overview">
         <canvas id="globalChart" class="global-chart" height="640"></canvas>
@@ -51,6 +41,7 @@
     </div>
     <aside class="ai-decisions-sidebar">
       <h3 class="sidebar-title">AI Decisions</h3>
+      <div id="modelFilters" class="model-filters"></div>
       <div id="aiDecisions"></div>
     </aside>
   </div>

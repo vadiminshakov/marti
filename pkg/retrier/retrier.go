@@ -75,11 +75,11 @@ func (r *Retrier) Do(ctx context.Context, fn func(ctx context.Context) error) er
 
 	for attempt := 0; attempt <= r.maxRetries; attempt++ {
 		if attempt > 0 {
-			// Calculate jitter
+			// calculate jitter
 			jitter := (rand.Float64()*2 - 1) * r.jitter * float64(interval)
 			sleepDuration := time.Duration(float64(interval) + jitter)
 
-			// Ensure we don't sleep less than 0
+			// ensure we don't sleep less than 0
 			if sleepDuration < 0 {
 				sleepDuration = 0
 			}
@@ -90,7 +90,7 @@ func (r *Retrier) Do(ctx context.Context, fn func(ctx context.Context) error) er
 			case <-time.After(sleepDuration):
 			}
 
-			// Update interval for next retry
+			// update interval for next retry
 			interval = time.Duration(float64(interval) * r.multiplier)
 			if interval > r.maxInterval {
 				interval = r.maxInterval

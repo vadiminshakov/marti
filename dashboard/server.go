@@ -93,7 +93,7 @@ func (s *Server) StartWithAutoTLS(ctx context.Context, domains []string, cacheDi
 		Cache:      autocert.DirCache(cacheDir),
 	}
 
-	// HTTP server on port 80 for ACME challenges and HTTP->HTTPS redirects.
+	// hTTP server on port 80 for ACME challenges and HTTP->HTTPS redirects.
 	httpSrv := &http.Server{
 		Addr:              ":80",
 		Handler:           manager.HTTPHandler(nil),
@@ -101,7 +101,7 @@ func (s *Server) StartWithAutoTLS(ctx context.Context, domains []string, cacheDi
 		IdleTimeout:       120 * time.Second,
 	}
 
-	// HTTPS server serving the dashboard with automatic certificates.
+	// hTTPS server serving the dashboard with automatic certificates.
 	tlsConfig := manager.TLSConfig()
 	tlsConfig.MinVersion = tls.VersionTLS12
 
@@ -113,7 +113,7 @@ func (s *Server) StartWithAutoTLS(ctx context.Context, domains []string, cacheDi
 		TLSConfig:         tlsConfig,
 	}
 
-	// Shutdown both servers when context is cancelled.
+	// shutdown both servers when context is cancelled.
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -126,7 +126,7 @@ func (s *Server) StartWithAutoTLS(ctx context.Context, domains []string, cacheDi
 		}
 	}()
 
-	// Start HTTP (ACME) server in the background.
+	// start HTTP (ACME) server in the background.
 	go func() {
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("http (acme) server error: %v", err)
@@ -173,13 +173,13 @@ func (s *Server) handleBalanceStream(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 
-		// Apply exponential thinning on first load for large datasets
+		// apply exponential thinning on first load for large datasets
 		recordsToSend := records
 		if isFirstLoad && len(records) > 100 {
 			recordsToSend = thinRecords(records)
 		}
 
-		// Send records with throttling
+		// send records with throttling
 		sendDelay := 0 * time.Millisecond
 		if isFirstLoad && len(recordsToSend) > 50 {
 			sendDelay = 10 * time.Millisecond

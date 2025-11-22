@@ -38,7 +38,7 @@ func main() {
 	}
 
 	if rampUp == 0 && connections > 100 {
-		// Default ramp-up: 1 second per 500 connections
+		// default ramp-up: 1 second per 500 connections
 		rampUp = time.Duration(connections/500) * time.Second
 		if rampUp < 1*time.Second {
 			rampUp = 1 * time.Second
@@ -160,7 +160,7 @@ func main() {
 						_ = resp.Body.Close()
 						return
 					}
-					// Count lines that look like data/events (ignore heartbeats ":" and empty lines)
+					// count lines that look like data/events (ignore heartbeats ":" and empty lines)
 					if len(line) > 0 && line[0] != ':' && line != "\n" && line != "\r\n" {
 						atomic.AddInt64(&events, 1)
 					}

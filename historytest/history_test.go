@@ -161,22 +161,22 @@ func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell fl
 }
 
 func summarizeResults(trader *traderCsv, pair *entity.Pair, initialBalanceBTC, lastPriceBTC decimal.Decimal) botSummary {
-	// Get the initial USDT balance from the trader
+	// get the initial USDT balance from the trader
 	initialBalanceUSDT, _ := decimal.NewFromString(usdtBalanceInWallet)
 
-	// Calculate total profit in USDT
+	// calculate total profit in USDT
 	totalProfit := calculateTotalProfit(trader)
 	if trader.balance1.IsPositive() {
 		totalProfit = totalProfit.Add(lastPriceBTC.Mul(trader.balance1))
 	}
 
-	// Calculate profit percentage based on initial USDT investment
+	// calculate profit percentage based on initial USDT investment
 	var profitPercent string
 	if initialBalanceUSDT.IsPositive() {
-		// Profit = (Current USDT - Initial USDT) / Initial USDT * 100
+		// profit = (Current USDT - Initial USDT) / Initial USDT * 100
 		profitPercent = totalProfit.Sub(initialBalanceUSDT).Mul(decimal.NewFromInt(100)).Div(initialBalanceUSDT).StringFixed(2)
 	} else if initialBalanceBTC.IsPositive() {
-		// Fallback to BTC calculation if we started with BTC
+		// fallback to BTC calculation if we started with BTC
 		initialValueUSDT := initialBalanceBTC.Mul(lastPriceBTC)
 		profitPercent = totalProfit.Sub(initialValueUSDT).Mul(decimal.NewFromInt(100)).Div(initialValueUSDT).StringFixed(2)
 	} else {
@@ -231,10 +231,10 @@ func createStrategyFactory(logger *zap.Logger, pair *entity.Pair, prices chan de
 		dcaPercentThresholdBuyDecimal := decimal.NewFromFloat(dcaPercentThresholdBuy)
 		dcaPercentThresholdSellDecimal := decimal.NewFromFloat(dcaPercentThresholdSell)
 
-		// For backtesting: use 20% to maximize capital utilization
-		// This means: use all available USDT balance for EACH trade
-		// Each buy order will use: current_balance * 20%
-		// This represents aggressive reinvestment strategy, good for backtesting
+		// for backtesting: use 20% to maximize capital utilization
+		// this means: use all available USDT balance for EACH trade
+		// each buy order will use: current_balance * 20%
+		// this represents aggressive reinvestment strategy, good for backtesting
 		// maxDcaTrades only limits the number of buys in a series
 		amountPercent := decimal.NewFromInt(20)
 

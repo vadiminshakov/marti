@@ -13,7 +13,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/gowal"
-	"github.com/vadiminshakov/marti/internal/domain"
+	entity "github.com/vadiminshakov/marti/internal/domain"
 	"go.uber.org/zap"
 )
 
@@ -69,7 +69,7 @@ type DCAStrategy struct {
 	dcaPercentThresholdSell decimal.Decimal
 	seriesKey               string
 
-	// Interval for checking order status (can be overridden for testing)
+	// interval for checking order status (can be overridden for testing)
 	orderCheckInterval time.Duration
 }
 
