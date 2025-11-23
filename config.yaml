@@ -30,11 +30,7 @@
   dca_percent_threshold_buy: 1
   dca_percent_threshold_sell: 2
 
-
 # AI Strategy - spot
-# NOTE: The 'leverage' parameter should NOT be specified for AI strategy.
-# AI strategy manages position sizing internally and does not use the leverage parameter.
-# Including leverage in AI strategy config will result in a validation error.
 - pair: BTC_USDT
   platform: binance
   strategy: ai
@@ -57,9 +53,22 @@
   # How often to check price updates and make decisions
   pollpriceinterval: 3m
 
+# AI Strategy - margin mode
+- pair: ETH_USDT
+  platform: bybit
+  strategy: ai
+  market_type: margin
+  llm_api_url: "https://openrouter.ai/api/v1/chat/completions"
+  llm_api_key: "sk-your-api-key-here"
+  model: "deepseek/deepseek-chat"
+  primary_timeframe: "5m"
+  higher_timeframe: "1d"
+  higher_lookback_periods: 120
+  primary_lookback_periods: 30
+  pollpriceinterval: 5m
+  max_leverage: 50
+
 # AI Strategy - simulation mode
-# NOTE: The 'leverage' parameter should NOT be specified for AI strategy.
-# AI strategy manages position sizing internally and does not use the leverage parameter.
 - pair: ETH_USDT
   platform: simulate
   strategy: ai
@@ -72,3 +81,4 @@
   higher_lookback_periods: 120
   primary_lookback_periods: 30
   pollpriceinterval: 5m
+  max_leverage: 50
