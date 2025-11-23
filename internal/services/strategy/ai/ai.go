@@ -20,15 +20,15 @@ const defaultHigherTimeframeLookback = 60
 
 // tradersvc abstracts the exchange operations required for the AI margin strategy.
 type tradersvc interface {
-	ExecuteAction(ctx context.Context, action entity.Action, amount decimal.Decimal, clientOrderID string) error
+	ExecuteAction(ctx context.Context, action domain.Action, amount decimal.Decimal, clientOrderID string) error
 	OrderExecuted(ctx context.Context, clientOrderID string) (executed bool, filledAmount decimal.Decimal, err error)
 	GetBalance(ctx context.Context, currency string) (decimal.Decimal, error)
-	GetPosition(ctx context.Context, pair entity.Pair) (*entity.Position, error)
-	SetPositionStops(ctx context.Context, pair entity.Pair, takeProfit, stopLoss decimal.Decimal) error
+	GetPosition(ctx context.Context, pair domain.Pair) (*domain.Position, error)
+	SetPositionStops(ctx context.Context, pair domain.Pair, takeProfit, stopLoss decimal.Decimal) error
 }
 
 type pricer interface {
-	GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error)
+	GetPrice(ctx context.Context, pair domain.Pair) (decimal.Decimal, error)
 }
 
 type llmClient interface {
@@ -36,17 +36,17 @@ type llmClient interface {
 }
 
 type marketDataCollector interface {
-	FetchTimeframeData(ctx context.Context, interval string, lookback int) (*entity.Timeframe, error)
+	FetchTimeframeData(ctx context.Context, interval string, lookback int) (*domain.Timeframe, error)
 }
 
 type aiDecisionWriter interface {
-	Save(event entity.AIDecisionEvent) error
+	Save(event domain.AIDecisionEvent) error
 }
 
 // AIStrategy executes margin trades based on LLM decisions.
 type AIStrategy struct {
-	pair             entity.Pair
-	marketType       entity.MarketType
+	pair             domain.Pair
+	marketType       domain.MarketType
 	llmClient        llmClient
 	marketData       marketDataCollector
 	pricer           pricer
@@ -63,8 +63,8 @@ type AIStrategy struct {
 // NewAIStrategy constructs an AI strategy instance.
 func NewAIStrategy(
 	logger *zap.Logger,
-	pair entity.Pair,
-	marketType entity.MarketType,
+	pair domain.Pair,
+	marketType domain.MarketType,
 	llmClient llmClient,
 	marketData marketDataCollector,
 	pricer pricer,
@@ -76,7 +76,7 @@ func NewAIStrategy(
 	decisionStore aiDecisionWriter,
 	modelName string,
 ) (*AIStrategy, error) {
-	if marketType != entity.MarketTypeMargin {
+	if marketType != domain.MarketTypeMargin {
 		return nil, fmt.Errorf("AI strategy requires margin market type, got %s", marketType)
 	}
 
@@ -111,7 +111,7 @@ func (s *AIStrategy) Initialize(ctx context.Context) error {
 }
 
 // Trade performs one AI evaluation and potential action.
-func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
+func (s *AIStrategy) Trade(ctx context.Context) (*domain.TradeEvent, error) {
 	// collect market data and indicators
 	snapshot, position, err := s.gatherMarketData(ctx)
 	if err != nil {
@@ -128,35 +128,35 @@ func (s *AIStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 
 	// save decision to WAL
 	if err := s.saveDecision(decision, snapshot, position); err != nil {
-		s.logger.Warn("Failed to save AI decision event", zap.Error(err))
+		return nil, errors.Wrap(err, "failed to save AI decision")
 	}
 
 	// execute decision
 	return s.executeDecision(ctx, decision, snapshot, position)
 }
 
-func (s *AIStrategy) gatherMarketData(ctx context.Context) (entity.MarketSnapshot, *entity.Position, error) {
+func (s *AIStrategy) gatherMarketData(ctx context.Context) (domain.MarketSnapshot, *domain.Position, error) {
 	primaryFrame, err := s.marketData.FetchTimeframeData(ctx, s.primaryTimeframe, s.primaryLookback)
 	if err != nil {
-		return entity.MarketSnapshot{}, nil, errors.Wrap(err, "failed to get market data")
+		return domain.MarketSnapshot{}, nil, errors.Wrap(err, "failed to get market data")
 	}
 
 	if primaryFrame == nil || len(primaryFrame.Candles) == 0 {
-		return entity.MarketSnapshot{}, nil, errors.New("insufficient market data")
+		return domain.MarketSnapshot{}, nil, errors.New("insufficient market data")
 	}
 
 	if len(primaryFrame.Indicators) == 0 || primaryFrame.Summary == nil {
-		return entity.MarketSnapshot{}, nil, errors.New("insufficient indicator data for primary timeframe")
+		return domain.MarketSnapshot{}, nil, errors.New("insufficient indicator data for primary timeframe")
 	}
 
 	quoteBalance, err := s.trader.GetBalance(ctx, s.pair.To)
 	if err != nil {
-		return entity.MarketSnapshot{}, nil, errors.Wrap(err, "failed to get margin balance")
+		return domain.MarketSnapshot{}, nil, errors.Wrap(err, "failed to get margin balance")
 	}
 
 	position, err := s.trader.GetPosition(ctx, s.pair)
 	if err != nil {
-		return entity.MarketSnapshot{}, nil, errors.Wrap(err, "failed to get position")
+		return domain.MarketSnapshot{}, nil, errors.Wrap(err, "failed to get position")
 	}
 
 	// fetch higher timeframe data for multi-timeframe analysis
@@ -169,9 +169,9 @@ func (s *AIStrategy) gatherMarketData(ctx context.Context) (entity.MarketSnapsho
 	}
 
 	// analyze volume patterns
-	volumeAnalysis := entity.NewVolumeAnalysis(primaryFrame.Candles)
+	volumeAnalysis := domain.NewVolumeAnalysis(primaryFrame.Candles)
 
-	snapshot := entity.MarketSnapshot{
+	snapshot := domain.MarketSnapshot{
 		PrimaryTimeFrame: primaryFrame,
 		QuoteBalance:     quoteBalance,
 		VolumeAnalysis:   volumeAnalysis,
@@ -181,7 +181,7 @@ func (s *AIStrategy) gatherMarketData(ctx context.Context) (entity.MarketSnapsho
 	return snapshot, position, nil
 }
 
-func (s *AIStrategy) logMarketState(snapshot entity.MarketSnapshot, position *entity.Position) {
+func (s *AIStrategy) logMarketState(snapshot domain.MarketSnapshot, position *domain.Position) {
 	currentPrice := snapshot.Price()
 	logFields := []zap.Field{
 		zap.String("price", currentPrice.StringFixed(2)),
@@ -200,16 +200,16 @@ func (s *AIStrategy) logMarketState(snapshot entity.MarketSnapshot, position *en
 
 func (s *AIStrategy) getAndValidateDecision(
 	ctx context.Context,
-	snapshot entity.MarketSnapshot,
-	position *entity.Position,
-) (*entity.Decision, error) {
+	snapshot domain.MarketSnapshot,
+	position *domain.Position,
+) (*domain.Decision, error) {
 	response, err := s.llmClient.GetDecision(ctx, s.buildMarketContext(snapshot, position))
 	if err != nil {
 		s.logger.Error("Failed to get AI response", zap.Error(err))
 		return nil, errors.Wrap(err, "failed to get AI decision")
 	}
 
-	decision, err := entity.NewDecision(response)
+	decision, err := domain.NewDecision(response)
 	if err != nil {
 		s.logger.Error("Decision validation failed",
 			zap.Error(err),
@@ -239,7 +239,7 @@ func (s *AIStrategy) getAndValidateDecision(
 }
 
 // buildMarketContext assembles data passed to LLM.
-func (s *AIStrategy) buildMarketContext(snapshot entity.MarketSnapshot, position *entity.Position) promptbuilder.MarketContext {
+func (s *AIStrategy) buildMarketContext(snapshot domain.MarketSnapshot, position *domain.Position) promptbuilder.MarketContext {
 	return promptbuilder.MarketContext{
 		Primary:         snapshot.PrimaryTimeFrame,
 		VolumeAnalysis:  snapshot.VolumeAnalysis,
@@ -252,19 +252,19 @@ func (s *AIStrategy) buildMarketContext(snapshot entity.MarketSnapshot, position
 // executeDecision routes decision to handler.
 func (s *AIStrategy) executeDecision(
 	ctx context.Context,
-	decision *entity.Decision,
-	snapshot entity.MarketSnapshot,
-	position *entity.Position,
-) (*entity.TradeEvent, error) {
+	decision *domain.Decision,
+	snapshot domain.MarketSnapshot,
+	position *domain.Position,
+) (*domain.TradeEvent, error) {
 	switch decision.Action {
 	case "open_long":
-		return s.executeEntry(ctx, entity.PositionSideLong, decision, snapshot, position)
+		return s.executeEntry(ctx, domain.PositionSideLong, decision, snapshot, position)
 	case "close_long":
-		return s.executeExit(ctx, entity.PositionSideLong, position, snapshot.Price())
+		return s.executeExit(ctx, domain.PositionSideLong, position, snapshot.Price())
 	case "open_short":
-		return s.executeEntry(ctx, entity.PositionSideShort, decision, snapshot, position)
+		return s.executeEntry(ctx, domain.PositionSideShort, decision, snapshot, position)
 	case "close_short":
-		return s.executeExit(ctx, entity.PositionSideShort, position, snapshot.Price())
+		return s.executeExit(ctx, domain.PositionSideShort, position, snapshot.Price())
 	case "hold":
 		return nil, nil
 	default:
@@ -275,11 +275,11 @@ func (s *AIStrategy) executeDecision(
 // executeEntry opens or adds to a position.
 func (s *AIStrategy) executeEntry(
 	ctx context.Context,
-	side entity.PositionSide,
-	decision *entity.Decision,
-	snapshot entity.MarketSnapshot,
-	position *entity.Position,
-) (*entity.TradeEvent, error) {
+	side domain.PositionSide,
+	decision *domain.Decision,
+	snapshot domain.MarketSnapshot,
+	position *domain.Position,
+) (*domain.TradeEvent, error) {
 	// validate position side
 	if position != nil && position.Side != side {
 		s.logger.Warn("Cannot open position: opposite position already exists",
@@ -289,17 +289,17 @@ func (s *AIStrategy) executeEntry(
 	}
 
 	if position != nil {
-		s.logger.Info("Adding to existing position", 
+		s.logger.Info("Adding to existing position",
 			zap.String("model", s.modelName),
 			zap.String("side", side.String()))
 	} else {
-		s.logger.Info("Opening new position", 
+		s.logger.Info("Opening new position",
 			zap.String("model", s.modelName),
 			zap.String("side", side.String()))
 	}
 
 	// calculate position size based on risk percent
-	budget := entity.NewRiskBudget(decision.RiskPercent)
+	budget := domain.NewRiskBudget(decision.RiskPercent)
 	positionValue, amount := budget.Allocate(snapshot.QuoteBalance, snapshot.Price())
 	if amount.LessThanOrEqual(decimal.Zero) {
 		s.logger.Warn("Calculated position amount is zero; skipping execution",
@@ -317,9 +317,9 @@ func (s *AIStrategy) executeEntry(
 		zap.String("position_value", positionValue.StringFixed(2)),
 		zap.String("order_id", orderID))
 
-	action := entity.ActionOpenLong
-	if side == entity.PositionSideShort {
-		action = entity.ActionOpenShort
+	action := domain.ActionOpenLong
+	if side == domain.PositionSideShort {
+		action = domain.ActionOpenShort
 	}
 
 	if err := s.trader.ExecuteAction(ctx, action, amount, orderID); err != nil {
@@ -341,7 +341,7 @@ func (s *AIStrategy) executeEntry(
 		}
 	}
 
-	return &entity.TradeEvent{
+	return &domain.TradeEvent{
 		Action: action,
 		Amount: amount,
 		Pair:   s.pair,
@@ -352,10 +352,10 @@ func (s *AIStrategy) executeEntry(
 // executeExit closes a position.
 func (s *AIStrategy) executeExit(
 	ctx context.Context,
-	side entity.PositionSide,
-	position *entity.Position,
+	side domain.PositionSide,
+	position *domain.Position,
 	currentPrice decimal.Decimal,
-) (*entity.TradeEvent, error) {
+) (*domain.TradeEvent, error) {
 	if position == nil {
 		s.logger.Warn("Received exit action without an open position, treating as HOLD")
 		return nil, nil
@@ -378,9 +378,9 @@ func (s *AIStrategy) executeExit(
 		zap.String("amount", position.Amount.String()),
 		zap.String("order_id", orderID))
 
-	action := entity.ActionCloseLong
-	if side == entity.PositionSideShort {
-		action = entity.ActionCloseShort
+	action := domain.ActionCloseLong
+	if side == domain.PositionSideShort {
+		action = domain.ActionCloseShort
 	}
 
 	if err := s.trader.ExecuteAction(ctx, action, position.Amount, orderID); err != nil {
@@ -394,7 +394,7 @@ func (s *AIStrategy) executeExit(
 		zap.String("side", side.String()),
 		zap.String("pnl", pnl.String()))
 
-	return &entity.TradeEvent{
+	return &domain.TradeEvent{
 		Action: action,
 		Amount: position.Amount,
 		Pair:   s.pair,
@@ -403,7 +403,7 @@ func (s *AIStrategy) executeExit(
 }
 
 // saveDecision persists the AI decision event to WAL.
-func (s *AIStrategy) saveDecision(decision *entity.Decision, snapshot entity.MarketSnapshot, position *entity.Position) error {
+func (s *AIStrategy) saveDecision(decision *domain.Decision, snapshot domain.MarketSnapshot, position *domain.Position) error {
 	if s.decisionStore == nil {
 		return nil
 	}
@@ -415,7 +415,7 @@ func (s *AIStrategy) saveDecision(decision *entity.Decision, snapshot entity.Mar
 		positionEntryPrice = position.EntryPrice.String()
 	}
 
-	event := entity.NewAIDecisionEvent(
+	event := domain.NewAIDecisionEvent(
 		time.Now().UTC(),
 		s.pair.String(),
 		s.modelName,

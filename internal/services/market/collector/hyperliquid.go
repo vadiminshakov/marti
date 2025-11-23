@@ -52,7 +52,7 @@ func parseIntervalToDuration(interval string) (time.Duration, error) {
 }
 
 // GetKlines fetches kline data from Hyperliquid.
-func (p *HyperliquidKlineProvider) GetKlines(ctx context.Context, pair entity.Pair, interval string, limit int) ([]entity.MarketCandle, error) {
+func (p *HyperliquidKlineProvider) GetKlines(ctx context.Context, pair domain.Pair, interval string, limit int) ([]domain.MarketCandle, error) {
 	if p.info == nil {
 		return nil, fmt.Errorf("hyperliquid info is nil")
 	}
@@ -87,7 +87,7 @@ func (p *HyperliquidKlineProvider) GetKlines(ctx context.Context, pair entity.Pa
 		candles = candles[len(candles)-limit:]
 	}
 
-	out := make([]entity.MarketCandle, 0, len(candles))
+	out := make([]domain.MarketCandle, 0, len(candles))
 	for i, c := range candles {
 		open, err := decimal.NewFromString(c.Open)
 		if err != nil {
@@ -110,7 +110,7 @@ func (p *HyperliquidKlineProvider) GetKlines(ctx context.Context, pair entity.Pa
 			return nil, fmt.Errorf("parse volume at %d: %w", i, err)
 		}
 
-		out = append(out, entity.MarketCandle{
+		out = append(out, domain.MarketCandle{
 			OpenTime:  time.UnixMilli(c.TimeOpen),
 			Open:      open,
 			High:      high,

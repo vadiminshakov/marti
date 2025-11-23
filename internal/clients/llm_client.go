@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -39,14 +40,24 @@ type OpenAICompatibleClient struct {
 }
 
 // NewOpenAICompatibleClient creates a new client for OpenAI-compatible APIs
-func NewOpenAICompatibleClient(apiURL, apiKey, model string, promptBuilder *promptbuilder.PromptBuilder) *OpenAICompatibleClient {
+func NewOpenAICompatibleClient(apiURL, apiKey, model, proxyURL string, promptBuilder *promptbuilder.PromptBuilder) (*OpenAICompatibleClient, error) {
+	transport := &http.Transport{}
+	if proxyURL != "" {
+		proxy, err := url.Parse(proxyURL)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to parse proxy URL")
+		}
+		transport.Proxy = http.ProxyURL(proxy)
+	}
+
 	client := &OpenAICompatibleClient{
 		apiURL:        apiURL,
 		apiKey:        apiKey,
 		model:         model,
 		promptBuilder: promptBuilder,
 		httpClient: &http.Client{
-			Timeout: defaultTimeout,
+			Timeout:   defaultTimeout,
+			Transport: transport,
 		},
 		retrier: retrier.New(
 			retrier.WithMaxRetries(defaultMaxRetries),
@@ -59,7 +70,7 @@ func NewOpenAICompatibleClient(apiURL, apiKey, model string, promptBuilder *prom
 
 	client.setProviderSpecificHeaders()
 
-	return client
+	return client, nil
 }
 
 // setProviderSpecificHeaders configures provider-specific headers and settings

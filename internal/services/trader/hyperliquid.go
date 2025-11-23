@@ -18,12 +18,12 @@ type HyperliquidTrader struct {
 	ex          *hyperliquid.Exchange
 	info        *hyperliquid.Info
 	accountAddr string
-	pair        entity.Pair
-	marketType  entity.MarketType
+	pair        domain.Pair
+	marketType  domain.MarketType
 	leverage    int
 }
 
-func NewHyperliquidTrader(ex *hyperliquid.Exchange, accountAddr string, pair entity.Pair, marketType entity.MarketType, leverage int) (*HyperliquidTrader, error) {
+func NewHyperliquidTrader(ex *hyperliquid.Exchange, accountAddr string, pair domain.Pair, marketType domain.MarketType, leverage int) (*HyperliquidTrader, error) {
 	if ex == nil {
 		return nil, fmt.Errorf("hyperliquid exchange is nil")
 	}
@@ -37,7 +37,7 @@ func NewHyperliquidTrader(ex *hyperliquid.Exchange, accountAddr string, pair ent
 	}
 
 	// Configure leverage for perp (margin) trading if requested
-	if marketType == entity.MarketTypeMargin && leverage > 1 {
+	if marketType == domain.MarketTypeMargin && leverage > 1 {
 		if _, err := ex.UpdateLeverage(context.Background(), leverage, pair.From, true); err != nil {
 			// non-fatal; some assets may not support requested leverage immediately
 			return nil, errors.Wrap(err, "failed to set leverage for hyperliquid")
@@ -88,20 +88,20 @@ func (t *HyperliquidTrader) executeOrder(ctx context.Context, isBuy bool, amount
 }
 
 // ExecuteAction executes a trading action (open/close long/short)
-func (t *HyperliquidTrader) ExecuteAction(ctx context.Context, action entity.Action, amount decimal.Decimal, clientOrderID string) error {
+func (t *HyperliquidTrader) ExecuteAction(ctx context.Context, action domain.Action, amount decimal.Decimal, clientOrderID string) error {
 	switch action {
-	case entity.ActionOpenLong:
+	case domain.ActionOpenLong:
 		return t.executeOrder(ctx, true, amount, clientOrderID, false)
-	case entity.ActionCloseLong:
+	case domain.ActionCloseLong:
 		// sell to close
-		reduce := t.marketType == entity.MarketTypeMargin
+		reduce := t.marketType == domain.MarketTypeMargin
 		return t.executeOrder(ctx, false, amount, clientOrderID, reduce)
-	case entity.ActionOpenShort:
+	case domain.ActionOpenShort:
 		// Opening short = sell
 		return t.executeOrder(ctx, false, amount, clientOrderID, false)
-	case entity.ActionCloseShort:
+	case domain.ActionCloseShort:
 		// Closing short = buy
-		reduce := t.marketType == entity.MarketTypeMargin
+		reduce := t.marketType == domain.MarketTypeMargin
 		return t.executeOrder(ctx, true, amount, clientOrderID, reduce)
 	default:
 		return fmt.Errorf("unknown action: %s", action)
@@ -149,7 +149,7 @@ func (t *HyperliquidTrader) OrderExecuted(ctx context.Context, clientOrderID str
 }
 
 func (t *HyperliquidTrader) GetBalance(ctx context.Context, currency string) (decimal.Decimal, error) {
-	if t.marketType == entity.MarketTypeMargin {
+	if t.marketType == domain.MarketTypeMargin {
 		// Margin: approximate quote as total account value in USD; base is not modeled
 		st, err := t.info.UserState(ctx, t.accountAddr)
 		if err != nil {
@@ -190,8 +190,8 @@ func (t *HyperliquidTrader) GetBalance(ctx context.Context, currency string) (de
 	return decimal.Zero, nil
 }
 
-func (t *HyperliquidTrader) GetPosition(ctx context.Context, pair entity.Pair) (*entity.Position, error) {
-	if t.marketType != entity.MarketTypeMargin {
+func (t *HyperliquidTrader) GetPosition(ctx context.Context, pair domain.Pair) (*domain.Position, error) {
+	if t.marketType != domain.MarketTypeMargin {
 		return nil, nil
 	}
 	st, err := t.info.UserState(ctx, t.accountAddr)
@@ -224,12 +224,12 @@ func (t *HyperliquidTrader) GetPosition(ctx context.Context, pair entity.Pair) (
 				entryPrice, _ = decimal.NewFromString(m)
 			}
 		}
-		side := entity.PositionSideLong
+		side := domain.PositionSideLong
 		if size.LessThan(decimal.Zero) {
-			side = entity.PositionSideShort
+			side = domain.PositionSideShort
 			size = size.Abs()
 		}
-		pos, err := entity.NewPositionFromExternalSnapshot(size, entryPrice, time.Now(), side)
+		pos, err := domain.NewPositionFromExternalSnapshot(size, entryPrice, time.Now(), side)
 		if err != nil {
 			return nil, errors.Wrap(err, "build position")
 		}
@@ -238,8 +238,8 @@ func (t *HyperliquidTrader) GetPosition(ctx context.Context, pair entity.Pair) (
 	return nil, nil
 }
 
-func (t *HyperliquidTrader) SetPositionStops(ctx context.Context, pair entity.Pair, takeProfit, stopLoss decimal.Decimal) error {
-	if t.marketType != entity.MarketTypeMargin {
+func (t *HyperliquidTrader) SetPositionStops(ctx context.Context, pair domain.Pair, takeProfit, stopLoss decimal.Decimal) error {
+	if t.marketType != domain.MarketTypeMargin {
 		return nil
 	}
 
@@ -280,7 +280,7 @@ func (t *HyperliquidTrader) SetPositionStops(ctx context.Context, pair entity.Pa
 	// determine order side for protective orders
 	// For long: protective orders are buys (to close short) — on HL reduce-only, need opposite trade
 	// Actually for long, closing is sell; for short, closing is buy.
-	isLong := pos.Side == entity.PositionSideLong
+	isLong := pos.Side == domain.PositionSideLong
 
 	sizeF, _ := pos.Amount.Round(8).Float64()
 

@@ -22,7 +22,7 @@ func NewSimulatePricer(client *binance.Client) *SimulatePricer {
 }
 
 // GetPrice fetches the current market price from Binance public API
-func (p *SimulatePricer) GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error) {
+func (p *SimulatePricer) GetPrice(ctx context.Context, pair domain.Pair) (decimal.Decimal, error) {
 	prices, err := p.client.NewListPricesService().Symbol(pair.Symbol()).Do(ctx)
 	if err != nil {
 		return decimal.Decimal{}, err

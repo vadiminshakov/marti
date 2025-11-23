@@ -28,7 +28,7 @@ func getStateDir() string {
 }
 
 // NewStore creates a simulator state store for the given pair.
-func NewStore(pair entity.Pair, scope string) (*Store, error) {
+func NewStore(pair domain.Pair, scope string) (*Store, error) {
 	stateDir := getStateDir()
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return nil, errors.Wrap(err, "create simulate state dir")
@@ -52,7 +52,7 @@ type State struct {
 	MarginUsed string            `json:"margin_used"`
 }
 
-// StoredPosition is a serializable snapshot of entity.Position.
+// StoredPosition is a serializable snapshot of domain.Position.
 type StoredPosition struct {
 	EntryTime    time.Time           `json:"entry_time"`
 	EntryPrice   string              `json:"entry_price"`
@@ -60,7 +60,7 @@ type StoredPosition struct {
 	StopLoss     string              `json:"stop_loss"`
 	TakeProfit   string              `json:"take_profit"`
 	Invalidation string              `json:"invalidation"`
-	Side         entity.PositionSide `json:"side"`
+	Side         domain.PositionSide `json:"side"`
 }
 
 // Load reads simulator state from disk.
@@ -113,8 +113,8 @@ func (s *Store) Save(state State) error {
 	return nil
 }
 
-// NewStoredPosition converts entity.Position into its stored representation.
-func NewStoredPosition(pos *entity.Position) *StoredPosition {
+// NewStoredPosition converts domain.Position into its stored representation.
+func NewStoredPosition(pos *domain.Position) *StoredPosition {
 	if pos == nil {
 		return nil
 	}
@@ -130,8 +130,8 @@ func NewStoredPosition(pos *entity.Position) *StoredPosition {
 	}
 }
 
-// ToPosition reconstructs entity.Position from stored data.
-func (sp *StoredPosition) ToPosition() (*entity.Position, error) {
+// ToPosition reconstructs domain.Position from stored data.
+func (sp *StoredPosition) ToPosition() (*domain.Position, error) {
 	if sp == nil {
 		return nil, nil
 	}
@@ -162,7 +162,7 @@ func (sp *StoredPosition) ToPosition() (*entity.Position, error) {
 		}
 	}
 
-	return &entity.Position{
+	return &domain.Position{
 		EntryPrice:   entryPrice,
 		Amount:       amount,
 		StopLoss:     stopLoss,

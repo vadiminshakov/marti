@@ -13,17 +13,17 @@ const minCandlesForIndicators = 50
 
 // klineProvider defines the interface for fetching historical candles inside the package.
 type klineProvider interface {
-	GetKlines(ctx context.Context, pair entity.Pair, interval string, limit int) ([]entity.MarketCandle, error)
+	GetKlines(ctx context.Context, pair domain.Pair, interval string, limit int) ([]domain.MarketCandle, error)
 }
 
 // MarketDataCollector manages market data collection and indicator calculation.
 type MarketDataCollector struct {
 	provider klineProvider
-	pair     entity.Pair
+	pair     domain.Pair
 }
 
 // NewMarketDataCollector creates a new market data collector.
-func NewMarketDataCollector(provider klineProvider, pair entity.Pair) *MarketDataCollector {
+func NewMarketDataCollector(provider klineProvider, pair domain.Pair) *MarketDataCollector {
 	return &MarketDataCollector{
 		provider: provider,
 		pair:     pair,
@@ -35,7 +35,7 @@ func (c *MarketDataCollector) FetchTimeframeData(
 	ctx context.Context,
 	interval string,
 	limit int,
-) (*entity.Timeframe, error) {
+) (*domain.Timeframe, error) {
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -71,5 +71,5 @@ func (c *MarketDataCollector) FetchTimeframeData(
 		return nil, errors.Wrapf(err, "failed to calculate indicators for timeframe %s", interval)
 	}
 
-	return entity.NewTimeframe(interval, candles, indicatorSnapshots), nil
+	return domain.NewTimeframe(interval, candles, indicatorSnapshots), nil
 }

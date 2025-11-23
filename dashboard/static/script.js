@@ -276,9 +276,9 @@ const buildGlobalChart = (ctx) => {
           'qwen': 'qwen.webp',
           'moonshot': 'moonshot.webp',
           'openai': 'openai.webp',
-          'gemini': 'gemini.webp',
+          'google': 'google.webp',
           'anthropic': 'anthropic.webp',
-          'grok': 'grok.webp'
+          'x-ai': 'xai.webp'
         };
 
         // Cache for preloaded images
@@ -647,7 +647,7 @@ let currentFilter = null;
 
 const knownModels = [
   'yandex', 'deepseek', 'qwen', 'moonshot',
-  'openai', 'gemini', 'anthropic', 'grok'
+  'openai', 'google', 'anthropic', 'xai'
 ];
 
 function filterDecisions(model) {
@@ -669,9 +669,10 @@ function filterDecisions(model) {
 
   // Filter existing cards
   const cards = aiDecisionsContainer.querySelectorAll('.ai-decision-card');
+  const filterTerm = currentFilter === 'xai' ? 'x-ai' : currentFilter;
   cards.forEach(card => {
     const cardModel = card.dataset.model;
-    if (!currentFilter || (cardModel && cardModel.includes(currentFilter))) {
+    if (!currentFilter || (cardModel && cardModel.includes(filterTerm))) {
       card.style.display = 'block';
     } else {
       card.style.display = 'none';

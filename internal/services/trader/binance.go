@@ -16,8 +16,8 @@ import (
 
 type BinanceTrader struct {
 	client     *binance.Client
-	pair       entity.Pair
-	marketType entity.MarketType
+	pair       domain.Pair
+	marketType domain.MarketType
 	leverage   int
 }
 
@@ -26,7 +26,7 @@ const (
 	binanceTakeProfitClientPrefix = "marti-tp-"
 )
 
-func NewBinanceTrader(client *binance.Client, pair entity.Pair, marketType entity.MarketType, leverage int) (*BinanceTrader, error) {
+func NewBinanceTrader(client *binance.Client, pair domain.Pair, marketType domain.MarketType, leverage int) (*BinanceTrader, error) {
 	return &BinanceTrader{
 		pair:       pair,
 		client:     client,
@@ -38,7 +38,7 @@ func NewBinanceTrader(client *binance.Client, pair entity.Pair, marketType entit
 func (t *BinanceTrader) Buy(ctx context.Context, amount decimal.Decimal, clientOrderID string) error {
 	amount = amount.RoundFloor(4)
 
-	if t.marketType == entity.MarketTypeMargin {
+	if t.marketType == domain.MarketTypeMargin {
 		// use margin order service for margin trading
 		_, err := t.client.NewCreateMarginOrderService().Symbol(t.pair.Symbol()).
 			Side(binance.SideTypeBuy).Type(binance.OrderTypeMarket).
@@ -59,7 +59,7 @@ func (t *BinanceTrader) Buy(ctx context.Context, amount decimal.Decimal, clientO
 func (t *BinanceTrader) Sell(ctx context.Context, amount decimal.Decimal, clientOrderID string) error {
 	amount = amount.RoundFloor(4)
 
-	if t.marketType == entity.MarketTypeMargin {
+	if t.marketType == domain.MarketTypeMargin {
 		// use margin order service for margin trading
 		_, err := t.client.NewCreateMarginOrderService().Symbol(t.pair.Symbol()).
 			Side(binance.SideTypeSell).Type(binance.OrderTypeMarket).
@@ -82,7 +82,7 @@ func (t *BinanceTrader) OrderExecuted(ctx context.Context, clientOrderID string)
 	var order *binance.Order
 	var err error
 
-	if t.marketType == entity.MarketTypeMargin {
+	if t.marketType == domain.MarketTypeMargin {
 		// query margin order
 		order, err = t.client.NewGetMarginOrderService().
 			Symbol(t.pair.Symbol()).
@@ -130,7 +130,7 @@ func (t *BinanceTrader) OrderExecuted(ctx context.Context, clientOrderID string)
 }
 
 func (t *BinanceTrader) GetBalance(ctx context.Context, currency string) (decimal.Decimal, error) {
-	if t.marketType == entity.MarketTypeMargin {
+	if t.marketType == domain.MarketTypeMargin {
 		// get margin account balance
 		marginAccount, err := t.client.NewGetMarginAccountService().Do(ctx)
 		if err != nil {
@@ -168,8 +168,8 @@ func (t *BinanceTrader) GetBalance(ctx context.Context, currency string) (decima
 	return decimal.Zero, nil
 }
 
-func (t *BinanceTrader) GetPosition(ctx context.Context, pair entity.Pair) (*entity.Position, error) {
-	if t.marketType != entity.MarketTypeMargin {
+func (t *BinanceTrader) GetPosition(ctx context.Context, pair domain.Pair) (*domain.Position, error) {
+	if t.marketType != domain.MarketTypeMargin {
 		return nil, nil
 	}
 
@@ -302,12 +302,12 @@ func (t *BinanceTrader) GetPosition(ctx context.Context, pair entity.Pair) (*ent
 	}
 
 	// determine position side
-	side := entity.PositionSideLong
+	side := domain.PositionSideLong
 	if totalQty.LessThan(decimal.Zero) {
-		side = entity.PositionSideShort
+		side = domain.PositionSideShort
 	}
 
-	position, err := entity.NewPositionFromExternalSnapshot(absQty, avgPrice, entryTime, side)
+	position, err := domain.NewPositionFromExternalSnapshot(absQty, avgPrice, entryTime, side)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to construct position snapshot")
 	}
@@ -315,8 +315,8 @@ func (t *BinanceTrader) GetPosition(ctx context.Context, pair entity.Pair) (*ent
 	return position, nil
 }
 
-func (t *BinanceTrader) SetPositionStops(ctx context.Context, pair entity.Pair, takeProfit, stopLoss decimal.Decimal) error {
-	if t.marketType != entity.MarketTypeMargin {
+func (t *BinanceTrader) SetPositionStops(ctx context.Context, pair domain.Pair, takeProfit, stopLoss decimal.Decimal) error {
+	if t.marketType != domain.MarketTypeMargin {
 		return nil
 	}
 
@@ -359,7 +359,7 @@ func (t *BinanceTrader) SetPositionStops(ctx context.Context, pair entity.Pair, 
 	return nil
 }
 
-func (t *BinanceTrader) cancelBinanceProtectiveOrders(ctx context.Context, pair entity.Pair, orders []*binance.Order) error {
+func (t *BinanceTrader) cancelBinanceProtectiveOrders(ctx context.Context, pair domain.Pair, orders []*binance.Order) error {
 	for _, order := range orders {
 		if order == nil {
 			continue
@@ -387,19 +387,19 @@ func (t *BinanceTrader) cancelBinanceProtectiveOrders(ctx context.Context, pair 
 
 func (t *BinanceTrader) placeBinanceProtectiveOrder(
 	ctx context.Context,
-	pair entity.Pair,
+	pair domain.Pair,
 	quantity decimal.Decimal,
 	price decimal.Decimal,
 	orderType binance.OrderType,
 	clientIDPrefix string,
-	positionSide entity.PositionSide,
+	positionSide domain.PositionSide,
 ) error {
 	clientOrderID := fmt.Sprintf("%s%d", clientIDPrefix, time.Now().UnixNano())
 
 	// for long positions: protective orders are sells
 	// for short positions: protective orders are buys
 	side := binance.SideTypeSell
-	if positionSide == entity.PositionSideShort {
+	if positionSide == domain.PositionSideShort {
 		side = binance.SideTypeBuy
 	}
 
@@ -419,16 +419,16 @@ func (t *BinanceTrader) placeBinanceProtectiveOrder(
 }
 
 // ExecuteAction executes a trading action (supports both long and short positions)
-func (t *BinanceTrader) ExecuteAction(ctx context.Context, action entity.Action, amount decimal.Decimal, clientOrderID string) error {
+func (t *BinanceTrader) ExecuteAction(ctx context.Context, action domain.Action, amount decimal.Decimal, clientOrderID string) error {
 	switch action {
-	case entity.ActionOpenLong:
+	case domain.ActionOpenLong:
 		return t.Buy(ctx, amount, clientOrderID)
-	case entity.ActionCloseLong:
+	case domain.ActionCloseLong:
 		return t.Sell(ctx, amount, clientOrderID)
-	case entity.ActionOpenShort:
+	case domain.ActionOpenShort:
 		// Opening short = selling
 		return t.Sell(ctx, amount, clientOrderID)
-	case entity.ActionCloseShort:
+	case domain.ActionCloseShort:
 		// Closing short = buying
 		return t.Buy(ctx, amount, clientOrderID)
 	default:

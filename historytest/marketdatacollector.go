@@ -27,7 +27,7 @@ import (
 //   - fromHoursAgo: how many hours back to start collecting data
 //   - toHoursAgo: how many hours back to stop collecting data
 //   - klinesize: the kline interval (e.g., "1h", "4h", "1d")
-func DataCollectorFactory(filePath string, pair *entity.Pair) (func(fromHoursAgo, toHoursAgo int, klinesize string) error, error) {
+func DataCollectorFactory(filePath string, pair *domain.Pair) (func(fromHoursAgo, toHoursAgo int, klinesize string) error, error) {
 	apikey := os.Getenv("BINANCE_API_KEY")
 	if len(apikey) == 0 {
 		return nil, errors.New("BINANCE_API_KEY env is not set")
@@ -51,7 +51,7 @@ func DataCollectorFactory(filePath string, pair *entity.Pair) (func(fromHoursAgo
 
 // collectMarketData fetches historical market data from Binance for a given pair and time range
 // This is used within the closure returned by DataCollectorFactory
-func collectMarketData(client *binance.Client, pair *entity.Pair, fromHoursAgo, toHoursAgo int, klinesize string) ([][]string, error) {
+func collectMarketData(client *binance.Client, pair *domain.Pair, fromHoursAgo, toHoursAgo int, klinesize string) ([][]string, error) {
 	startTime := time.Now().Add(-time.Duration(fromHoursAgo)*time.Hour).Unix() * 1000
 	endTime := time.Now().Add(-time.Duration(toHoursAgo)*time.Hour).Unix() * 1000
 

@@ -21,7 +21,6 @@ type AIDecisionEvent struct {
 	PositionAmount        string    `json:"position_amount,omitempty"`
 	PositionSide          string    `json:"position_side,omitempty"`
 	PositionEntryPrice    string    `json:"position_entry_price,omitempty"`
-	Raw                   string    `json:"raw,omitempty"`
 }
 
 // NewAIDecisionEvent creates a new AIDecisionEvent with normalized model name.
@@ -41,7 +40,6 @@ func NewAIDecisionEvent(
 	positionAmount string,
 	positionSide string,
 	positionEntryPrice string,
-	raw string,
 ) AIDecisionEvent {
 	// normalize model name by removing gpt://folder_id/ prefix
 	normalizedModel := NormalizeModelName(model)
@@ -61,7 +59,6 @@ func NewAIDecisionEvent(
 		PositionAmount:        positionAmount,
 		PositionSide:          positionSide,
 		PositionEntryPrice:    positionEntryPrice,
-		Raw:                   raw,
 	}
 }
 

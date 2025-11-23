@@ -22,7 +22,7 @@ func NewBinanceKlineProvider(client *binance.Client) *BinanceKlineProvider {
 }
 
 // GetKlines fetches kline data from Binance.
-func (p *BinanceKlineProvider) GetKlines(ctx context.Context, pair entity.Pair, interval string, limit int) ([]entity.MarketCandle, error) {
+func (p *BinanceKlineProvider) GetKlines(ctx context.Context, pair domain.Pair, interval string, limit int) ([]domain.MarketCandle, error) {
 	symbol := pair.Symbol()
 
 	klines, err := p.client.NewKlinesService().
@@ -34,7 +34,7 @@ func (p *BinanceKlineProvider) GetKlines(ctx context.Context, pair entity.Pair, 
 		return nil, errors.Wrapf(err, "failed to fetch klines from Binance for %s", pair.String())
 	}
 
-	result := make([]entity.MarketCandle, len(klines))
+	result := make([]domain.MarketCandle, len(klines))
 	for i, k := range klines {
 		open, err := decimal.NewFromString(k.Open)
 		if err != nil {
@@ -57,7 +57,7 @@ func (p *BinanceKlineProvider) GetKlines(ctx context.Context, pair entity.Pair, 
 			return nil, errors.Wrapf(err, "failed to parse volume at index %d", i)
 		}
 
-		result[i] = entity.MarketCandle{
+		result[i] = domain.MarketCandle{
 			OpenTime:  time.Unix(0, k.OpenTime*int64(time.Millisecond)),
 			Open:      open,
 			High:      high,

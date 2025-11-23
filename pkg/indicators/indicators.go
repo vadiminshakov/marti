@@ -100,7 +100,7 @@ func CalculateATR(priceData []PriceData, period int) ([]decimal.Decimal, error) 
 }
 
 // CalculateAllIndicators calculates all indicators and returns aligned slices.
-func CalculateAllIndicators(priceData []PriceData) ([]entity.TechnicalIndicators, error) {
+func CalculateAllIndicators(priceData []PriceData) ([]domain.TechnicalIndicators, error) {
 	if len(priceData) < 50 {
 		return nil, fmt.Errorf("not enough data points: need at least 50, got %d", len(priceData))
 	}
@@ -175,10 +175,10 @@ func CalculateAllIndicators(priceData []PriceData) ([]entity.TechnicalIndicators
 	offsetATR3 := len(atr3) - minLen
 	offsetATR14 := len(atr14) - minLen
 
-	result := make([]entity.TechnicalIndicators, minLen)
+	result := make([]domain.TechnicalIndicators, minLen)
 
 	for i := 0; i < minLen; i++ {
-		result[i] = entity.TechnicalIndicators{
+		result[i] = domain.TechnicalIndicators{
 			EMA20: ema20[offsetEMA20+i],
 			EMA50: ema50[offsetEMA50+i],
 			MACD:  macd[offsetMACD+i],

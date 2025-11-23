@@ -8,27 +8,27 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
-	entity "github.com/vadiminshakov/marti/internal/domain"
+	"github.com/vadiminshakov/marti/internal/domain"
 	"github.com/vadiminshakov/marti/internal/storage/simstate"
 	"go.uber.org/zap"
 )
 
 // Pricer defines an interface for getting the price of a trading pair.
 type Pricer interface {
-	GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error)
+	GetPrice(ctx context.Context, pair domain.Pair) (decimal.Decimal, error)
 }
 
 // SimulateTrader is a simple spot/margin simulator.
 type SimulateTrader struct {
 	mu         sync.RWMutex
-	pair       entity.Pair
+	pair       domain.Pair
 	logger     *zap.Logger
 	wallet     map[string]decimal.Decimal
 	orders     map[string]orderInfo
-	position   *entity.Position
+	position   *domain.Position
 	pricer     Pricer
 	leverage   int
-	marketType entity.MarketType
+	marketType domain.MarketType
 	// marginUsed tracks how much quote-side collateral is currently locked
 	// for open margin positions so that we can release the same amount plus
 	// realised PnL when the position is unwound.
@@ -42,7 +42,7 @@ type orderInfo struct {
 }
 
 // NewSimulateTrader creates a new SimulateTrader.
-func NewSimulateTrader(pair entity.Pair, marketType entity.MarketType, leverage int, logger *zap.Logger, pricer Pricer, stateKey string) (*SimulateTrader, error) {
+func NewSimulateTrader(pair domain.Pair, marketType domain.MarketType, leverage int, logger *zap.Logger, pricer Pricer, stateKey string) (*SimulateTrader, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -81,19 +81,19 @@ func NewSimulateTrader(pair entity.Pair, marketType entity.MarketType, leverage 
 }
 
 // ExecuteAction executes a trading action.
-func (t *SimulateTrader) ExecuteAction(ctx context.Context, action entity.Action, amount decimal.Decimal, clientOrderID string) error {
+func (t *SimulateTrader) ExecuteAction(ctx context.Context, action domain.Action, amount decimal.Decimal, clientOrderID string) error {
 	switch action {
-	case entity.ActionOpenLong:
+	case domain.ActionOpenLong:
 		return t.buy(ctx, amount, clientOrderID)
-	case entity.ActionCloseLong:
+	case domain.ActionCloseLong:
 		return t.sell(ctx, amount, clientOrderID)
-	case entity.ActionOpenShort:
-		if t.marketType != entity.MarketTypeMargin {
+	case domain.ActionOpenShort:
+		if t.marketType != domain.MarketTypeMargin {
 			return fmt.Errorf("short positions are supported only in margin trading mode")
 		}
 		return t.sell(ctx, amount, clientOrderID)
-	case entity.ActionCloseShort:
-		if t.marketType != entity.MarketTypeMargin {
+	case domain.ActionCloseShort:
+		if t.marketType != domain.MarketTypeMargin {
 			return fmt.Errorf("short positions are supported only in margin trading mode")
 		}
 		return t.buy(ctx, amount, clientOrderID)
@@ -119,7 +119,7 @@ func (t *SimulateTrader) GetBalance(ctx context.Context, currency string) (decim
 	return t.wallet[currency], nil
 }
 
-func (t *SimulateTrader) GetPosition(ctx context.Context, pair entity.Pair) (*entity.Position, error) {
+func (t *SimulateTrader) GetPosition(ctx context.Context, pair domain.Pair) (*domain.Position, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	if pair != t.pair || t.position == nil {
@@ -129,7 +129,7 @@ func (t *SimulateTrader) GetPosition(ctx context.Context, pair entity.Pair) (*en
 	return &clone, nil
 }
 
-func (t *SimulateTrader) SetPositionStops(ctx context.Context, pair entity.Pair, tp, sl decimal.Decimal) error {
+func (t *SimulateTrader) SetPositionStops(ctx context.Context, pair domain.Pair, tp, sl decimal.Decimal) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if pair != t.pair || t.position == nil {
@@ -174,7 +174,7 @@ func (t *SimulateTrader) buy(ctx context.Context, amount decimal.Decimal, id str
 	}
 
 	var actionErr error
-	if t.position != nil && t.position.Side == entity.PositionSideShort {
+	if t.position != nil && t.position.Side == domain.PositionSideShort {
 		actionErr = t.closeShort(amount, id, price)
 	} else {
 		actionErr = t.openOrAddLong(amount, id, price)
@@ -202,9 +202,9 @@ func (t *SimulateTrader) sell(ctx context.Context, amount decimal.Decimal, id st
 	}
 
 	var actionErr error
-	if t.position != nil && t.position.Side == entity.PositionSideLong {
+	if t.position != nil && t.position.Side == domain.PositionSideLong {
 		actionErr = t.closeLong(amount, id, price)
-	} else if t.marketType == entity.MarketTypeMargin {
+	} else if t.marketType == domain.MarketTypeMargin {
 		actionErr = t.openOrAddShort(amount, id, price)
 	} else {
 		actionErr = t.sellSpotWithoutPosition(amount, id, price)
@@ -228,20 +228,20 @@ func (t *SimulateTrader) openOrAddLong(amount decimal.Decimal, id string, price 
 	}
 
 	t.wallet[t.pair.To] = t.wallet[t.pair.To].Sub(requiredQuote)
-	if t.marketType == entity.MarketTypeMargin {
+	if t.marketType == domain.MarketTypeMargin {
 		t.marginUsed = t.marginUsed.Add(requiredQuote)
 	} else {
 		t.wallet[t.pair.From] = t.wallet[t.pair.From].Add(amount)
 	}
 
 	if t.position == nil {
-		pos, err := entity.NewPositionFromExternalSnapshot(amount, price, time.Now(), entity.PositionSideLong)
+		pos, err := domain.NewPositionFromExternalSnapshot(amount, price, time.Now(), domain.PositionSideLong)
 		if err != nil {
 			return errors.Wrap(err, "create position")
 		}
 		t.position = pos
 	} else {
-		if t.position.Side != entity.PositionSideLong {
+		if t.position.Side != domain.PositionSideLong {
 			return fmt.Errorf("cannot open long while %s position is active", t.position.Side.String())
 		}
 		totalBase := t.position.Amount.Add(amount)
@@ -263,7 +263,7 @@ func (t *SimulateTrader) openOrAddLong(amount decimal.Decimal, id string, price 
 }
 
 func (t *SimulateTrader) closeLong(amount decimal.Decimal, id string, price decimal.Decimal) error {
-	if t.position == nil || t.position.Side != entity.PositionSideLong {
+	if t.position == nil || t.position.Side != domain.PositionSideLong {
 		return fmt.Errorf("no long position to close")
 	}
 
@@ -278,21 +278,21 @@ func (t *SimulateTrader) closeLong(amount decimal.Decimal, id string, price deci
 		return fmt.Errorf("close amount must be positive, got %s", closeAmount.String())
 	}
 
-	if t.marketType != entity.MarketTypeMargin && t.wallet[t.pair.From].LessThan(closeAmount) {
+	if t.marketType != domain.MarketTypeMargin && t.wallet[t.pair.From].LessThan(closeAmount) {
 		return fmt.Errorf("insufficient %s balance: have %s need %s",
 			t.pair.From,
 			t.wallet[t.pair.From].String(),
 			closeAmount.String())
 	}
 
-	if t.marketType != entity.MarketTypeMargin {
+	if t.marketType != domain.MarketTypeMargin {
 		t.wallet[t.pair.From] = t.wallet[t.pair.From].Sub(closeAmount)
 	}
 
 	prevAmount := t.position.Amount
 	entryPrice := t.position.EntryPrice
 
-	if t.marketType == entity.MarketTypeMargin {
+	if t.marketType == domain.MarketTypeMargin {
 		fraction := closeAmount.Div(prevAmount)
 		one := decimal.NewFromInt(1)
 		if fraction.GreaterThan(one) {
@@ -326,7 +326,7 @@ func (t *SimulateTrader) closeLong(amount decimal.Decimal, id string, price deci
 }
 
 func (t *SimulateTrader) openOrAddShort(amount decimal.Decimal, id string, price decimal.Decimal) error {
-	if t.marketType != entity.MarketTypeMargin {
+	if t.marketType != domain.MarketTypeMargin {
 		return fmt.Errorf("short positions are supported only in margin trading mode")
 	}
 
@@ -341,7 +341,7 @@ func (t *SimulateTrader) openOrAddShort(amount decimal.Decimal, id string, price
 			t.leverage)
 	}
 
-	if t.position != nil && t.position.Side == entity.PositionSideLong {
+	if t.position != nil && t.position.Side == domain.PositionSideLong {
 		return fmt.Errorf("cannot open short while long position is active")
 	}
 
@@ -350,7 +350,7 @@ func (t *SimulateTrader) openOrAddShort(amount decimal.Decimal, id string, price
 	t.wallet[t.pair.From] = t.wallet[t.pair.From].Sub(amount)
 
 	if t.position == nil {
-		pos, err := entity.NewPositionFromExternalSnapshot(amount, price, time.Now(), entity.PositionSideShort)
+		pos, err := domain.NewPositionFromExternalSnapshot(amount, price, time.Now(), domain.PositionSideShort)
 		if err != nil {
 			return errors.Wrap(err, "create short position")
 		}
@@ -373,7 +373,7 @@ func (t *SimulateTrader) openOrAddShort(amount decimal.Decimal, id string, price
 }
 
 func (t *SimulateTrader) closeShort(amount decimal.Decimal, id string, price decimal.Decimal) error {
-	if t.position == nil || t.position.Side != entity.PositionSideShort {
+	if t.position == nil || t.position.Side != domain.PositionSideShort {
 		return fmt.Errorf("no short position to close")
 	}
 
@@ -442,7 +442,7 @@ func (t *SimulateTrader) sellSpotWithoutPosition(amount decimal.Decimal, id stri
 }
 
 func (t *SimulateTrader) requiredQuoteAmount(notional decimal.Decimal) decimal.Decimal {
-	if t.marketType != entity.MarketTypeMargin {
+	if t.marketType != domain.MarketTypeMargin {
 		return notional
 	}
 	leverage := t.leverage

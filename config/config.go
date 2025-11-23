@@ -20,7 +20,7 @@ type Config struct {
 	// Platform specifies the exchange (e.g. binance, bybit, simulate).
 	Platform string
 	// Pair is the trading pair (e.g. BTC/USDT).
-	Pair entity.Pair
+	Pair domain.Pair
 	// StrategyType selects strategy ("dca" or "ai").
 	StrategyType string
 	// AmountPercent is % of quote balance per trade (DCA only).
@@ -28,7 +28,7 @@ type Config struct {
 	// PollPriceInterval defines price polling interval.
 	PollPriceInterval time.Duration
 	// MarketType is "spot" or "margin".
-	MarketType entity.MarketType
+	MarketType domain.MarketType
 	// Leverage multiplier (margin only, ignored by AI; must be 1 for spot).
 	Leverage int
 
@@ -41,6 +41,8 @@ type Config struct {
 
 	// LLMAPIURL endpoint for LLM service.
 	LLMAPIURL string
+	// LLMProxyURL proxy for LLM service.
+	LLMProxyURL string
 	// LLMAPIKey API key for LLM.
 	LLMAPIKey string
 	// Model LLM model identifier.
@@ -97,6 +99,7 @@ type ConfigTmp struct {
 
 	// AI strategy fields
 	LLMAPIURL                 string `yaml:"llm_api_url,omitempty"`
+	LLMProxyURL               string `yaml:"llm_proxy_url,omitempty"`
 	LLMAPIKey                 string `yaml:"llm_api_key,omitempty"`
 	Model                     string `yaml:"model,omitempty"`
 	PrimaryTimeframe          string `yaml:"primary_timeframe,omitempty"`
@@ -139,20 +142,20 @@ func Get() ([]Config, error) {
 	}, nil
 }
 
-func getFromCLI() (pair entity.Pair, amount decimal.Decimal,
+func getFromCLI() (pair domain.Pair, amount decimal.Decimal,
 	pollPriceInterval time.Duration, _ error) {
 	var err error
 	pair, err = getPairFromString(*pairFlag)
 	if err != nil {
-		return entity.Pair{}, decimal.Decimal{}, 0, fmt.Errorf("invalid --pair provided, --pair=%s", *pairFlag)
+		return domain.Pair{}, decimal.Decimal{}, 0, fmt.Errorf("invalid --pair provided, --pair=%s", *pairFlag)
 	}
 	amount, err = decimal.NewFromString(*amountFlag)
 	if err != nil {
-		return entity.Pair{}, decimal.Decimal{}, 0, err
+		return domain.Pair{}, decimal.Decimal{}, 0, err
 	}
 
 	if amount.LessThan(decimal.NewFromInt(1)) || amount.GreaterThan(decimal.NewFromInt(100)) {
-		return entity.Pair{}, decimal.Decimal{}, 0, fmt.Errorf("amount must be between 1 and 100 percent, got %s", amount.String())
+		return domain.Pair{}, decimal.Decimal{}, 0, fmt.Errorf("amount must be between 1 and 100 percent, got %s", amount.String())
 	}
 
 	pollPriceInterval = *piFlag
@@ -193,9 +196,9 @@ func parseConfig(c ConfigTmp) (*Config, error) {
 		strategyType = "dca"
 	}
 
-	marketType := entity.MarketType(c.MarketTypeStr)
+	marketType := domain.MarketType(c.MarketTypeStr)
 	if c.MarketTypeStr == "" {
-		marketType = entity.MarketTypeSpot
+		marketType = domain.MarketTypeSpot
 	}
 	if !marketType.IsValid() {
 		return nil, fmt.Errorf("invalid market_type '%s' in yaml config (must be 'spot' or 'margin')", c.MarketTypeStr)
@@ -212,7 +215,7 @@ func parseConfig(c ConfigTmp) (*Config, error) {
 		}
 	}
 
-	if marketType == entity.MarketTypeSpot && leverage > 1 {
+	if marketType == domain.MarketTypeSpot && leverage > 1 {
 		return nil, fmt.Errorf("leverage > 1 is not allowed for spot trading. Use market_type: margin")
 	}
 
@@ -297,6 +300,7 @@ func parseAIConfig(c *ConfigTmp, cfg *Config) error {
 	} else {
 		cfg.LLMAPIURL = c.LLMAPIURL
 	}
+	cfg.LLMProxyURL = c.LLMProxyURL
 
 	if c.Model == "" {
 		cfg.Model = "deepseek/deepseek-chat"
@@ -361,12 +365,12 @@ func parseAIConfig(c *ConfigTmp, cfg *Config) error {
 	return nil
 }
 
-func getPairFromString(pairStr string) (entity.Pair, error) {
+func getPairFromString(pairStr string) (domain.Pair, error) {
 	pairElements := strings.Split(pairStr, "_")
 	if len(pairElements) != 2 {
-		return entity.Pair{}, fmt.Errorf("invalid pair param")
+		return domain.Pair{}, fmt.Errorf("invalid pair param")
 	}
-	return entity.Pair{From: pairElements[0], To: pairElements[1]}, nil
+	return domain.Pair{From: pairElements[0], To: pairElements[1]}, nil
 }
 
 func sanitizeStateKeyComponent(value string) string {

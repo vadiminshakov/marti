@@ -47,7 +47,7 @@ func NewWALStore(dir string) (*WALStore, error) {
 }
 
 // Save writes the AI decision event to WAL. Callers must ensure event.Pair is set.
-func (s *WALStore) Save(event entity.AIDecisionEvent) error {
+func (s *WALStore) Save(event domain.AIDecisionEvent) error {
 	if s == nil || s.wal == nil {
 		return errors.New("AI decision store is not initialized")
 	}
@@ -70,7 +70,7 @@ func (s *WALStore) Save(event entity.AIDecisionEvent) error {
 }
 
 // EventsAfter returns all AI decision events written after the provided WAL index.
-func (s *WALStore) EventsAfter(index uint64) ([]entity.AIDecisionEventRecord, error) {
+func (s *WALStore) EventsAfter(index uint64) ([]domain.AIDecisionEventRecord, error) {
 	if s == nil || s.wal == nil {
 		return nil, errors.New("AI decision store is not initialized")
 	}
@@ -83,17 +83,17 @@ func (s *WALStore) EventsAfter(index uint64) ([]entity.AIDecisionEventRecord, er
 		return nil, nil
 	}
 
-	records := make([]entity.AIDecisionEventRecord, 0, current-index)
+	records := make([]domain.AIDecisionEventRecord, 0, current-index)
 	for idx := index + 1; idx <= current; idx++ {
 		key, payload, ok := s.wal.Get(idx)
 		if !ok || !strings.HasPrefix(key, aiDecisionKeyPrefix) {
 			continue
 		}
-		var event entity.AIDecisionEvent
+		var event domain.AIDecisionEvent
 		if err := json.Unmarshal(payload, &event); err != nil {
 			return nil, errors.Wrap(err, "decode AI decision event")
 		}
-		records = append(records, entity.AIDecisionEventRecord{
+		records = append(records, domain.AIDecisionEventRecord{
 			Index: idx,
 			Event: event,
 		})

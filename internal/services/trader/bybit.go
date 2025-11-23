@@ -15,12 +15,12 @@ import (
 
 type BybitTrader struct {
 	client     *bybit.Client
-	pair       entity.Pair
-	marketType entity.MarketType
+	pair       domain.Pair
+	marketType domain.MarketType
 	leverage   int
 }
 
-func NewBybitTrader(client *bybit.Client, pair entity.Pair, marketType entity.MarketType, leverage int) (*BybitTrader, error) {
+func NewBybitTrader(client *bybit.Client, pair domain.Pair, marketType domain.MarketType, leverage int) (*BybitTrader, error) {
 	trader := &BybitTrader{
 		pair:       pair,
 		client:     client,
@@ -29,7 +29,7 @@ func NewBybitTrader(client *bybit.Client, pair entity.Pair, marketType entity.Ma
 	}
 
 	// for margin trading (linear category), set leverage via API
-	if marketType == entity.MarketTypeMargin && leverage > 1 {
+	if marketType == domain.MarketTypeMargin && leverage > 1 {
 		err := trader.setLeverage()
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to set leverage for bybit margin trading")
@@ -42,7 +42,7 @@ func NewBybitTrader(client *bybit.Client, pair entity.Pair, marketType entity.Ma
 // mapMarketTypeToCategory converts internal MarketType to Bybit's CategoryV5
 func (t *BybitTrader) mapMarketTypeToCategory() bybit.CategoryV5 {
 	switch t.marketType {
-	case entity.MarketTypeMargin:
+	case domain.MarketTypeMargin:
 		return bybit.CategoryV5Linear
 	default:
 		return bybit.CategoryV5Spot
@@ -51,7 +51,7 @@ func (t *BybitTrader) mapMarketTypeToCategory() bybit.CategoryV5 {
 
 // setLeverage sets the leverage for margin trading (linear category only)
 func (t *BybitTrader) setLeverage() error {
-	if t.marketType != entity.MarketTypeMargin {
+	if t.marketType != domain.MarketTypeMargin {
 		return nil
 	}
 
@@ -92,7 +92,7 @@ func (t *BybitTrader) Sell(ctx context.Context, amount decimal.Decimal, clientOr
 	category := t.mapMarketTypeToCategory()
 
 	var reduceOnly *bool
-	if t.marketType == entity.MarketTypeMargin {
+	if t.marketType == domain.MarketTypeMargin {
 		val := true
 		reduceOnly = &val
 	}
@@ -114,7 +114,7 @@ func (t *BybitTrader) Sell(ctx context.Context, amount decimal.Decimal, clientOr
 }
 
 // ExecuteAction executes a trading action (open/close long/short)
-func (t *BybitTrader) ExecuteAction(ctx context.Context, action entity.Action, amount decimal.Decimal, clientOrderID string) error {
+func (t *BybitTrader) ExecuteAction(ctx context.Context, action domain.Action, amount decimal.Decimal, clientOrderID string) error {
 	amount = amount.RoundFloor(4)
 	category := t.mapMarketTypeToCategory()
 	orderLinkID := clientOrderID
@@ -123,16 +123,16 @@ func (t *BybitTrader) ExecuteAction(ctx context.Context, action entity.Action, a
 	var reduceOnly bool
 
 	switch action {
-	case entity.ActionOpenLong:
+	case domain.ActionOpenLong:
 		side = bybit.SideBuy
 		reduceOnly = false
-	case entity.ActionCloseLong:
+	case domain.ActionCloseLong:
 		side = bybit.SideSell
 		reduceOnly = true
-	case entity.ActionOpenShort:
+	case domain.ActionOpenShort:
 		side = bybit.SideSell
 		reduceOnly = false
-	case entity.ActionCloseShort:
+	case domain.ActionCloseShort:
 		side = bybit.SideBuy
 		reduceOnly = true
 	default:
@@ -140,7 +140,7 @@ func (t *BybitTrader) ExecuteAction(ctx context.Context, action entity.Action, a
 	}
 
 	var reduceOnlyPtr *bool
-	if t.marketType == entity.MarketTypeMargin && reduceOnly {
+	if t.marketType == domain.MarketTypeMargin && reduceOnly {
 		val := true
 		reduceOnlyPtr = &val
 	}
@@ -238,7 +238,7 @@ func (t *BybitTrader) OrderExecuted(ctx context.Context, clientOrderID string) (
 func (t *BybitTrader) GetBalance(ctx context.Context, currency string) (decimal.Decimal, error) {
 	// choose the correct account type based on market type
 	accountType := bybit.AccountTypeV5SPOT
-	if t.marketType == entity.MarketTypeMargin {
+	if t.marketType == domain.MarketTypeMargin {
 		accountType = bybit.AccountTypeV5CONTRACT
 	}
 
@@ -266,8 +266,8 @@ func (t *BybitTrader) GetBalance(ctx context.Context, currency string) (decimal.
 	return decimal.Zero, nil
 }
 
-func (t *BybitTrader) GetPosition(_ context.Context, pair entity.Pair) (*entity.Position, error) {
-	if t.marketType != entity.MarketTypeMargin {
+func (t *BybitTrader) GetPosition(_ context.Context, pair domain.Pair) (*domain.Position, error) {
+	if t.marketType != domain.MarketTypeMargin {
 		return nil, nil
 	}
 
@@ -296,7 +296,7 @@ func (t *BybitTrader) GetPosition(_ context.Context, pair entity.Pair) (*entity.
 		return d, nil
 	}
 
-	var latest *entity.Position
+	var latest *domain.Position
 
 	for _, item := range resp.Result.List {
 		size, err := parseDecimal(item.Size)
@@ -342,12 +342,12 @@ func (t *BybitTrader) GetPosition(_ context.Context, pair entity.Pair) (*entity.
 			entryTime = parseTime(item.CreatedTime)
 		}
 
-		side := entity.PositionSideLong
+		side := domain.PositionSideLong
 		if item.Side == bybit.SideSell {
-			side = entity.PositionSideShort
+			side = domain.PositionSideShort
 		}
 
-		latest = &entity.Position{
+		latest = &domain.Position{
 			EntryPrice: entryPrice,
 			Amount:     size,
 			StopLoss:   stopLoss,
@@ -360,8 +360,8 @@ func (t *BybitTrader) GetPosition(_ context.Context, pair entity.Pair) (*entity.
 	return latest, nil
 }
 
-func (t *BybitTrader) SetPositionStops(_ context.Context, pair entity.Pair, takeProfit, stopLoss decimal.Decimal) error {
-	if t.marketType != entity.MarketTypeMargin {
+func (t *BybitTrader) SetPositionStops(_ context.Context, pair domain.Pair, takeProfit, stopLoss decimal.Decimal) error {
+	if t.marketType != domain.MarketTypeMargin {
 		return nil
 	}
 

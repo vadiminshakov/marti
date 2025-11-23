@@ -15,12 +15,12 @@ import (
 
 // PromptBuilder constructs optimized prompts for the LLM
 type PromptBuilder struct {
-	pair   entity.Pair
+	pair   domain.Pair
 	logger *zap.Logger
 }
 
 // NewPromptBuilder creates a new PromptBuilder instance
-func NewPromptBuilder(pair entity.Pair, logger *zap.Logger) *PromptBuilder {
+func NewPromptBuilder(pair domain.Pair, logger *zap.Logger) *PromptBuilder {
 	return &PromptBuilder{
 		pair:   pair,
 		logger: logger,
@@ -29,10 +29,10 @@ func NewPromptBuilder(pair entity.Pair, logger *zap.Logger) *PromptBuilder {
 
 // MarketContext contains all data needed for prompt building
 type MarketContext struct {
-	Primary         *entity.Timeframe
-	VolumeAnalysis  entity.VolumeAnalysis
-	HigherTimeframe *entity.Timeframe
-	CurrentPosition *entity.Position
+	Primary         *domain.Timeframe
+	VolumeAnalysis  domain.VolumeAnalysis
+	HigherTimeframe *domain.Timeframe
+	CurrentPosition *domain.Position
 	Balance         decimal.Decimal
 }
 
@@ -71,9 +71,9 @@ func (pb *PromptBuilder) BuildUserPrompt(ctx MarketContext) string {
 	sb.WriteString("## Instructions\n\n")
 	sb.WriteString("Analyze the market data and provide your trading decision in JSON format.\n")
 	if ctx.CurrentPosition != nil {
-		if ctx.CurrentPosition.Side == entity.PositionSideLong {
+		if ctx.CurrentPosition.Side == domain.PositionSideLong {
 			sb.WriteString("You currently have an open LONG position - decide whether to hold, close_long, or add to it.\n")
-		} else if ctx.CurrentPosition.Side == entity.PositionSideShort {
+		} else if ctx.CurrentPosition.Side == domain.PositionSideShort {
 			sb.WriteString("You currently have an open SHORT position - decide whether to hold, close_short, or add to it.\n")
 		}
 	} else {
@@ -85,7 +85,7 @@ func (pb *PromptBuilder) BuildUserPrompt(ctx MarketContext) string {
 
 // formatRecentData formats the last N candles with full OHLCV data and indicators
 // in a compact table format to save tokens while maintaining readability
-func (pb *PromptBuilder) formatRecentData(primary *entity.Timeframe, limit int) string {
+func (pb *PromptBuilder) formatRecentData(primary *domain.Timeframe, limit int) string {
 	var sb strings.Builder
 
 	sb.WriteString("## Recent Market Data (Last 20 Candles)\n\n")
@@ -155,7 +155,7 @@ func toFloat(d decimal.Decimal) float64 {
 
 // formatHistoricalSummary formats older candles (21-100) with only close prices
 // and key indicators in compact array format to minimize token usage
-func (pb *PromptBuilder) formatHistoricalSummary(primary *entity.Timeframe) string {
+func (pb *PromptBuilder) formatHistoricalSummary(primary *domain.Timeframe) string {
 	var sb strings.Builder
 
 	if primary == nil || len(primary.Candles) <= 20 {
@@ -217,7 +217,7 @@ func (pb *PromptBuilder) formatHistoricalSummary(primary *entity.Timeframe) stri
 
 // formatVolumeAnalysis formats volume metrics including current volume,
 // average volume, relative volume, and highlights volume spikes
-func (pb *PromptBuilder) formatVolumeAnalysis(volume entity.VolumeAnalysis) string {
+func (pb *PromptBuilder) formatVolumeAnalysis(volume domain.VolumeAnalysis) string {
 	var sb strings.Builder
 
 	sb.WriteString("## Volume Analysis\n\n")
@@ -309,7 +309,7 @@ func (pb *PromptBuilder) formatMultiTimeframe(ctx MarketContext) string {
 		if hasPrimary {
 			primaryTrend := ctx.Primary.Summary.Trend
 
-			if primaryTrend == htf.Trend && primaryTrend != entity.TrendDirectionNeutral {
+			if primaryTrend == htf.Trend && primaryTrend != domain.TrendDirectionNeutral {
 				sb.WriteString(fmt.Sprintf("\n✅ **Timeframes Aligned:** Both timeframes show %s trend\n", primaryTrend.Title()))
 			} else if primaryTrend != htf.Trend {
 				sb.WriteString(fmt.Sprintf("\n⚠️ **Timeframe Divergence:** Primary is %s, Higher is %s\n",
@@ -327,13 +327,13 @@ func (pb *PromptBuilder) formatMultiTimeframe(ctx MarketContext) string {
 
 // formatPosition formats open position information including entry price,
 // current P&L, time held, distance to stop-loss and take-profit, and risk-reward ratio
-func (pb *PromptBuilder) formatPosition(position *entity.Position, currentPrice decimal.Decimal) string {
+func (pb *PromptBuilder) formatPosition(position *domain.Position, currentPrice decimal.Decimal) string {
 	var sb strings.Builder
 
 	sb.WriteString("## Current Position\n\n")
-	if position.Side == entity.PositionSideLong {
+	if position.Side == domain.PositionSideLong {
 		sb.WriteString("**Status:** Open Long\n\n")
-	} else if position.Side == entity.PositionSideShort {
+	} else if position.Side == domain.PositionSideShort {
 		sb.WriteString("**Status:** Open Short\n\n")
 	}
 
@@ -346,7 +346,7 @@ func (pb *PromptBuilder) formatPosition(position *entity.Position, currentPrice 
 	pnl := position.PnL(currentPrice)
 	pnlPercent := decimal.Zero
 	if !position.EntryPrice.IsZero() {
-		if position.Side == entity.PositionSideLong {
+		if position.Side == domain.PositionSideLong {
 			// for long: (currentPrice - entryPrice) / entryPrice * 100
 			pnlPercent = currentPrice.Sub(position.EntryPrice).Div(position.EntryPrice).Mul(decimal.NewFromInt(100))
 		} else {

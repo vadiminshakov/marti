@@ -18,7 +18,7 @@ func NewHyperliquidPricer(info *hyperliquid.Info) *HyperliquidPricer {
 	return &HyperliquidPricer{info: info}
 }
 
-func (p *HyperliquidPricer) GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error) {
+func (p *HyperliquidPricer) GetPrice(ctx context.Context, pair domain.Pair) (decimal.Decimal, error) {
 	if p.info == nil {
 		return decimal.Zero, fmt.Errorf("hyperliquid info client is nil")
 	}

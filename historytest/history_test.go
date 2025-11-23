@@ -104,7 +104,7 @@ func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell fl
 	defer logger.Sync()
 	log := logger.Sugar()
 
-	pair := &entity.Pair{From: "BTC", To: "USDT"}
+	pair := &domain.Pair{From: "BTC", To: "USDT"}
 
 	prices, klines, cleanup, err := prepareData(dataFile, pair)
 	if err != nil {
@@ -150,7 +150,7 @@ func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell fl
 			log.Debug(err)
 		}
 
-		if tradeEvent != nil && tradeEvent.Action != entity.ActionNull {
+		if tradeEvent != nil && tradeEvent.Action != domain.ActionNull {
 			lastPriceBTC = tradeEvent.Price
 			log.Infof("Trade executed: %s at price %s, amount %s, current deals count: %d",
 				tradeEvent.Action, tradeEvent.Price, tradeEvent.Amount, trader.dealsCount)
@@ -160,7 +160,7 @@ func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell fl
 	return summarizeResults(trader, pair, balanceBTC, lastPriceBTC), nil
 }
 
-func summarizeResults(trader *traderCsv, pair *entity.Pair, initialBalanceBTC, lastPriceBTC decimal.Decimal) botSummary {
+func summarizeResults(trader *traderCsv, pair *domain.Pair, initialBalanceBTC, lastPriceBTC decimal.Decimal) botSummary {
 	// get the initial USDT balance from the trader
 	initialBalanceUSDT, _ := decimal.NewFromString(usdtBalanceInWallet)
 
@@ -201,7 +201,7 @@ func calculateTotalProfit(trader *traderCsv) decimal.Decimal {
 	return trader.balance2.Sub(trader.fee)
 }
 
-func prepareData(filePath string, pair *entity.Pair) (chan decimal.Decimal, chan entity.Kline, func(), error) {
+func prepareData(filePath string, pair *domain.Pair) (chan decimal.Decimal, chan domain.Kline, func(), error) {
 	collectData, err := DataCollectorFactory(filePath, pair)
 	if err != nil {
 		return nil, nil, nil, err
@@ -223,7 +223,7 @@ func prepareData(filePath string, pair *entity.Pair) (chan decimal.Decimal, chan
 	return prices, klines, cleanup, nil
 }
 
-func createStrategyFactory(logger *zap.Logger, pair *entity.Pair, prices chan decimal.Decimal, balanceBTC, balanceUSDT decimal.Decimal, maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell float64) (*traderCsv, func() (internal.TradingStrategy, error)) {
+func createStrategyFactory(logger *zap.Logger, pair *domain.Pair, prices chan decimal.Decimal, balanceBTC, balanceUSDT decimal.Decimal, maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell float64) (*traderCsv, func() (internal.TradingStrategy, error)) {
 	pricer := &pricerCsv{pricesCh: prices}
 	trader := &traderCsv{pair: pair, balance1: balanceBTC, balance2: balanceUSDT, pricesCh: prices, executed: make(map[string]decimal.Decimal)}
 
@@ -256,9 +256,9 @@ func createStrategyFactory(logger *zap.Logger, pair *entity.Pair, prices chan de
 	}
 }
 
-func loadPricesFromCSV(filePath string) (chan decimal.Decimal, chan entity.Kline) {
+func loadPricesFromCSV(filePath string) (chan decimal.Decimal, chan domain.Kline) {
 	prices := make(chan decimal.Decimal, 1000)
-	klines := make(chan entity.Kline, 1000)
+	klines := make(chan domain.Kline, 1000)
 
 	priceData, klineData := parseCSV(filePath)
 	go func() {
@@ -279,7 +279,7 @@ func loadPricesFromCSV(filePath string) (chan decimal.Decimal, chan entity.Kline
 	return prices, klines
 }
 
-func parseCSV(filePath string) ([]decimal.Decimal, []entity.Kline) {
+func parseCSV(filePath string) ([]decimal.Decimal, []domain.Kline) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		log.Fatalf("Unable to read input file %s: %v", filePath, err)
@@ -293,7 +293,7 @@ func parseCSV(filePath string) ([]decimal.Decimal, []entity.Kline) {
 	}
 
 	prices := make([]decimal.Decimal, 0, len(records))
-	klines := make([]entity.Kline, 0, len(records))
+	klines := make([]domain.Kline, 0, len(records))
 	for _, record := range records {
 		open, _ := decimal.NewFromString(record[0])
 		_, _ = decimal.NewFromString(record[1])
@@ -302,7 +302,7 @@ func parseCSV(filePath string) ([]decimal.Decimal, []entity.Kline) {
 
 		price := closePrice
 		prices = append(prices, price)
-		klines = append(klines, entity.Kline{Open: open, Close: closePrice})
+		klines = append(klines, domain.Kline{Open: open, Close: closePrice})
 	}
 
 	return prices, klines

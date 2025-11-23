@@ -91,7 +91,10 @@ func (f *strategyFactory) createAIStrategy(
 	promptBuilder := promptbuilder.NewPromptBuilder(conf.Pair, f.logger)
 
 	// create LLM client
-	llmClient := clients.NewOpenAICompatibleClient(conf.LLMAPIURL, conf.LLMAPIKey, conf.Model, promptBuilder)
+	llmClient, err := clients.NewOpenAICompatibleClient(conf.LLMAPIURL, conf.LLMAPIKey, conf.Model, conf.LLMProxyURL, promptBuilder)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create LLM client")
+	}
 
 	// create kline provider using the provider
 	klineProvider, err := provider.KlineProvider()

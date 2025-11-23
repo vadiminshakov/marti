@@ -17,12 +17,12 @@ type pricerCsv struct {
 	pricesCh chan decimal.Decimal
 }
 
-func (p *pricerCsv) GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error) {
+func (p *pricerCsv) GetPrice(ctx context.Context, pair domain.Pair) (decimal.Decimal, error) {
 	return <-p.pricesCh, nil
 }
 
 type traderCsv struct {
-	pair          *entity.Pair
+	pair          *domain.Pair
 	balance1      decimal.Decimal
 	balance2      decimal.Decimal
 	oldbalance2   decimal.Decimal
@@ -142,13 +142,13 @@ func (t *traderCsv) GetBalance(ctx context.Context, currency string) (decimal.De
 }
 
 // ExecuteAction routes the action to Buy/Sell methods for testing.
-func (t *traderCsv) ExecuteAction(ctx context.Context, action entity.Action, amount decimal.Decimal, clientOrderID string) error {
+func (t *traderCsv) ExecuteAction(ctx context.Context, action domain.Action, amount decimal.Decimal, clientOrderID string) error {
 	switch action {
-	case entity.ActionOpenLong:
+	case domain.ActionOpenLong:
 		return t.Buy(ctx, amount, clientOrderID)
-	case entity.ActionCloseLong:
+	case domain.ActionCloseLong:
 		return t.Sell(ctx, amount, clientOrderID)
-	case entity.ActionOpenShort, entity.ActionCloseShort:
+	case domain.ActionOpenShort, domain.ActionCloseShort:
 		return fmt.Errorf("short positions not supported by traderCsv")
 	default:
 		return fmt.Errorf("unknown action: %s", action)

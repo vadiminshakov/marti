@@ -47,7 +47,7 @@ func NewWALStore(dir string) (*WALStore, error) {
 }
 
 // Save writes the snapshot to WAL. Callers must ensure snapshot.Pair is set.
-func (s *WALStore) Save(snapshot entity.BalanceSnapshot) error {
+func (s *WALStore) Save(snapshot domain.BalanceSnapshot) error {
 	if s == nil || s.wal == nil {
 		return errors.New("balance snapshot store is not initialized")
 	}
@@ -70,7 +70,7 @@ func (s *WALStore) Save(snapshot entity.BalanceSnapshot) error {
 }
 
 // SnapshotsAfter returns all balance snapshots written after the provided WAL index.
-func (s *WALStore) SnapshotsAfter(index uint64) ([]entity.BalanceSnapshotRecord, error) {
+func (s *WALStore) SnapshotsAfter(index uint64) ([]domain.BalanceSnapshotRecord, error) {
 	if s == nil || s.wal == nil {
 		return nil, errors.New("balance snapshot store is not initialized")
 	}
@@ -83,17 +83,17 @@ func (s *WALStore) SnapshotsAfter(index uint64) ([]entity.BalanceSnapshotRecord,
 		return nil, nil
 	}
 
-	records := make([]entity.BalanceSnapshotRecord, 0, current-index)
+	records := make([]domain.BalanceSnapshotRecord, 0, current-index)
 	for idx := index + 1; idx <= current; idx++ {
 		key, payload, ok := s.wal.Get(idx)
 		if !ok || !strings.HasPrefix(key, snapshotKeyPrefix) {
 			continue
 		}
-		var snapshot entity.BalanceSnapshot
+		var snapshot domain.BalanceSnapshot
 		if err := json.Unmarshal(payload, &snapshot); err != nil {
 			return nil, errors.Wrap(err, "decode balance snapshot")
 		}
-		records = append(records, entity.BalanceSnapshotRecord{
+		records = append(records, domain.BalanceSnapshotRecord{
 			Index:    idx,
 			Snapshot: snapshot,
 		})

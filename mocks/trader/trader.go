@@ -50,11 +50,11 @@ func (_m *Trader) Sell(ctx context.Context, amount decimal.Decimal, clientOrderI
 }
 
 // ExecuteAction provides a mock function with given fields: ctx, action, amount, clientOrderID
-func (_m *Trader) ExecuteAction(ctx context.Context, action entity.Action, amount decimal.Decimal, clientOrderID string) error {
+func (_m *Trader) ExecuteAction(ctx context.Context, action domain.Action, amount decimal.Decimal, clientOrderID string) error {
 	ret := _m.Called(ctx, action, amount, clientOrderID)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, entity.Action, decimal.Decimal, string) error); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, domain.Action, decimal.Decimal, string) error); ok {
 		r0 = rf(ctx, action, amount, clientOrderID)
 	} else {
 		r0 = ret.Error(0)
