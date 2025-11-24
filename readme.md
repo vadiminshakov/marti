@@ -12,7 +12,7 @@ Marti is a cryptocurrency trading bot with *DCA* and *AI* strategies for multipl
 
 ![Screenshot](https://github.com/vadiminshakov/marti/blob/main/screenshot.png)
 
-## Installation
+### Installation
 
 ```bash
 go install github.com/vadiminshakov/marti/cmd@latest
@@ -32,26 +32,22 @@ export BINANCE_API_SECRET=your_api_secret
 marti --config config.yaml
 ```
 
-## Configuration
-
-Create a `config.yaml` file:
-
 ### Configuration
 
 See [config.yaml](config.yaml) for a complete example.
 
 
-### Supported LLM Providers
+#### Supported LLM Providers
 
 The AI strategy works with any OpenAI-compatible API.
 
-## Testing with Historical Data
+#### Testing with Historical Data
 
 ```bash
 BINANCE_API_KEY=your_api_key BINANCE_API_SECRET=your_api_secret go test -v ./historytest
 ```
 
-## Contributing
+#### Contributing
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
@@ -59,7 +55,7 @@ BINANCE_API_KEY=your_api_key BINANCE_API_SECRET=your_api_secret go test -v ./his
 4. Push to the branch (`git push origin feature/amazing-feature`) 
 5. Open a Pull Request
 
-## Disclaimer
+#### Disclaimer
 
 This software is for educational and research purposes only. Cryptocurrency trading involves substantial risk of loss. The authors are not responsible for any financial losses incurred through the use of this software. Always test thoroughly with small amounts before using in production.
 
