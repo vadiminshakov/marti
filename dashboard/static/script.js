@@ -642,7 +642,7 @@ connectSSE();
 // AI Decisions Stream
 const aiDecisionsContainer = document.getElementById('aiDecisions');
 const modelFiltersContainer = document.getElementById('modelFilters');
-const MAX_DECISIONS = 50;
+const MAX_DECISIONS = 1000;
 let currentFilter = null;
 
 const knownModels = [
@@ -712,8 +712,11 @@ function createDecisionCard(decision) {
   }
 
   // Apply initial filter state
-  if (currentFilter && card.dataset.model && !card.dataset.model.includes(currentFilter)) {
-    card.style.display = 'none';
+  if (currentFilter && card.dataset.model) {
+    const filterTerm = currentFilter === 'xai' ? 'x-ai' : currentFilter;
+    if (!card.dataset.model.includes(filterTerm)) {
+      card.style.display = 'none';
+    }
   }
 
   const header = document.createElement('div');
