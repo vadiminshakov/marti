@@ -8,6 +8,10 @@
 
 Marti is a flexible cryptocurrency trading bot framework that supports multiple trading strategies including Dollar Cost Averaging (DCA) and AI-powered technical analysis for automated trading across multiple exchanges. It provides a comprehensive solution for algorithmic trading with configurable parameters, real-time price monitoring, and robust trade execution.
 
+## live: https://llmtrade.tech
+
+![Screenshot](https://github.com/vadiminshakov/marti/blob/main/screenshot.png)
+
 ## Features
 
 - **Multi-Exchange Support**: Seamless integration with Binance and Bybit exchanges
