@@ -85,8 +85,8 @@ func (s *WALStore) EventsAfter(index uint64) ([]domain.AIDecisionEventRecord, er
 
 	records := make([]domain.AIDecisionEventRecord, 0, current-index)
 	for idx := index + 1; idx <= current; idx++ {
-		key, payload, ok := s.wal.Get(idx)
-		if !ok || !strings.HasPrefix(key, aiDecisionKeyPrefix) {
+		key, payload, err := s.wal.Get(idx)
+		if err != nil || !strings.HasPrefix(key, aiDecisionKeyPrefix) {
 			continue
 		}
 		var event domain.AIDecisionEvent

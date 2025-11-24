@@ -11,7 +11,7 @@ require (
 	github.com/shopspring/decimal v1.4.0
 	github.com/sonirico/go-hyperliquid v0.22.0
 	github.com/stretchr/testify v1.11.1
-	github.com/vadiminshakov/gowal v0.0.3
+	github.com/vadiminshakov/gowal v0.0.4
 	go.uber.org/zap v1.24.0
 	golang.org/x/crypto v0.45.0
 	gopkg.in/yaml.v3 v3.0.1

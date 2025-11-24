@@ -85,8 +85,8 @@ func (s *WALStore) SnapshotsAfter(index uint64) ([]domain.BalanceSnapshotRecord,
 
 	records := make([]domain.BalanceSnapshotRecord, 0, current-index)
 	for idx := index + 1; idx <= current; idx++ {
-		key, payload, ok := s.wal.Get(idx)
-		if !ok || !strings.HasPrefix(key, snapshotKeyPrefix) {
+		key, payload, err := s.wal.Get(idx)
+		if err != nil || !strings.HasPrefix(key, snapshotKeyPrefix) {
 			continue
 		}
 		var snapshot domain.BalanceSnapshot
