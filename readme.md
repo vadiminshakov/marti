@@ -1,4 +1,4 @@
-# Marti - Cryptocurrency Trading Bot Framework
+# Marti - Cryptocurrency Trading Bot
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/vadiminshakov/marti.svg)](https://pkg.go.dev/github.com/vadiminshakov/marti)
 ![Tests](https://github.com/vadiminshakov/marti/workflows/tests/badge.svg)
