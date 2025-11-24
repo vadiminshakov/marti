@@ -1,29 +1,84 @@
-# The trading pair. The pair should be in the format COIN1_COIN2.
+# DCA strategy on spot market
 - pair: BTC_USDT
-  platform: binance
-  # The percentage of available balance to be used for trading. The value should be in the range of 0 to 100.
-  amount: 38
+  platform: binance # (bybit, hyperliquid, simulate)
+  strategy: dca
+  # Market type: "spot" for spot trading or "margin" for margin/futures trading (default: spot)
+  market_type: spot
+  # Leverage multiplier for margin trading, 1-20 (default: 1)
+  # NOTE: leverage > 1 can ONLY be used with market_type: margin, NOT with spot
+  leverage: 1
+  # The percentage of available balance to be used for trading. The value should be in the range of 1 to 100.
+  amount: 20
   # The time interval between polling market prices to make trading decision (buy/sell/do nothing).
   pollpriceinterval: 5m
   # The maximum number of DCA trades to be executed.
-  max_dca_trades: 3
+  max_dca_trades: 35
   # The percentage of the price drop required to trigger a buy.
-  dca_percent_threshold_buy: 3.5
+  dca_percent_threshold_buy: 2
   # The percentage of the price rise required to trigger a sell.
-  dca_percent_threshold_sell: 66
+  dca_percent_threshold_sell: 20
 
+# DCA strategy - simulation mode
+- pair: BTC_USDT
+  platform: simulate
+  strategy: dca
+  market_type: spot
+  leverage: 1
+  amount: 20
+  pollpriceinterval: 2s
+  max_dca_trades: 8
+  dca_percent_threshold_buy: 1
+  dca_percent_threshold_sell: 2
+
+# AI Strategy - spot
+- pair: BTC_USDT
+  platform: binance
+  strategy: ai
+  market_type: spot
+  # LLM API endpoint (OpenRouter, or any OpenAI-compatible API)
+  llm_api_url: "https://openrouter.ai/api/v1/chat/completions"
+  llm_api_key: "sk-your-api-key-here"
+  # Model to use
+  # Examples: "deepseek/deepseek-chat", "openai/gpt-4", "anthropic/claude-3-sonnet"
+  model: "deepseek/deepseek-chat"
+  # Primary timeframe for market data (1m, 3m, 5m, 15m, 30m, 1h, 4h, etc.)
+  primary_timeframe: "3m"
+  # Higher timeframe for multi-timeframe analysis (optional, defaults to "15m")
+  # Should be a higher interval than primary_timeframe for trend confirmation
+  higher_timeframe: "15m"
+  # Number of candles to fetch/analyze for the higher timeframe (affects trend context only)
+  higher_lookback_periods: 60
+  # Number of historical periods to analyze on primary timeframe (minimum 50 for indicators)
+  primary_lookback_periods: 100
+  # How often to check price updates and make decisions
+  pollpriceinterval: 3m
+
+# AI Strategy - margin mode
 - pair: ETH_USDT
   platform: bybit
-  amount: 27
+  strategy: ai
+  market_type: margin
+  llm_api_url: "https://openrouter.ai/api/v1/chat/completions"
+  llm_api_key: "sk-your-api-key-here"
+  model: "deepseek/deepseek-chat"
+  primary_timeframe: "5m"
+  higher_timeframe: "1d"
+  higher_lookback_periods: 120
+  primary_lookback_periods: 30
   pollpriceinterval: 5m
-  max_dca_trades: 3
-  dca_percent_threshold_buy: 3.5
-  dca_percent_threshold_sell: 66
+  max_leverage: 50
 
-- pair: BNB_USDT
-  platform: binance
-  amount: 20
+# AI Strategy - simulation mode
+- pair: ETH_USDT
+  platform: simulate
+  strategy: ai
+  market_type: spot
+  llm_api_url: "https://openrouter.ai/api/v1/chat/completions"
+  llm_api_key: "sk-your-api-key-here"
+  model: "deepseek/deepseek-chat"
+  primary_timeframe: "5m"
+  higher_timeframe: "1d"
+  higher_lookback_periods: 120
+  primary_lookback_periods: 30
   pollpriceinterval: 5m
-  max_dca_trades: 3
-  dca_percent_threshold_buy: 3.5
-  dca_percent_threshold_sell: 66
+  max_leverage: 50

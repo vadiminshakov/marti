@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"github.com/adshao/go-binance/v2"
 	"github.com/shopspring/decimal"
-	"github.com/vadiminshakov/marti/internal/entity"
+	"github.com/vadiminshakov/marti/internal/domain"
 )
 
 type BinancePricer struct {
@@ -16,7 +16,7 @@ func NewBinancePricer(client *binance.Client) *BinancePricer {
 	return &BinancePricer{client: client}
 }
 
-func (p *BinancePricer) GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error) {
+func (p *BinancePricer) GetPrice(ctx context.Context, pair domain.Pair) (decimal.Decimal, error) {
 	prices, err := p.client.NewListPricesService().Symbol(pair.Symbol()).Do(ctx)
 	if err != nil {
 		return decimal.Decimal{}, err

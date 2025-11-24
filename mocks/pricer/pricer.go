@@ -6,7 +6,7 @@ import (
 	"context"
 
 	decimal "github.com/shopspring/decimal"
-	"github.com/vadiminshakov/marti/internal/entity"
+	"github.com/vadiminshakov/marti/internal/domain"
 
 	mock "github.com/stretchr/testify/mock"
 )
@@ -22,21 +22,21 @@ type Pricer struct {
 }
 
 // GetPrice provides a mock function with given fields: ctx, pair
-func (_m *Pricer) GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error) {
+func (_m *Pricer) GetPrice(ctx context.Context, pair domain.Pair) (decimal.Decimal, error) {
 	ret := _m.Called(ctx, pair)
 
 	var r0 decimal.Decimal
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, entity.Pair) (decimal.Decimal, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, domain.Pair) (decimal.Decimal, error)); ok {
 		return rf(ctx, pair)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, entity.Pair) decimal.Decimal); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, domain.Pair) decimal.Decimal); ok {
 		r0 = rf(ctx, pair)
 	} else {
 		r0 = ret.Get(0).(decimal.Decimal)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, entity.Pair) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, domain.Pair) error); ok {
 		r1 = rf(ctx, pair)
 	} else {
 		r1 = ret.Error(1)

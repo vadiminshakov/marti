@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/vadiminshakov/marti/config"
-
-	"github.com/vadiminshakov/marti/internal/entity"
-	"github.com/vadiminshakov/marti/internal/services/strategy"
+	"github.com/shopspring/decimal"
 	"go.uber.org/zap"
+
+	"github.com/vadiminshakov/marti/config"
+	entity "github.com/vadiminshakov/marti/internal/domain"
 )
 
 // TradingStrategy defines the interface that all trading strategies must implement.
@@ -27,35 +27,63 @@ type TradingStrategy interface {
 // TradingBot represents a single trading instance that manages the execution
 // of a specific trading strategy on a configured trading pair.
 type TradingBot struct {
-	// Config contains the trading configuration parameters
-	Config config.Config
-	// tradingStrategy holds the strategy implementation to be executed
 	tradingStrategy TradingStrategy
+	trader          traderService
+	pricer          priceService
+	balanceStore    balanceSnapshotWriter
+	Config          config.Config
+	leverage        int
+}
+
+type balanceSnapshotWriter interface {
+	Save(snapshot entity.BalanceSnapshot) error
+}
+
+type aiDecisionWriter interface {
+	Save(event entity.AIDecisionEvent) error
 }
 
 // NewTradingBot creates a new trading bot instance with the specified configuration, exchange client, and logger.
 // It initializes the appropriate trader and pricer components based on the platform specified in the config,
 // and sets up the trading strategy with the provided parameters.
-func NewTradingBot(logger *zap.Logger, conf config.Config, client any) (*TradingBot, error) {
-	currentTrader, currentPricer, err := createTraderAndPricer(conf.Platform, conf.Pair, client)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create trader and pricer")
-	}
-
+func NewTradingBot(logger *zap.Logger, conf config.Config, client any, balanceStore balanceSnapshotWriter, decisionStore aiDecisionWriter) (*TradingBot, error) {
 	if logger == nil {
 		logger = zap.L()
 	}
 
-	tsLogger := logger.With(zap.String("pair", conf.Pair.String()))
-	tradingStrategy, err := createTradingStrategy(
-		tsLogger,
-		conf.Pair,
-		conf.Amount,
+	provider, err := newServiceProvider(client, logger)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create service provider")
+	}
+
+	// for AI strategy, use MaxLeverage; for DCA strategy, use Leverage
+	leverage := conf.Leverage
+	if conf.StrategyType == "ai" {
+		leverage = conf.MaxLeverage
+	}
+
+	stateKey := ""
+	if conf.Platform == "simulate" {
+		stateKey = conf.SimulationStateKey()
+	}
+
+	currentTrader, err := provider.Trader(conf.Pair, conf.MarketType, leverage, stateKey)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create trader")
+	}
+
+	currentPricer, err := provider.Pricer()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create pricer")
+	}
+
+	factory := newStrategyFactory(logger)
+	tradingStrategy, err := factory.createTradingStrategy(
+		conf,
 		currentPricer,
 		currentTrader,
-		conf.MaxDcaTrades,
-		conf.DcaPercentThresholdBuy,
-		conf.DcaPercentThresholdSell,
+		provider,
+		decisionStore,
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create trading strategy")
@@ -64,6 +92,10 @@ func NewTradingBot(logger *zap.Logger, conf config.Config, client any) (*Trading
 	return &TradingBot{
 		Config:          conf,
 		tradingStrategy: tradingStrategy,
+		trader:          currentTrader,
+		pricer:          currentPricer,
+		leverage:        leverage,
+		balanceStore:    balanceStore,
 	}, nil
 }
 
@@ -78,36 +110,117 @@ func (b *TradingBot) Close() {
 // Trade method at regular intervals defined by PollPriceInterval.
 // The method blocks until the context is cancelled or an unrecoverable error occurs.
 func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
-	// Initialize trading strategy (handles initial buy if needed)
 	if err := b.tradingStrategy.Initialize(ctx); err != nil {
 		return errors.Wrap(err, "failed to initialize trading strategy")
 	}
 
+	go b.streamBalances(ctx, logger.With(zap.String("component", "balance-reporter")))
+
 	ticker := time.NewTicker(b.Config.PollPriceInterval)
 	defer ticker.Stop()
 
-	logger.Info("Starting trading loop", zap.String("pair", b.Config.Pair.String()), zap.Duration("poll_interval", b.Config.PollPriceInterval))
+	logger.Info("Starting trading loop", zap.Duration("poll_interval", b.Config.PollPriceInterval))
 
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Info("Context done, stopping trading bot run loop.", zap.String("pair", b.Config.Pair.String()))
-			return ctx.Err()
+			logger.Info("Context done, stopping trading bot run loop")
+
+			return errors.Wrap(ctx.Err(), "context done")
 		case <-ticker.C:
-			logger.Debug("Trade service tick", zap.String("pair", b.Config.Pair.String()))
 			tradeEvent, err := b.tradingStrategy.Trade(ctx)
 			if err != nil {
-				if errors.Is(err, strategy.ErrNoData) {
-					logger.Debug("Trading strategy returned no data, continuing", zap.String("pair", b.Config.Pair.String()))
-				} else {
-					logger.Error("Trading strategy failed", zap.String("pair", b.Config.Pair.String()), zap.Error(err))
-				}
+				logger.Error("Trading strategy failed", zap.Error(err))
+
 				continue
 			}
 
 			if tradeEvent != nil {
-				logger.Info("Trade event occurred", zap.String("pair", b.Config.Pair.String()), zap.Any("event", tradeEvent))
+				logger.Info("Trade event occurred", zap.Any("event", tradeEvent))
+
+				go func() {
+					if err := b.publishBalanceSnapshot(ctx); err != nil {
+						logger.Debug("balance snapshot skipped", zap.Error(err))
+					}
+				}()
 			}
 		}
 	}
+}
+
+func (b *TradingBot) streamBalances(ctx context.Context, logger *zap.Logger) {
+	interval := b.Config.PollPriceInterval
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	if err := b.publishBalanceSnapshot(ctx); err != nil {
+		logger.Debug("balance snapshot skipped", zap.Error(err))
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := b.publishBalanceSnapshot(ctx); err != nil {
+				logger.Debug("balance snapshot skipped", zap.Error(err))
+			}
+		}
+	}
+}
+
+func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
+	base, err := b.trader.GetBalance(ctx, b.Config.Pair.From)
+	if err != nil {
+		return errors.Wrapf(err, "get %s balance", b.Config.Pair.From)
+	}
+
+	quote, err := b.trader.GetBalance(ctx, b.Config.Pair.To)
+	if err != nil {
+		return errors.Wrapf(err, "get %s balance", b.Config.Pair.To)
+	}
+
+	price, err := b.pricer.GetPrice(ctx, b.Config.Pair)
+	if err != nil {
+		return errors.Wrap(err, "get price for balance snapshot")
+	}
+
+	total := quote.Add(base.Mul(price))
+
+	var activePosition string
+
+	if b.Config.MarketType == entity.MarketTypeMargin {
+		position, posErr := b.trader.GetPosition(ctx, b.Config.Pair)
+		if posErr != nil {
+			return errors.Wrap(posErr, "get position for balance snapshot")
+		}
+
+		if position != nil && position.Amount.GreaterThan(decimal.Zero) {
+			switch position.Side {
+			case entity.PositionSideLong:
+				activePosition = "long"
+			case entity.PositionSideShort:
+				activePosition = "short"
+			}
+
+			total = position.CalculateTotalEquity(price, base, quote, b.leverage)
+		}
+	}
+
+	err = b.balanceStore.Save(entity.BalanceSnapshot{
+		Timestamp:  time.Now().UTC(),
+		Pair:       b.Config.Pair.String(),
+		Model:      entity.NormalizeModelName(b.Config.Model),
+		Base:       base.String(),
+		Quote:      quote.String(),
+		TotalQuote: total.StringFixed(2),
+		Price:      price.String(),
+		Position:   activePosition,
+	})
+
+	return errors.Wrap(err, "failed to save balance snapshot")
 }

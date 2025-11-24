@@ -1,5 +1,4 @@
-package entity
-
+package domain
 import "github.com/shopspring/decimal"
 
 // Kliner defines the interface for accessing kline (candlestick) price data.

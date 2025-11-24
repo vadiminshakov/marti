@@ -6,6 +6,7 @@ import (
 	"context"
 
 	decimal "github.com/shopspring/decimal"
+	"github.com/vadiminshakov/marti/internal/domain"
 
 	mock "github.com/stretchr/testify/mock"
 )
@@ -48,6 +49,20 @@ func (_m *Trader) Sell(ctx context.Context, amount decimal.Decimal, clientOrderI
 	return r0
 }
 
+// ExecuteAction provides a mock function with given fields: ctx, action, amount, clientOrderID
+func (_m *Trader) ExecuteAction(ctx context.Context, action domain.Action, amount decimal.Decimal, clientOrderID string) error {
+	ret := _m.Called(ctx, action, amount, clientOrderID)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, domain.Action, decimal.Decimal, string) error); ok {
+		r0 = rf(ctx, action, amount, clientOrderID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // OrderExecuted provides a mock function with given fields: ctx, clientOrderID
 func (_m *Trader) OrderExecuted(ctx context.Context, clientOrderID string) (bool, decimal.Decimal, error) {
 	ret := _m.Called(ctx, clientOrderID)
@@ -83,6 +98,35 @@ func (_m *Trader) OrderExecuted(ctx context.Context, clientOrderID string) (bool
 	}
 
 	return r0, r1, r2
+}
+
+// GetBalance provides a mock function with given fields: ctx, currency
+func (_m *Trader) GetBalance(ctx context.Context, currency string) (decimal.Decimal, error) {
+	ret := _m.Called(ctx, currency)
+
+	var r0 decimal.Decimal
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (decimal.Decimal, error)); ok {
+		return rf(ctx, currency)
+	}
+	if len(ret) > 0 {
+		if rf, ok := ret.Get(0).(func(context.Context, string) decimal.Decimal); ok {
+			r0 = rf(ctx, currency)
+		} else {
+			if ret.Get(0) != nil {
+				r0 = ret.Get(0).(decimal.Decimal)
+			}
+		}
+	}
+	if len(ret) > 1 {
+		if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+			r1 = rf(ctx, currency)
+		} else {
+			r1 = ret.Error(1)
+		}
+	}
+
+	return r0, r1
 }
 
 type mockConstructorTestingTNewTrader interface {

@@ -1,5 +1,5 @@
-// Package entity defines core data structures used throughout the trading bot.
-package entity
+// Package domain defines core data structures used throughout the trading bot.
+package domain
 
 import "fmt"
 

@@ -14,7 +14,7 @@ lint:
 
 # Run linter and fix issues
 lint-fix:
-	@golangci-lint run --fix --timeout=5m ./internal/...
+	@golangci-lint run --fix --timeout=5m ./...
 
 # Prepare development environment
 setup: install-tools lint test

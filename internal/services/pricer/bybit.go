@@ -6,7 +6,7 @@ import (
 
 	"github.com/hirokisan/bybit/v2"
 	"github.com/shopspring/decimal"
-	"github.com/vadiminshakov/marti/internal/entity"
+	"github.com/vadiminshakov/marti/internal/domain"
 )
 
 type BybitPricer struct {
@@ -17,7 +17,7 @@ func NewBybitPricer(client *bybit.Client) *BybitPricer {
 	return &BybitPricer{client: client}
 }
 
-func (p *BybitPricer) GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error) {
+func (p *BybitPricer) GetPrice(ctx context.Context, pair domain.Pair) (decimal.Decimal, error) {
 	symbol := bybit.SymbolV5(pair.Symbol())
 
 	result, err := p.client.V5().Market().GetTickers(bybit.V5GetTickersParam{

@@ -13,8 +13,8 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 	"github.com/vadiminshakov/marti/internal"
-	"github.com/vadiminshakov/marti/internal/entity"
-	"github.com/vadiminshakov/marti/internal/services/strategy"
+	"github.com/vadiminshakov/marti/internal/domain"
+	"github.com/vadiminshakov/marti/internal/services/strategy/dca"
 	"go.uber.org/zap"
 )
 
@@ -41,31 +41,31 @@ func TestProfit(t *testing.T) {
 		dcaPercentThresholdSell float64
 	}{
 		{
-			name:                    "1 year - Conservative buy",
-			duration:                8760,
-			maxDcaTrades:            3,
-			dcaPercentThresholdBuy:  2,
-			dcaPercentThresholdSell: 60,
-		},
-		{
-			name:                    "2 years - Conservative buy",
-			duration:                17520,
-			maxDcaTrades:            3,
-			dcaPercentThresholdBuy:  2,
-			dcaPercentThresholdSell: 60,
-		},
-		{
-			name:                    "1 year - Aggressive trades",
+			name:                    "1 year - Conservative",
 			duration:                8760,
 			maxDcaTrades:            20,
 			dcaPercentThresholdBuy:  2,
+			dcaPercentThresholdSell: 20,
+		},
+		{
+			name:                    "2 years - Conservative",
+			duration:                17520,
+			maxDcaTrades:            40,
+			dcaPercentThresholdBuy:  2,
+			dcaPercentThresholdSell: 20,
+		},
+		{
+			name:                    "1 year - Aggressive",
+			duration:                8760,
+			maxDcaTrades:            100,
+			dcaPercentThresholdBuy:  0.5,
 			dcaPercentThresholdSell: 4,
 		},
 		{
-			name:                    "2 years - Aggressive trades",
+			name:                    "2 years - Aggressive",
 			duration:                17520,
-			maxDcaTrades:            20,
-			dcaPercentThresholdBuy:  2,
+			maxDcaTrades:            200,
+			dcaPercentThresholdBuy:  0.5,
 			dcaPercentThresholdSell: 4,
 		},
 	}
@@ -104,7 +104,7 @@ func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell fl
 	defer logger.Sync()
 	log := logger.Sugar()
 
-	pair := &entity.Pair{From: "BTC", To: "USDT"}
+	pair := &domain.Pair{From: "BTC", To: "USDT"}
 
 	prices, klines, cleanup, err := prepareData(dataFile, pair)
 	if err != nil {
@@ -150,7 +150,7 @@ func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell fl
 			log.Debug(err)
 		}
 
-		if tradeEvent != nil && tradeEvent.Action != entity.ActionNull {
+		if tradeEvent != nil && tradeEvent.Action != domain.ActionNull {
 			lastPriceBTC = tradeEvent.Price
 			log.Infof("Trade executed: %s at price %s, amount %s, current deals count: %d",
 				tradeEvent.Action, tradeEvent.Price, tradeEvent.Amount, trader.dealsCount)
@@ -160,23 +160,23 @@ func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell fl
 	return summarizeResults(trader, pair, balanceBTC, lastPriceBTC), nil
 }
 
-func summarizeResults(trader *traderCsv, pair *entity.Pair, initialBalanceBTC, lastPriceBTC decimal.Decimal) botSummary {
-	// Get the initial USDT balance from the trader
+func summarizeResults(trader *traderCsv, pair *domain.Pair, initialBalanceBTC, lastPriceBTC decimal.Decimal) botSummary {
+	// get the initial USDT balance from the trader
 	initialBalanceUSDT, _ := decimal.NewFromString(usdtBalanceInWallet)
 
-	// Calculate total profit in USDT
+	// calculate total profit in USDT
 	totalProfit := calculateTotalProfit(trader)
 	if trader.balance1.IsPositive() {
 		totalProfit = totalProfit.Add(lastPriceBTC.Mul(trader.balance1))
 	}
 
-	// Calculate profit percentage based on initial USDT investment
+	// calculate profit percentage based on initial USDT investment
 	var profitPercent string
 	if initialBalanceUSDT.IsPositive() {
-		// Profit = (Current USDT - Initial USDT) / Initial USDT * 100
+		// profit = (Current USDT - Initial USDT) / Initial USDT * 100
 		profitPercent = totalProfit.Sub(initialBalanceUSDT).Mul(decimal.NewFromInt(100)).Div(initialBalanceUSDT).StringFixed(2)
 	} else if initialBalanceBTC.IsPositive() {
-		// Fallback to BTC calculation if we started with BTC
+		// fallback to BTC calculation if we started with BTC
 		initialValueUSDT := initialBalanceBTC.Mul(lastPriceBTC)
 		profitPercent = totalProfit.Sub(initialValueUSDT).Mul(decimal.NewFromInt(100)).Div(initialValueUSDT).StringFixed(2)
 	} else {
@@ -201,7 +201,7 @@ func calculateTotalProfit(trader *traderCsv) decimal.Decimal {
 	return trader.balance2.Sub(trader.fee)
 }
 
-func prepareData(filePath string, pair *entity.Pair) (chan decimal.Decimal, chan entity.Kline, func(), error) {
+func prepareData(filePath string, pair *domain.Pair) (chan decimal.Decimal, chan domain.Kline, func(), error) {
 	collectData, err := DataCollectorFactory(filePath, pair)
 	if err != nil {
 		return nil, nil, nil, err
@@ -223,7 +223,7 @@ func prepareData(filePath string, pair *entity.Pair) (chan decimal.Decimal, chan
 	return prices, klines, cleanup, nil
 }
 
-func createStrategyFactory(logger *zap.Logger, pair *entity.Pair, prices chan decimal.Decimal, balanceBTC, balanceUSDT decimal.Decimal, maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell float64) (*traderCsv, func() (internal.TradingStrategy, error)) {
+func createStrategyFactory(logger *zap.Logger, pair *domain.Pair, prices chan decimal.Decimal, balanceBTC, balanceUSDT decimal.Decimal, maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell float64) (*traderCsv, func() (internal.TradingStrategy, error)) {
 	pricer := &pricerCsv{pricesCh: prices}
 	trader := &traderCsv{pair: pair, balance1: balanceBTC, balance2: balanceUSDT, pricesCh: prices, executed: make(map[string]decimal.Decimal)}
 
@@ -231,10 +231,17 @@ func createStrategyFactory(logger *zap.Logger, pair *entity.Pair, prices chan de
 		dcaPercentThresholdBuyDecimal := decimal.NewFromFloat(dcaPercentThresholdBuy)
 		dcaPercentThresholdSellDecimal := decimal.NewFromFloat(dcaPercentThresholdSell)
 
-		dcaStrategy, err := strategy.NewDCAStrategy(
+		// for backtesting: use 20% to maximize capital utilization
+		// this means: use all available USDT balance for EACH trade
+		// each buy order will use: current_balance * 20%
+		// this represents aggressive reinvestment strategy, good for backtesting
+		// maxDcaTrades only limits the number of buys in a series
+		amountPercent := decimal.NewFromInt(20)
+
+		dcaStrategy, err := dca.NewDCAStrategy(
 			logger,
 			*pair,
-			balanceUSDT,
+			amountPercent,
 			pricer,
 			trader,
 			maxDcaTrades,
@@ -249,9 +256,9 @@ func createStrategyFactory(logger *zap.Logger, pair *entity.Pair, prices chan de
 	}
 }
 
-func loadPricesFromCSV(filePath string) (chan decimal.Decimal, chan entity.Kline) {
+func loadPricesFromCSV(filePath string) (chan decimal.Decimal, chan domain.Kline) {
 	prices := make(chan decimal.Decimal, 1000)
-	klines := make(chan entity.Kline, 1000)
+	klines := make(chan domain.Kline, 1000)
 
 	priceData, klineData := parseCSV(filePath)
 	go func() {
@@ -272,7 +279,7 @@ func loadPricesFromCSV(filePath string) (chan decimal.Decimal, chan entity.Kline
 	return prices, klines
 }
 
-func parseCSV(filePath string) ([]decimal.Decimal, []entity.Kline) {
+func parseCSV(filePath string) ([]decimal.Decimal, []domain.Kline) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		log.Fatalf("Unable to read input file %s: %v", filePath, err)
@@ -286,7 +293,7 @@ func parseCSV(filePath string) ([]decimal.Decimal, []entity.Kline) {
 	}
 
 	prices := make([]decimal.Decimal, 0, len(records))
-	klines := make([]entity.Kline, 0, len(records))
+	klines := make([]domain.Kline, 0, len(records))
 	for _, record := range records {
 		open, _ := decimal.NewFromString(record[0])
 		_, _ = decimal.NewFromString(record[1])
@@ -295,7 +302,7 @@ func parseCSV(filePath string) ([]decimal.Decimal, []entity.Kline) {
 
 		price := closePrice
 		prices = append(prices, price)
-		klines = append(klines, entity.Kline{Open: open, Close: closePrice})
+		klines = append(klines, domain.Kline{Open: open, Close: closePrice})
 	}
 
 	return prices, klines

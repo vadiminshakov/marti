@@ -1,0 +1,7 @@
+- pair: BTC_USDT
+  platform: simulate
+  amount: 10
+  pollpriceinterval: 2s
+  max_dca_trades: 8
+  dca_percent_threshold_buy: 2
+  dca_percent_threshold_sell: 3

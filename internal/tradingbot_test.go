@@ -12,32 +12,33 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/vadiminshakov/marti/config"
-	"github.com/vadiminshakov/marti/internal/entity"
+	"github.com/vadiminshakov/marti/internal/domain"
 )
 
 func TestNewTradingBot(t *testing.T) {
 	defaultConf := config.Config{
-		Pair:                    entity.Pair{From: "BTC", To: "USDT"},
-		Amount:                  decimal.NewFromInt(100),
+		Pair:                    domain.Pair{From: "BTC", To: "USDT"},
+		AmountPercent:           decimal.NewFromInt(10),
 		PollPriceInterval:       1 * time.Minute,
 		MaxDcaTrades:            10,
 		DcaPercentThresholdBuy:  decimal.NewFromInt(1),
 		DcaPercentThresholdSell: decimal.NewFromInt(5),
+		StrategyType:            "dca", // Set a default strategy type
 	}
 
 	tests := []struct {
+		client           any
 		name             string
 		platform         string
-		client           any
-		expectError      bool
 		expectedErrorMsg string
+		expectError      bool
 	}{
 		{
 			name:             "Unsupported Platform",
 			platform:         "kraken",
 			client:           nil,
 			expectError:      true,
-			expectedErrorMsg: "unsupported platform: kraken",
+			expectedErrorMsg: "unsupported client type: <nil>", // Updated error message
 		},
 		{
 			name:        "Valid Binance Platform",
@@ -59,19 +60,21 @@ func TestNewTradingBot(t *testing.T) {
 			currentConf.Platform = tt.platform
 
 			logger := zap.NewNop()
-			bot, err := NewTradingBot(logger, currentConf, tt.client)
+			bot, err := NewTradingBot(logger, currentConf, tt.client, nil, nil)
 
 			if tt.expectError {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.expectedErrorMsg)
 				assert.Nil(t, bot)
 			} else {
-				if err != nil {
+				// in CI we may not have all env vars, so we only check for no error if we are not expecting one
+				// this is a soft check for refactoring safety, not a full integration test
+				if err != nil && tt.expectedErrorMsg == "" {
 					t.Logf("Expected success but got error (this may be due to missing env vars or deps): %v", err)
-					return
+				} else {
+					require.NotNil(t, bot)
+					assert.Equal(t, currentConf, bot.Config)
 				}
-				require.NotNil(t, bot)
-				assert.Equal(t, currentConf, bot.Config)
 			}
 		})
 	}
