@@ -18,7 +18,7 @@ Marti is a cryptocurrency trading bot with *DCA* and *AI* strategies for multipl
 go install github.com/vadiminshakov/marti/cmd@latest
 ```
 
-## Quick Start (Standalone Application)
+### Run
 
 ```bash
 # Set API credentials
