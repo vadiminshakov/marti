@@ -47,10 +47,6 @@ type aiDecisionWriter interface {
 // It initializes the appropriate trader and pricer components based on the platform specified in the config,
 // and sets up the trading strategy with the provided parameters.
 func NewTradingBot(logger *zap.Logger, conf config.Config, client any, balanceStore balanceSnapshotWriter, decisionStore aiDecisionWriter) (*TradingBot, error) {
-	if logger == nil {
-		logger = zap.L()
-	}
-
 	provider, err := newServiceProvider(client, logger)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create service provider")
