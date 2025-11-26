@@ -6,6 +6,14 @@ import (
 	"time"
 )
 
+const (
+	defaultInitialInterval = 1 * time.Second
+	defaultMaxInterval     = 30 * time.Second
+	defaultMultiplier      = 2.0
+	defaultMaxRetries      = 5
+	defaultJitter          = 0.1
+)
+
 // Retrier implements exponential backoff with jitter.
 type Retrier struct {
 	initialInterval time.Duration
@@ -56,15 +64,17 @@ func WithJitter(j float64) Option {
 // New creates a new Retrier with default values and optional overrides.
 func New(opts ...Option) *Retrier {
 	r := &Retrier{
-		initialInterval: 1 * time.Second,
-		maxInterval:     30 * time.Second,
-		multiplier:      2.0,
-		maxRetries:      5,
-		jitter:          0.1,
+		initialInterval: defaultInitialInterval,
+		maxInterval:     defaultMaxInterval,
+		multiplier:      defaultMultiplier,
+		maxRetries:      defaultMaxRetries,
+		jitter:          defaultJitter,
 	}
+
 	for _, opt := range opts {
 		opt(r)
 	}
+
 	return r
 }
 
@@ -75,11 +85,9 @@ func (r *Retrier) Do(ctx context.Context, fn func(ctx context.Context) error) er
 
 	for attempt := 0; attempt <= r.maxRetries; attempt++ {
 		if attempt > 0 {
-			// calculate jitter
 			jitter := (rand.Float64()*2 - 1) * r.jitter * float64(interval)
 			sleepDuration := time.Duration(float64(interval) + jitter)
 
-			// ensure we don't sleep less than 0
 			if sleepDuration < 0 {
 				sleepDuration = 0
 			}
@@ -90,7 +98,6 @@ func (r *Retrier) Do(ctx context.Context, fn func(ctx context.Context) error) er
 			case <-time.After(sleepDuration):
 			}
 
-			// update interval for next retry
 			interval = time.Duration(float64(interval) * r.multiplier)
 			if interval > r.maxInterval {
 				interval = r.maxInterval
