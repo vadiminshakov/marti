@@ -77,6 +77,55 @@ function distanceToLineSegment(px, py, x1, y1, x2, y2) {
   return Math.sqrt((px - nearestX) ** 2 + (py - nearestY) ** 2);
 }
 
+const modelLogos = {
+  'yandex': 'yandex.webp',
+  'deepseek': 'deepseek.webp',
+  'qwen': 'qwen.webp',
+  'moonshot': 'moonshot.webp',
+  'openai': 'openai.webp',
+  'google': 'google.webp',
+  'anthropic': 'anthropic.webp',
+  'x-ai': 'xai.webp'
+};
+
+const chartLogos = {};
+const legendLogos = {};
+
+function resizeImage(img, size) {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, size, size);
+  return canvas;
+}
+
+function loadLogos() {
+  Object.entries(modelLogos).forEach(([key, filename]) => {
+    const img = new Image();
+    img.src = filename;
+    img.onload = () => {
+      chartLogos[key] = img;
+      legendLogos[key] = resizeImage(img, 18); // Heavily reduced size for legend
+
+      // Update existing datasets
+      if (datasetByPair) {
+        datasetByPair.forEach((dataset) => {
+          const modelKey = (dataset.modelKey || '').toLowerCase();
+          if (modelKey.includes(key) && !modelKey.includes('tngtech')) {
+            dataset.pointStyle = legendLogos[key];
+          }
+        });
+      }
+      if (typeof globalChart !== 'undefined' && globalChart) {
+        globalChart.update('none');
+      }
+    };
+  });
+}
+
+loadLogos();
+
 const buildGlobalChart = (ctx) => {
   let hoveredDatasetIndex = null;
   const hoverThreshold = 12;
@@ -235,7 +284,7 @@ const buildGlobalChart = (ctx) => {
       elements: { line: { borderCapStyle: 'round' } },
       plugins: {
 
-        legend: { display: true, labels: { usePointStyle: true, boxWidth: 8, font: { size: 10 } } },
+        legend: { display: true, labels: { usePointStyle: true, boxWidth: 20, font: { size: 10 } } },
         tooltip: {
           enabled: false, // Disable tooltip rendering
           external: () => { }, // Ensure no external tooltip is triggered
@@ -269,40 +318,6 @@ const buildGlobalChart = (ctx) => {
       afterDraw: (chart) => {
         const ctx = chart.ctx;
 
-        // Map of model keywords to logo filenames
-        const modelLogos = {
-          'yandex': 'yandex.webp',
-          'deepseek': 'deepseek.webp',
-          'qwen': 'qwen.webp',
-          'moonshot': 'moonshot.webp',
-          'openai': 'openai.webp',
-          'google': 'google.webp',
-          'anthropic': 'anthropic.webp',
-          'x-ai': 'xai.webp'
-        };
-
-        // Cache for preloaded images
-        if (!chart.logoImages) {
-          chart.logoImages = {};
-          let loadedCount = 0;
-          const totalLogos = Object.keys(modelLogos).length;
-          Object.entries(modelLogos).forEach(([key, filename]) => {
-            const img = new Image();
-            img.src = filename;
-            img.onload = () => {
-              loadedCount++;
-              // Only update once when all logos are loaded
-              if (loadedCount === totalLogos) {
-                setTimeout(() => chart.update('none'), 100);
-              }
-            };
-            img.onerror = () => {
-              console.error(`Failed to load logo: ${filename}`);
-            };
-            chart.logoImages[key] = img;
-          });
-        }
-
         // Get hovered dataset index from the chart instance
         const hoveredIndex = chart.hoveredDatasetIndex;
 
@@ -333,7 +348,7 @@ const buildGlobalChart = (ctx) => {
           let logoImg = null;
           const modelKey = dataset.modelKey ? dataset.modelKey.toLowerCase() : '';
 
-          for (const [key, img] of Object.entries(chart.logoImages)) {
+          for (const [key, img] of Object.entries(chartLogos)) {
             if (modelKey.includes(key)) {
               if (modelKey.includes('tngtech')) {
                 continue;
@@ -448,6 +463,15 @@ function ensureDataset(model) {
     fill: true,
     spanGaps: true
   };
+
+  const safeKey = key.toLowerCase();
+  for (const [logoKey, img] of Object.entries(legendLogos)) {
+    if (safeKey.includes(logoKey) && !safeKey.includes('tngtech')) {
+      dataset.pointStyle = img;
+      break;
+    }
+  }
+
   globalChart.data.datasets.push(dataset);
   datasetByPair.set(key, dataset);
   return dataset;
