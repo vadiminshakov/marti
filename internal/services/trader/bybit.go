@@ -83,6 +83,7 @@ func (t *BybitTrader) Buy(ctx context.Context, amount decimal.Decimal, clientOrd
 	if err != nil {
 		return errors.Wrap(err, "failed to create buy order")
 	}
+	
 	return nil
 }
 
@@ -110,6 +111,7 @@ func (t *BybitTrader) Sell(ctx context.Context, amount decimal.Decimal, clientOr
 	if err != nil {
 		return errors.Wrap(err, "failed to create sell order")
 	}
+
 	return nil
 }
 
