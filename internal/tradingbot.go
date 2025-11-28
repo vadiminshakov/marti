@@ -73,12 +73,21 @@ func NewTradingBot(logger *zap.Logger, conf config.Config, client any, balanceSt
 		return nil, errors.Wrap(err, "failed to create pricer")
 	}
 
+	var currentKlineProvider klineService
+	if conf.StrategyType == "ai" {
+		currentKlineProvider, err = provider.KlineProvider()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create kline provider")
+		}
+	}
+
 	factory := newStrategyFactory(logger)
+
 	tradingStrategy, err := factory.createTradingStrategy(
 		conf,
 		currentPricer,
 		currentTrader,
-		provider,
+		currentKlineProvider,
 		decisionStore,
 	)
 	if err != nil {
