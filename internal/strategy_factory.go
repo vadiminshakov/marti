@@ -31,7 +31,7 @@ func (f *strategyFactory) createTradingStrategy(
 	conf config.Config,
 	pricer priceService,
 	tradeSvc traderService,
-	provider serviceProvider,
+	klineProvider klineService,
 	decisionStore aiDecisionWriter,
 ) (TradingStrategy, error) {
 	switch conf.StrategyType {
@@ -46,7 +46,7 @@ func (f *strategyFactory) createTradingStrategy(
 			conf.DcaPercentThresholdSell,
 		)
 	case "ai":
-		return f.createAIStrategy(conf, pricer, tradeSvc, provider, decisionStore)
+		return f.createAIStrategy(conf, pricer, tradeSvc, klineProvider, decisionStore)
 	default:
 		return nil, fmt.Errorf("unsupported strategy type: %s", conf.StrategyType)
 	}
@@ -84,7 +84,7 @@ func (f *strategyFactory) createAIStrategy(
 	conf config.Config,
 	pricer priceService,
 	tradeSvc traderService,
-	provider serviceProvider,
+	klineProvider klineService,
 	decisionStore aiDecisionWriter,
 ) (TradingStrategy, error) {
 	// create PromptBuilder
@@ -94,12 +94,6 @@ func (f *strategyFactory) createAIStrategy(
 	llmClient, err := clients.NewOpenAICompatibleClient(conf.LLMAPIURL, conf.LLMAPIKey, conf.Model, conf.LLMProxyURL, promptBuilder)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create LLM client")
-	}
-
-	// create kline provider using the provider
-	klineProvider, err := provider.KlineProvider()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create kline provider")
 	}
 
 	// create market data collector
