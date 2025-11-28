@@ -66,7 +66,7 @@ func (d *Decision) Validate() error {
 	}
 
 	// exit plan is required for opening positions (open_long, open_short)
-	if d.Action == "open_long" || d.Action == "open_short" {
+	if d.Action == actionStringOpenLong || d.Action == actionStringOpenShort {
 		if err := d.validateExitPlan(); err != nil {
 			return errors.Wrap(err, "exit plan validation error")
 		}
@@ -86,14 +86,7 @@ func (d *Decision) validateRequiredFields() error {
 }
 
 func (d *Decision) validateAction() error {
-	validActions := map[string]bool{
-		"hold":        true,
-		"open_long":   true,
-		"close_long":  true,
-		"open_short":  true,
-		"close_short": true,
-	}
-	if !validActions[d.Action] {
+	if !isValidActionString(d.Action) {
 		return fmt.Errorf("Invalid action: %s", d.Action)
 	}
 	return nil
@@ -122,11 +115,11 @@ func (d *Decision) validateExitPlan() error {
 	}
 
 	switch d.Action {
-	case "open_long":
+	case actionStringOpenLong:
 		if exitPlan.StopLossPrice >= exitPlan.TakeProfitPrice {
 			return errors.New("stop_loss_price must be less than take_profit_price for long positions")
 		}
-	case "open_short":
+	case actionStringOpenShort:
 		if exitPlan.StopLossPrice <= exitPlan.TakeProfitPrice {
 			return errors.New("stop_loss_price must be greater than take_profit_price for short positions")
 		}
@@ -138,17 +131,15 @@ func (d *Decision) validateExitPlan() error {
 // ToAction converts decision action string to typed Action.
 func (d *Decision) ToAction() Action {
 	switch d.Action {
-	case "open_long":
+	case actionStringOpenLong:
 		return ActionOpenLong
-	case "close_long":
+	case actionStringCloseLong:
 		return ActionCloseLong
-	case "open_short":
+	case actionStringOpenShort:
 		return ActionOpenShort
-	case "close_short":
+	case actionStringCloseShort:
 		return ActionCloseShort
-	case "hold":
-		return ActionNull
 	default:
-		return ActionNull
+		return ActionOpenLong // default fallback
 	}
 }

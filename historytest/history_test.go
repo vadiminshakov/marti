@@ -150,7 +150,7 @@ func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell fl
 			log.Debug(err)
 		}
 
-		if tradeEvent != nil && tradeEvent.Action != domain.ActionNull {
+		if tradeEvent != nil {
 			lastPriceBTC = tradeEvent.Price
 			log.Infof("Trade executed: %s at price %s, amount %s, current deals count: %d",
 				tradeEvent.Action, tradeEvent.Price, tradeEvent.Amount, trader.dealsCount)

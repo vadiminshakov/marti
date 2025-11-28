@@ -290,8 +290,6 @@ func (s *AIStrategy) executeDecision(
 		return s.executeEntry(ctx, domain.PositionSideShort, decision, snapshot, position)
 	case domain.ActionCloseShort:
 		return s.executeExit(ctx, domain.PositionSideShort, position, snapshot.Price())
-	case domain.ActionNull:
-		return nil, nil
 	default:
 		return nil, fmt.Errorf("unknown action: %v", action)
 	}
