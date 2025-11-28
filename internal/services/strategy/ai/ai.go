@@ -110,7 +110,7 @@ func (s *AIStrategy) Initialize(ctx context.Context) error {
 	return nil
 }
 
-// Trade performs one AI evaluation and potential action.
+// Trade performs one AI evaluation and action.
 func (s *AIStrategy) Trade(ctx context.Context) (*domain.TradeEvent, error) {
 	// collect market data and indicators
 	snapshot, position, err := s.gatherMarketData(ctx)
@@ -136,49 +136,71 @@ func (s *AIStrategy) Trade(ctx context.Context) (*domain.TradeEvent, error) {
 }
 
 func (s *AIStrategy) gatherMarketData(ctx context.Context) (domain.MarketSnapshot, *domain.Position, error) {
-	primaryFrame, err := s.marketData.FetchTimeframeData(ctx, s.primaryTimeframe, s.primaryLookback)
+	primaryFrame, err := s.fetchPrimaryTimeframe(ctx)
 	if err != nil {
-		return domain.MarketSnapshot{}, nil, errors.Wrap(err, "failed to get market data")
+		return domain.MarketSnapshot{}, nil, err
 	}
 
-	if primaryFrame == nil || len(primaryFrame.Candles) == 0 {
-		return domain.MarketSnapshot{}, nil, errors.New("insufficient market data")
-	}
+	higherTimeframeData := s.fetchHigherTimeframe(ctx)
 
-	if len(primaryFrame.Indicators) == 0 || primaryFrame.Summary == nil {
-		return domain.MarketSnapshot{}, nil, errors.New("insufficient indicator data for primary timeframe")
-	}
-
-	quoteBalance, err := s.trader.GetBalance(ctx, s.pair.To)
+	quoteBalance, position, err := s.fetchAccountState(ctx)
 	if err != nil {
-		return domain.MarketSnapshot{}, nil, errors.Wrap(err, "failed to get margin balance")
+		return domain.MarketSnapshot{}, nil, err
 	}
 
-	position, err := s.trader.GetPosition(ctx, s.pair)
-	if err != nil {
-		return domain.MarketSnapshot{}, nil, errors.Wrap(err, "failed to get position")
-	}
-
-	// fetch higher timeframe data for multi-timeframe analysis
-	higherTimeframeData, err := s.marketData.FetchTimeframeData(ctx, s.higherTimeframe, s.higherLookback)
-	if err != nil {
-		s.logger.Warn("Failed to get higher timeframe data, continuing without it",
-			zap.Error(err),
-			zap.String("timeframe", s.higherTimeframe))
-		higherTimeframeData = nil
-	}
-
-	// analyze volume patterns
 	volumeAnalysis := domain.NewVolumeAnalysis(primaryFrame.Candles)
 
 	snapshot := domain.MarketSnapshot{
 		PrimaryTimeFrame: primaryFrame,
+		HigherTimeFrame:  higherTimeframeData,
 		QuoteBalance:     quoteBalance,
 		VolumeAnalysis:   volumeAnalysis,
-		HigherTimeFrame:  higherTimeframeData,
 	}
 
 	return snapshot, position, nil
+}
+
+func (s *AIStrategy) fetchPrimaryTimeframe(ctx context.Context) (*domain.Timeframe, error) {
+	frame, err := s.marketData.FetchTimeframeData(ctx, s.primaryTimeframe, s.primaryLookback)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get market data")
+	}
+
+	if frame == nil || len(frame.Candles) == 0 {
+		return nil, errors.New("insufficient market data")
+	}
+
+	if len(frame.Indicators) == 0 || frame.Summary == nil {
+		return nil, errors.New("insufficient indicator data for primary timeframe")
+	}
+
+	return frame, nil
+}
+
+func (s *AIStrategy) fetchHigherTimeframe(ctx context.Context) *domain.Timeframe {
+	data, err := s.marketData.FetchTimeframeData(ctx, s.higherTimeframe, s.higherLookback)
+	if err != nil {
+		s.logger.Warn("Failed to get higher timeframe data, continuing without it",
+			zap.Error(err),
+			zap.String("timeframe", s.higherTimeframe))
+		return nil
+	}
+
+	return data
+}
+
+func (s *AIStrategy) fetchAccountState(ctx context.Context) (decimal.Decimal, *domain.Position, error) {
+	quoteBalance, err := s.trader.GetBalance(ctx, s.pair.To)
+	if err != nil {
+		return decimal.Zero, nil, errors.Wrap(err, "failed to get margin balance")
+	}
+
+	position, err := s.trader.GetPosition(ctx, s.pair)
+	if err != nil {
+		return decimal.Zero, nil, errors.Wrap(err, "failed to get position")
+	}
+
+	return quoteBalance, position, nil
 }
 
 func (s *AIStrategy) logMarketState(snapshot domain.MarketSnapshot, position *domain.Position) {
@@ -228,7 +250,8 @@ func (s *AIStrategy) getAndValidateDecision(
 		zap.String("reasoning", decision.Reasoning),
 	}
 
-	if decision.Action == "open_long" || decision.Action == "open_short" {
+	action := decision.ToAction()
+	if action == domain.ActionOpenLong || action == domain.ActionOpenShort {
 		decisionFields = append(decisionFields,
 			zap.Float64("risk_percent", decision.RiskPercent))
 	}
@@ -256,19 +279,21 @@ func (s *AIStrategy) executeDecision(
 	snapshot domain.MarketSnapshot,
 	position *domain.Position,
 ) (*domain.TradeEvent, error) {
-	switch decision.Action {
-	case "open_long":
+	action := decision.ToAction()
+
+	switch action {
+	case domain.ActionOpenLong:
 		return s.executeEntry(ctx, domain.PositionSideLong, decision, snapshot, position)
-	case "close_long":
+	case domain.ActionCloseLong:
 		return s.executeExit(ctx, domain.PositionSideLong, position, snapshot.Price())
-	case "open_short":
+	case domain.ActionOpenShort:
 		return s.executeEntry(ctx, domain.PositionSideShort, decision, snapshot, position)
-	case "close_short":
+	case domain.ActionCloseShort:
 		return s.executeExit(ctx, domain.PositionSideShort, position, snapshot.Price())
-	case "hold":
+	case domain.ActionNull:
 		return nil, nil
 	default:
-		return nil, fmt.Errorf("unknown action: %s", decision.Action)
+		return nil, fmt.Errorf("unknown action: %v", action)
 	}
 }
 
@@ -317,10 +342,7 @@ func (s *AIStrategy) executeEntry(
 		zap.String("position_value", positionValue.StringFixed(2)),
 		zap.String("order_id", orderID))
 
-	action := domain.ActionOpenLong
-	if side == domain.PositionSideShort {
-		action = domain.ActionOpenShort
-	}
+	action := decision.ToAction()
 
 	if err := s.trader.ExecuteAction(ctx, action, amount, orderID); err != nil {
 		return nil, errors.Wrapf(err, "failed to execute %s order", action)
@@ -378,8 +400,10 @@ func (s *AIStrategy) executeExit(
 		zap.String("amount", position.Amount.String()),
 		zap.String("order_id", orderID))
 
-	action := domain.ActionCloseLong
-	if side == domain.PositionSideShort {
+	var action domain.Action
+	if side == domain.PositionSideLong {
+		action = domain.ActionCloseLong
+	} else {
 		action = domain.ActionCloseShort
 	}
 
