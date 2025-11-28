@@ -62,11 +62,18 @@ type binanceProvider struct {
 }
 
 func (p *binanceProvider) Trader(pair entity.Pair, marketType entity.MarketType, leverage int, _ string) (traderService, error) {
-	return trader.NewBinanceTrader(p.client, pair, marketType, leverage)
+	t, err := trader.NewBinanceTrader(p.client, pair, marketType, leverage)
+	if err != nil {
+		return nil, fmt.Errorf("new binance trader: %w", err)
+	}
+
+	return t, nil
 }
+
 func (p *binanceProvider) Pricer() (priceService, error) {
 	return pricer.NewBinancePricer(p.client), nil
 }
+
 func (p *binanceProvider) KlineProvider() (klineService, error) {
 	return collector.NewBinanceKlineProvider(p.client), nil
 }
@@ -76,11 +83,18 @@ type bybitProvider struct {
 }
 
 func (p *bybitProvider) Trader(pair entity.Pair, marketType entity.MarketType, leverage int, _ string) (traderService, error) {
-	return trader.NewBybitTrader(p.client, pair, marketType, leverage)
+	t, err := trader.NewBybitTrader(p.client, pair, marketType, leverage)
+	if err != nil {
+		return nil, fmt.Errorf("new bybit trader: %w", err)
+	}
+
+	return t, nil
 }
+
 func (p *bybitProvider) Pricer() (priceService, error) {
 	return pricer.NewBybitPricer(p.client), nil
 }
+
 func (p *bybitProvider) KlineProvider() (klineService, error) {
 	return collector.NewBybitKlineProvider(p.client), nil
 }
@@ -96,15 +110,23 @@ func (p *simulateProvider) getPricer() priceService {
 	p.pricerOnce.Do(func() {
 		p.pricer = pricer.NewSimulatePricer(p.client.GetBinanceClient())
 	})
+
 	return p.pricer
 }
 
 func (p *simulateProvider) Trader(pair entity.Pair, marketType entity.MarketType, leverage int, stateKey string) (traderService, error) {
-	return trader.NewSimulateTrader(pair, marketType, leverage, p.logger, p.getPricer(), stateKey)
+	t, err := trader.NewSimulateTrader(pair, marketType, leverage, p.logger, p.getPricer(), stateKey)
+	if err != nil {
+		return nil, fmt.Errorf("new simulate trader: %w", err)
+	}
+
+	return t, nil
 }
+
 func (p *simulateProvider) Pricer() (priceService, error) {
 	return p.getPricer(), nil
 }
+
 func (p *simulateProvider) KlineProvider() (klineService, error) {
 	return collector.NewBinanceKlineProvider(p.client.GetBinanceClient()), nil
 }
@@ -114,11 +136,18 @@ type hyperliquidProvider struct {
 }
 
 func (p *hyperliquidProvider) Trader(pair entity.Pair, marketType entity.MarketType, leverage int, _ string) (traderService, error) {
-	return trader.NewHyperliquidTrader(p.client.Exchange(), p.client.AccountAddress(), pair, marketType, leverage)
+	t, err := trader.NewHyperliquidTrader(p.client.Exchange(), p.client.AccountAddress(), pair, marketType, leverage)
+	if err != nil {
+		return nil, fmt.Errorf("new hyperliquid trader: %w", err)
+	}
+
+	return t, nil
 }
+
 func (p *hyperliquidProvider) Pricer() (priceService, error) {
 	return pricer.NewHyperliquidPricer(p.client.Exchange().Info()), nil
 }
+
 func (p *hyperliquidProvider) KlineProvider() (klineService, error) {
 	return collector.NewHyperliquidKlineProvider(p.client.Exchange().Info()), nil
 }
