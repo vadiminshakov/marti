@@ -152,15 +152,3 @@ func (d *Decision) ToAction() Action {
 		return ActionNull
 	}
 }
-
-// ToPositionSide extracts position side from open action.
-func (d *Decision) ToPositionSide() (PositionSide, error) {
-	switch d.Action {
-	case "open_long", "close_long":
-		return PositionSideLong, nil
-	case "open_short", "close_short":
-		return PositionSideShort, nil
-	default:
-		return 0, fmt.Errorf("action %s does not define a position side", d.Action)
-	}
-}
