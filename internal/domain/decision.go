@@ -134,3 +134,33 @@ func (d *Decision) validateExitPlan() error {
 
 	return nil
 }
+
+// ToAction converts decision action string to typed Action.
+func (d *Decision) ToAction() Action {
+	switch d.Action {
+	case "open_long":
+		return ActionOpenLong
+	case "close_long":
+		return ActionCloseLong
+	case "open_short":
+		return ActionOpenShort
+	case "close_short":
+		return ActionCloseShort
+	case "hold":
+		return ActionNull
+	default:
+		return ActionNull
+	}
+}
+
+// ToPositionSide extracts position side from open action.
+func (d *Decision) ToPositionSide() (PositionSide, error) {
+	switch d.Action {
+	case "open_long", "close_long":
+		return PositionSideLong, nil
+	case "open_short", "close_short":
+		return PositionSideShort, nil
+	default:
+		return 0, fmt.Errorf("action %s does not define a position side", d.Action)
+	}
+}
