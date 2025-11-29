@@ -9,16 +9,11 @@ import (
 	hyperliquid "github.com/sonirico/go-hyperliquid"
 )
 
-// HyperliquidClient wraps the Hyperliquid exchange client and exposes
-// the derived account address for convenience.
 type HyperliquidClient struct {
 	exchange    *hyperliquid.Exchange
 	accountAddr string
 }
 
-// NewHyperliquidClient creates a new Hyperliquid client.
-// privateKeyHex must be a hex-encoded ECDSA private key (with or without 0x prefix).
-// baseURL can be empty to use the default mainnet API URL.
 func NewHyperliquidClient(privateKeyHex string, baseURL string) (*HyperliquidClient, error) {
 	key := privateKeyHex
 	// NewExchange accepts a *ecdsa.PrivateKey, derive account address from it.
@@ -38,7 +33,7 @@ func NewHyperliquidClient(privateKeyHex string, baseURL string) (*HyperliquidCli
 	}
 	accountAddr := crypto.PubkeyToAddress(*pubECDSA).Hex()
 
-	// Build exchange; Info and SpotMeta are fetched lazily by the SDK
+	// build exchange; Info and SpotMeta are fetched lazily by the SDK
 	ex := hyperliquid.NewExchange(
 		context.Background(),
 		privateKey,

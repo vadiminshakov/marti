@@ -23,9 +23,9 @@ const (
 	defaultMaxDelay   = 1 * time.Minute
 )
 
-// LLMClient defines the interface for interacting with LLM services
+// LLMClient interface for interacting with LLM services.
 type LLMClient interface {
-	// GetDecision sends market data to the LLM and returns a trading decision
+	// GetDecision sends market data to the LLM and returns a trading decision.
 	GetDecision(ctx context.Context, marketContext promptbuilder.MarketContext) (string, error)
 }
 
@@ -39,7 +39,7 @@ type OpenAICompatibleClient struct {
 	customHeaders map[string]string
 }
 
-// NewOpenAICompatibleClient creates a new client for OpenAI-compatible APIs
+// NewOpenAICompatibleClient creates a new client for OpenAI-compatible APIs.
 func NewOpenAICompatibleClient(apiURL, apiKey, model, proxyURL string, promptBuilder *promptbuilder.PromptBuilder) (*OpenAICompatibleClient, error) {
 	transport := &http.Transport{}
 	if proxyURL != "" {
@@ -73,7 +73,7 @@ func NewOpenAICompatibleClient(apiURL, apiKey, model, proxyURL string, promptBui
 	return client, nil
 }
 
-// setProviderSpecificHeaders configures provider-specific headers and settings
+// setProviderSpecificHeaders configures provider-specific headers.
 func (c *OpenAICompatibleClient) setProviderSpecificHeaders() {
 	if strings.Contains(c.apiURL, "yandex") || strings.Contains(c.apiURL, "yandex.net") {
 		// For Yandex GPT, extract folder ID from model name like "gpt://folder/model"
@@ -86,7 +86,7 @@ func (c *OpenAICompatibleClient) setProviderSpecificHeaders() {
 	}
 }
 
-// chatRequest represents the request structure for OpenAI-compatible APIs
+// chatRequest request structure for OpenAI-compatible APIs.
 type chatRequest struct {
 	Model       string    `json:"model"`
 	Messages    []message `json:"messages,omitempty"`
@@ -94,7 +94,7 @@ type chatRequest struct {
 	MaxTokens   int       `json:"max_tokens,omitempty"`
 }
 
-// yandexRequest represents the request structure for Yandex GPT API
+// yandexRequest request structure for Yandex GPT API.
 type yandexRequest struct {
 	Model           string  `json:"model"`
 	Instructions    string  `json:"instructions"`
@@ -108,7 +108,7 @@ type message struct {
 	Content string `json:"content"`
 }
 
-// chatResponse represents the response structure from OpenAI-compatible APIs
+// chatResponse response structure from OpenAI-compatible APIs.
 type chatResponse struct {
 	ID      string    `json:"id"`
 	Object  string    `json:"object"`
@@ -137,12 +137,12 @@ type apiError struct {
 	Code    string `json:"code"`
 }
 
-// isYandexAPI checks if the API endpoint is Yandex GPT
+// isYandexAPI checks if the API endpoint is Yandex GPT.
 func (c *OpenAICompatibleClient) isYandexAPI() bool {
 	return strings.Contains(c.apiURL, "yandex") || strings.Contains(c.apiURL, "yandex.net")
 }
 
-// GetDecision builds prompts, sends a chat request to the LLM API, and returns the response
+// GetDecision builds prompts, sends a chat request to the LLM API, and returns the response.
 func (c *OpenAICompatibleClient) GetDecision(ctx context.Context, marketContext promptbuilder.MarketContext) (string, error) {
 	if c.apiKey == "" {
 		return "", errors.New("LLM API key is empty")
@@ -158,7 +158,7 @@ func (c *OpenAICompatibleClient) GetDecision(ctx context.Context, marketContext 
 	})
 }
 
-// getOpenAIDecision handles standard OpenAI-compatible API requests
+// getOpenAIDecision handles standard OpenAI-compatible API requests.
 func (c *OpenAICompatibleClient) getOpenAIDecision(ctx context.Context, userPrompt string) (string, error) {
 	reqBody := chatRequest{
 		Model: c.model,
@@ -178,7 +178,7 @@ func (c *OpenAICompatibleClient) getOpenAIDecision(ctx context.Context, userProm
 	return c.sendRequest(ctx, reqBody)
 }
 
-// getYandexDecision handles Yandex GPT API requests
+// getYandexDecision handles Yandex GPT API requests.
 func (c *OpenAICompatibleClient) getYandexDecision(ctx context.Context, userPrompt string) (string, error) {
 	reqBody := yandexRequest{
 		Model:           c.model,
@@ -308,7 +308,7 @@ func (c *OpenAICompatibleClient) sendYandexRequest(ctx context.Context, reqBody 
 	return strings.TrimSpace(responseText), nil
 }
 
-// yandexResponse represents the response structure from Yandex GPT API
+// yandexResponse response structure from Yandex GPT API.
 type yandexResponse struct {
 	Output []struct {
 		Content []struct {
