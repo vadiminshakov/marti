@@ -8,22 +8,19 @@ const (
 	veryHighVolumeThreshold = 2.0
 )
 
-// VolumeAnalysis contains volume metrics and patterns identified in market data.
-// This is a value object representing statistical analysis of trading volume.
+// VolumeAnalysis volume metrics and patterns.
 type VolumeAnalysis struct {
-	// CurrentVolume is the volume of the most recent candle
+	// CurrentVolume volume of the most recent candle.
 	CurrentVolume decimal.Decimal
-	// AverageVolume is the 20-period simple moving average of volume
+	// AverageVolume 20-period simple moving average of volume.
 	AverageVolume decimal.Decimal
-	// RelativeVolume is the ratio of current volume to average (CurrentVolume / AverageVolume)
+	// RelativeVolume ratio of current volume to average.
 	RelativeVolume decimal.Decimal
-	// VolumeSpikes contains indices of candles where volume exceeded 1.5x average
+	// VolumeSpikes indices of candles where volume exceeded 1.5x average.
 	VolumeSpikes []int
 }
 
-// NewVolumeAnalysis creates a new VolumeAnalysis from market candles.
-// It calculates the average volume over the last 20 periods (or fewer if not enough data)
-// and identifies volume spikes where volume exceeds 1.5x the average.
+// NewVolumeAnalysis creates a new VolumeAnalysis.
 func NewVolumeAnalysis(candles []MarketCandle) VolumeAnalysis {
 	if len(candles) == 0 {
 		return VolumeAnalysis{
@@ -73,17 +70,17 @@ func NewVolumeAnalysis(candles []MarketCandle) VolumeAnalysis {
 	}
 }
 
-// HasSpike returns true if the current volume is significantly higher than average (>1.5x).
+// HasSpike returns true if the current volume is significantly higher than average.
 func (v VolumeAnalysis) HasSpike() bool {
 	return v.RelativeVolume.GreaterThan(decimal.NewFromFloat(volumeSpikeThreshold))
 }
 
-// IsHighVolume returns true if volume is notably elevated (>1.5x average).
+// IsHighVolume returns true if volume is notably elevated.
 func (v VolumeAnalysis) IsHighVolume() bool {
 	return v.RelativeVolume.GreaterThan(decimal.NewFromFloat(highVolumeThreshold))
 }
 
-// IsVeryHighVolume returns true if volume is exceptionally high (>2x average).
+// IsVeryHighVolume returns true if volume is exceptionally high.
 func (v VolumeAnalysis) IsVeryHighVolume() bool {
 	return v.RelativeVolume.GreaterThan(decimal.NewFromFloat(veryHighVolumeThreshold))
 }
@@ -93,7 +90,7 @@ func (v VolumeAnalysis) IsLowVolume() bool {
 	return v.RelativeVolume.LessThan(decimal.NewFromInt(1))
 }
 
-// HasRecentSpike returns true if there was a volume spike in the last n candles.
+// HasRecentSpike returns true if there was a volume spike.
 func (v VolumeAnalysis) HasRecentSpike(lastN int) bool {
 	if len(v.VolumeSpikes) == 0 {
 		return false

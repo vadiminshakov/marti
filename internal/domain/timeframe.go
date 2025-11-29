@@ -4,7 +4,7 @@ import (
 	"time"
 )
 
-// TrendDirection captures the qualitative direction of price action on a timeframe.
+// TrendDirection qualitative direction of price action.
 type TrendDirection string
 
 const (
@@ -13,7 +13,7 @@ const (
 	TrendDirectionNeutral TrendDirection = "neutral"
 )
 
-// Title returns a human-readable representation with capitalized first letter.
+// Title returns a human-readable representation.
 func (t TrendDirection) Title() string {
 	switch t {
 	case TrendDirectionBullish:
@@ -25,7 +25,7 @@ func (t TrendDirection) Title() string {
 	}
 }
 
-// TechnicalIndicators represents a snapshot of derived technical signals for a candle.
+// TechnicalIndicators snapshot of derived technical signals.
 type TechnicalIndicators struct {
 	EMA20 decimal.Decimal
 	EMA50 decimal.Decimal
@@ -36,7 +36,7 @@ type TechnicalIndicators struct {
 	ATR14 decimal.Decimal
 }
 
-// MarketCandle represents a single OHLCV candlestick.
+// MarketCandle single OHLCV candlestick.
 type MarketCandle struct {
 	OpenTime  time.Time
 	Open      decimal.Decimal
@@ -47,7 +47,7 @@ type MarketCandle struct {
 	CloseTime time.Time
 }
 
-// TimeframeSummary aggregates headline metrics for a timeframe.
+// TimeframeSummary headline metrics for a timeframe.
 type TimeframeSummary struct {
 	Interval string
 	Price    decimal.Decimal
@@ -57,7 +57,7 @@ type TimeframeSummary struct {
 	Trend    TrendDirection
 }
 
-// Timeframe contains candlestick and indicator data for a specific interval.
+// Timeframe candlestick and indicator data.
 type Timeframe struct {
 	Interval        string
 	Candles         []MarketCandle
@@ -66,7 +66,7 @@ type Timeframe struct {
 	Summary         *TimeframeSummary
 }
 
-// NewTimeframe constructs a Timeframe entity and derives its summary.
+// NewTimeframe constructs a Timeframe.
 func NewTimeframe(interval string, candles []MarketCandle, indicators []TechnicalIndicators) *Timeframe {
 	offset := 0
 	if len(candles) > len(indicators) {
@@ -85,7 +85,7 @@ func NewTimeframe(interval string, candles []MarketCandle, indicators []Technica
 	return tf
 }
 
-// IndicatorForCandle returns indicator values aligned with the candle index.
+// IndicatorForCandle returns indicator values.
 func (t *Timeframe) IndicatorForCandle(candleIdx int) (TechnicalIndicators, bool) {
 	index, ok := t.indicatorIndexForCandle(candleIdx)
 	if !ok {
@@ -102,7 +102,7 @@ func (t *Timeframe) LatestCandle() (MarketCandle, bool) {
 	return t.Candles[len(t.Candles)-1], true
 }
 
-// LatestIndicator returns the indicator values aligned with the most recent candle.
+// LatestIndicator returns the indicator values.
 func (t *Timeframe) LatestIndicator() (TechnicalIndicators, bool) {
 	if t == nil || len(t.Candles) == 0 {
 		return TechnicalIndicators{}, false
@@ -110,7 +110,7 @@ func (t *Timeframe) LatestIndicator() (TechnicalIndicators, bool) {
 	return t.IndicatorForCandle(len(t.Candles) - 1)
 }
 
-// LatestPrice returns the close price of the most recent candle.
+// LatestPrice returns the close price.
 func (t *Timeframe) LatestPrice() (decimal.Decimal, bool) {
 	candle, ok := t.LatestCandle()
 	if !ok {

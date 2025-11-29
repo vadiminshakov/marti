@@ -216,16 +216,16 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 		}
 	}
 
-	err = b.balanceStore.Save(entity.BalanceSnapshot{
-		Timestamp:  time.Now().UTC(),
-		Pair:       b.Config.Pair.String(),
-		Model:      entity.NormalizeModelName(b.Config.Model),
-		Base:       base.String(),
-		Quote:      quote.String(),
-		TotalQuote: total.StringFixed(2),
-		Price:      price.String(),
-		Position:   activePosition,
-	})
+	err = b.balanceStore.Save(entity.NewBalanceSnapshot(
+		time.Now().UTC(),
+		b.Config.Pair.String(),
+		b.Config.Model,
+		base.String(),
+		quote.String(),
+		total.StringFixed(2),
+		price.String(),
+		activePosition,
+	))
 
 	return errors.Wrap(err, "failed to save balance snapshot")
 }

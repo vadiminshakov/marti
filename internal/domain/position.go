@@ -16,7 +16,7 @@ const (
 	PositionSideShort
 )
 
-// Position represents an open trading position tracked in memory.
+// Position open trading position.
 type Position struct {
 	EntryPrice   decimal.Decimal
 	Amount       decimal.Decimal
@@ -27,7 +27,7 @@ type Position struct {
 	Side         PositionSide // Long or Short
 }
 
-// NewPosition constructs a position opened by the strategy.
+// NewPosition constructs a position.
 func NewPosition(amount, entryPrice decimal.Decimal, entryTime time.Time, exit ExitPlan, side PositionSide) (*Position, error) {
 	if amount.LessThanOrEqual(decimal.Zero) {
 		return nil, errors.New("position amount must be greater than zero")
@@ -47,7 +47,7 @@ func NewPosition(amount, entryPrice decimal.Decimal, entryTime time.Time, exit E
 	}, nil
 }
 
-// NewPositionFromExternalSnapshot builds an in-memory position based on external (exchange) balance snapshot.
+// NewPositionFromExternalSnapshot builds an in-memory position.
 func NewPositionFromExternalSnapshot(amount, entryPrice decimal.Decimal, entryTime time.Time, side PositionSide) (*Position, error) {
 	if amount.LessThanOrEqual(decimal.Zero) {
 		return nil, errors.New("position amount must be greater than zero")
@@ -64,8 +64,7 @@ func NewPositionFromExternalSnapshot(amount, entryPrice decimal.Decimal, entryTi
 	}, nil
 }
 
-// UpdateAmount synchronises the tracked position size with the actual balance.
-// Returns true when amount changed.
+// UpdateAmount synchronises the tracked position size.
 func (p *Position) UpdateAmount(amount decimal.Decimal) bool {
 	if p == nil {
 		return false
@@ -81,7 +80,7 @@ func (p *Position) UpdateAmount(amount decimal.Decimal) bool {
 	return true
 }
 
-// PnL calculates profit and loss for the given market price.
+// PnL calculates profit and loss.
 func (p *Position) PnL(currentPrice decimal.Decimal) decimal.Decimal {
 	if p == nil {
 		return decimal.Zero
@@ -95,12 +94,12 @@ func (p *Position) PnL(currentPrice decimal.Decimal) decimal.Decimal {
 	return currentPrice.Sub(p.EntryPrice).Mul(p.Amount)
 }
 
-// IsPositive returns true if the position is open and has a positive amount.
+// IsPositive returns true if the position is open.
 func (p *Position) IsPositive() bool {
 	return p != nil && p.Amount.IsPositive()
 }
 
-// CalculateTotalEquity calculates the total equity including collateral and PnL.
+// CalculateTotalEquity calculates the total equity.
 func (p *Position) CalculateTotalEquity(currentPrice decimal.Decimal, baseBalance, quoteBalance decimal.Decimal, leverage int) decimal.Decimal {
 	if p == nil || !p.IsPositive() {
 		return quoteBalance.Add(baseBalance.Mul(currentPrice))

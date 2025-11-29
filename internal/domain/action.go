@@ -1,6 +1,6 @@
 package domain
 
-// Action represents the type of trading action to be performed.
+// Action type of trading action to be performed.
 type Action int
 
 const (
@@ -10,7 +10,7 @@ const (
 	ActionCloseShort
 )
 
-// action string constants to avoid magic strings
+// action string constants.
 const (
 	actionStringOpenLong   = "open_long"
 	actionStringCloseLong  = "close_long"
@@ -18,7 +18,7 @@ const (
 	actionStringCloseShort = "close_short"
 )
 
-// isValidActionString checks if the string is a valid action
+// isValidActionString checks if the string is a valid action.
 func isValidActionString(s string) bool {
 	switch s {
 	case actionStringOpenLong, actionStringCloseLong,
@@ -28,7 +28,7 @@ func isValidActionString(s string) bool {
 	return false
 }
 
-// String returns the string representation of the action
+// String returns the string representation of the action.
 func (a Action) String() string {
 	switch a {
 	case ActionOpenLong:

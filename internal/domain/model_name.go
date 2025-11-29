@@ -2,9 +2,8 @@ package domain
 
 import "strings"
 
-// NormalizeModelName removes the gpt://folder_id/ prefix pattern from model names.
-// For example: "gpt://b1g8t5pmnjifaov0paff/yandexgpt/rc" becomes "yandexgpt"
-func NormalizeModelName(model string) string {
+// normalizeModelName removes the gpt://folder_id/ prefix pattern.
+func normalizeModelName(model string) string {
 	normalizedModel := model
 	if idx := strings.Index(normalizedModel, "gpt://"); idx >= 0 {
 		remainder := normalizedModel[idx+6:] // skip "gpt://"

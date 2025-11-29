@@ -2,21 +2,19 @@ package domain
 
 import "github.com/shopspring/decimal"
 
-// MarketSnapshot aggregates relevant market data for a single trading decision cycle.
-// This is a value object that represents a complete view of market conditions at a point in time.
+// MarketSnapshot market data for a single trading decision cycle.
 type MarketSnapshot struct {
-	// PrimaryTimeFrame contains candle and indicator data for the main trading timeframe
+	// PrimaryTimeFrame candle and indicator data for the main trading timeframe.
 	PrimaryTimeFrame *Timeframe
-	// HigherTimeFrame contains candle and indicator data for broader market context
+	// HigherTimeFrame candle and indicator data for broader market context.
 	HigherTimeFrame *Timeframe
-	// QuoteBalance is the available balance in quote currency for trading
+	// QuoteBalance available balance in quote currency.
 	QuoteBalance decimal.Decimal
-	// VolumeAnalysis contains volume metrics and patterns
+	// VolumeAnalysis volume metrics and patterns.
 	VolumeAnalysis VolumeAnalysis
 }
 
-// Price returns the latest close price of the primary timeframe if available.
-// Returns zero if no price data is available.
+// Price returns the latest close price.
 func (s MarketSnapshot) Price() decimal.Decimal {
 	if s.PrimaryTimeFrame == nil {
 		return decimal.Zero

@@ -2,17 +2,17 @@ package domain
 
 import "github.com/shopspring/decimal"
 
-// RiskBudget encapsulates risk-based allocation logic.
+// RiskBudget risk-based allocation logic.
 type RiskBudget struct {
 	percent float64
 }
 
-// NewRiskBudget returns a risk budget configured with a desired percentage.
+// NewRiskBudget returns a risk budget.
 func NewRiskBudget(percent float64) RiskBudget {
 	return RiskBudget{percent: percent}
 }
 
-// Allocate calculates both position value in quote currency and base asset size.
+// Allocate calculates position value and base asset size.
 func (r RiskBudget) Allocate(balance, price decimal.Decimal) (positionValue decimal.Decimal, amount decimal.Decimal) {
 	if r.percent <= 0 {
 		return decimal.Zero, decimal.Zero

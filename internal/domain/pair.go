@@ -3,23 +3,20 @@ package domain
 
 import "fmt"
 
-// Pair represents a cryptocurrency trading pair consisting of two currencies.
-// For example, BTC/USDT where BTC is the base currency (From) and USDT is the quote currency (To).
+// Pair cryptocurrency trading pair.
 type Pair struct {
-	// From represents the base currency symbol (e.g., "BTC")
+	// From base currency symbol.
 	From string
-	// To represents the quote currency symbol (e.g., "USDT")
+	// To quote currency symbol.
 	To string
 }
 
-// String returns the string representation of the trading pair in "FROM_TO" format.
-// For example, "BTC_USDT".
+// String returns the string representation.
 func (p *Pair) String() string {
 	return fmt.Sprintf("%s_%s", p.From, p.To)
 }
 
-// Symbol returns the concatenated symbol representation without separator.
-// For example, "BTCUSDT". This format is commonly used by exchange APIs.
+// Symbol returns the concatenated symbol representation.
 func (p *Pair) Symbol() string {
 	return fmt.Sprintf("%s%s", p.From, p.To)
 }

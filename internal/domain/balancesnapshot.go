@@ -2,8 +2,7 @@ package domain
 
 import "time"
 
-// BalanceSnapshot represents wallet state for a trading pair.
-// String fields avoid precision issues when rendered in UI layers.
+// BalanceSnapshot wallet state for a trading pair.
 type BalanceSnapshot struct {
 	Timestamp  time.Time `json:"ts"`
 	Pair       string    `json:"pair"`
@@ -15,7 +14,30 @@ type BalanceSnapshot struct {
 	Position   string    `json:"position,omitempty"`
 }
 
-// BalanceSnapshotRecord bundles a snapshot with the log index it originated from.
+// NewBalanceSnapshot creates a new BalanceSnapshot.
+func NewBalanceSnapshot(
+	timestamp time.Time,
+	pair string,
+	model string,
+	base string,
+	quote string,
+	totalQuote string,
+	price string,
+	position string,
+) BalanceSnapshot {
+	return BalanceSnapshot{
+		Timestamp:  timestamp,
+		Pair:       pair,
+		Model:      normalizeModelName(model),
+		Base:       base,
+		Quote:      quote,
+		TotalQuote: totalQuote,
+		Price:      price,
+		Position:   position,
+	}
+}
+
+// BalanceSnapshotRecord bundles a snapshot.
 type BalanceSnapshotRecord struct {
 	Index    uint64
 	Snapshot BalanceSnapshot

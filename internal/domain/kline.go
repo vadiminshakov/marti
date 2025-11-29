@@ -1,30 +1,28 @@
 package domain
 import "github.com/shopspring/decimal"
 
-// Kliner defines the interface for accessing kline (candlestick) price data.
-// Implementations should provide access to open and close prices.
+// Kliner interface for accessing kline price data.
 type Kliner interface {
-	// OpenPrice returns the opening price of the kline period
+	// OpenPrice returns the opening price.
 	OpenPrice() decimal.Decimal
-	// ClosePrice returns the closing price of the kline period
+	// ClosePrice returns the closing price.
 	ClosePrice() decimal.Decimal
 }
 
-// Kline represents a candlestick data point with open and close prices.
-// This is a simplified version focusing on the essential price data needed for trading decisions.
+// Kline candlestick data point.
 type Kline struct {
-	// Open is the opening price of the kline period
+	// Open is the opening price.
 	Open decimal.Decimal
-	// Close is the closing price of the kline period
+	// Close is the closing price.
 	Close decimal.Decimal
 }
 
-// OpenPrice returns the opening price of the kline period.
+// OpenPrice returns the opening price.
 func (k *Kline) OpenPrice() decimal.Decimal {
 	return k.Open
 }
 
-// ClosePrice returns the closing price of the kline period.
+// ClosePrice returns the closing price.
 func (k *Kline) ClosePrice() decimal.Decimal {
 	return k.Close
 }

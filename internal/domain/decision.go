@@ -8,7 +8,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Decision represents the AI's trading decision.
+// Decision AI's trading decision.
 type Decision struct {
 	Action      string   `json:"action"`
 	RiskPercent float64  `json:"risk_percent"`
@@ -16,14 +16,14 @@ type Decision struct {
 	ExitPlan    ExitPlan `json:"exit_plan"`
 }
 
-// ExitPlan defines exit strategy for a trade.
+// ExitPlan exit strategy for a trade.
 type ExitPlan struct {
 	StopLossPrice         float64 `json:"stop_loss_price"`
 	TakeProfitPrice       float64 `json:"take_profit_price"`
 	InvalidationCondition string  `json:"invalidation_condition"`
 }
 
-// NewDecision builds a validated trading decision from raw LLM response.
+// NewDecision builds a validated trading decision.
 func NewDecision(raw string) (*Decision, error) {
 	response := sanitizeDecisionPayload(raw)
 
@@ -51,7 +51,7 @@ func sanitizeDecisionPayload(raw string) string {
 	return strings.TrimSpace(response)
 }
 
-// Validate checks if the decision is valid.
+// Validate validates the decision.
 func (d *Decision) Validate() error {
 	if err := d.validateRequiredFields(); err != nil {
 		return errors.Wrap(err, "missing required fields")

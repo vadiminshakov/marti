@@ -4,8 +4,7 @@ import (
 	"time"
 )
 
-// AIDecisionEvent represents a trading decision made by AI for a trading pair.
-// String fields avoid precision issues when rendered in UI layers.
+// AIDecisionEvent trading decision made by AI.
 type AIDecisionEvent struct {
 	Timestamp             time.Time `json:"ts"`
 	Pair                  string    `json:"pair"`
@@ -23,8 +22,7 @@ type AIDecisionEvent struct {
 	PositionEntryPrice    string    `json:"position_entry_price,omitempty"`
 }
 
-// NewAIDecisionEvent creates a new AIDecisionEvent with normalized model name.
-// It removes the gpt://folder_id/ prefix pattern from the model field.
+// NewAIDecisionEvent creates a new AIDecisionEvent.
 func NewAIDecisionEvent(
 	timestamp time.Time,
 	pair string,
@@ -42,7 +40,7 @@ func NewAIDecisionEvent(
 	positionEntryPrice string,
 ) AIDecisionEvent {
 	// normalize model name by removing gpt://folder_id/ prefix
-	normalizedModel := NormalizeModelName(model)
+	normalizedModel := normalizeModelName(model)
 
 	return AIDecisionEvent{
 		Timestamp:             timestamp,
@@ -62,7 +60,7 @@ func NewAIDecisionEvent(
 	}
 }
 
-// AIDecisionEventRecord bundles an AI decision event with the log index it originated from.
+// AIDecisionEventRecord bundles an AI decision event.
 type AIDecisionEventRecord struct {
 	Index uint64
 	Event AIDecisionEvent

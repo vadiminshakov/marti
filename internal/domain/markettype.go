@@ -1,19 +1,17 @@
-// Package entity defines core data structures used throughout the trading bot.
+// Package domain defines core data structures used throughout the trading bot.
 package domain
 
-// MarketType represents the type of market for trading (spot or margin).
+// MarketType type of market for trading.
 type MarketType string
 
 const (
-	// MarketTypeSpot represents spot trading where assets are bought and sold for immediate delivery.
+	// MarketTypeSpot spot trading.
 	MarketTypeSpot MarketType = "spot"
-	// MarketTypeMargin represents margin trading with leverage.
-	// For Binance: uses margin account with borrowed funds.
-	// For Bybit: uses linear perpetual contracts (USDT-margined futures).
+	// MarketTypeMargin margin trading.
 	MarketTypeMargin MarketType = "margin"
 )
 
-// String returns the string representation of the MarketType.
+// String returns the string representation.
 func (m MarketType) String() string {
 	return string(m)
 }
