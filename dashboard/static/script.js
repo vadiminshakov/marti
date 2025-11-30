@@ -32,10 +32,8 @@ const extractQuoteCurrency = (pair) => {
 
 const shortenModelName = (model) => {
   if (!model || typeof model !== 'string') { return '—'; }
-  // Handle gpt:// URIs specifically
   if (model.startsWith('gpt://')) {
     const parts = model.replace('gpt://', '').split('/');
-    // Return the part after the folder ID (e.g. yandexgpt from gpt://folder/yandexgpt/rc)
     if (parts.length > 1) {
       return parts[1];
     }
@@ -48,7 +46,6 @@ Chart.defaults.font.family = "'Space Mono', 'JetBrains Mono', monospace";
 Chart.defaults.font.size = 11;
 Chart.defaults.color = '#111111';
 
-// Helper function to convert hex to RGB
 function hexToRgb(hex) {
   const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
   return result ? {
@@ -58,7 +55,6 @@ function hexToRgb(hex) {
   } : { r: 0, g: 0, b: 0 };
 }
 
-// Helper function to calculate distance from point to line segment
 function distanceToLineSegment(px, py, x1, y1, x2, y2) {
   const dx = x2 - x1;
   const dy = y2 - y1;
@@ -106,9 +102,8 @@ function loadLogos() {
     img.src = filename;
     img.onload = () => {
       chartLogos[key] = img;
-      legendLogos[key] = resizeImage(img, 18); // Heavily reduced size for legend
+      legendLogos[key] = resizeImage(img, 18);
 
-      // Update existing datasets
       if (datasetByPair) {
         datasetByPair.forEach((dataset) => {
           const modelKey = (dataset.modelKey || '').toLowerCase();
@@ -258,7 +253,6 @@ const buildGlobalChart = (ctx) => {
         const chart = event.chart;
         const canvasPosition = Chart.helpers.getRelativePosition(event, chart);
 
-        // Find which dataset line is being hovered based on proximity to line segments
         const newHoveredIndex = findHoveredDataset(chart, canvasPosition);
 
         if (newHoveredIndex !== hoveredDatasetIndex) {
@@ -286,8 +280,8 @@ const buildGlobalChart = (ctx) => {
 
         legend: { display: true, labels: { usePointStyle: true, boxWidth: 20, font: { size: 10 } } },
         tooltip: {
-          enabled: false, // Disable tooltip rendering
-          external: () => { }, // Ensure no external tooltip is triggered
+          enabled: false,
+          external: () => { },
           backgroundColor: 'rgba(255, 255, 255, 0.95)',
           borderColor: 'rgba(0, 0, 0, 0.1)',
           borderWidth: 1,
@@ -318,14 +312,12 @@ const buildGlobalChart = (ctx) => {
       afterDraw: (chart) => {
         const ctx = chart.ctx;
 
-        // Get hovered dataset index from the chart instance
         const hoveredIndex = chart.hoveredDatasetIndex;
 
         chart.data.datasets.forEach((dataset, i) => {
           const meta = chart.getDatasetMeta(i);
           if (meta.hidden) return;
 
-          // Find the last non-null data point
           let lastIndex = -1;
           for (let j = dataset.data.length - 1; j >= 0; j--) {
             if (dataset.data[j] !== null && dataset.data[j] !== undefined) {
@@ -341,10 +333,8 @@ const buildGlobalChart = (ctx) => {
 
           const { x, y } = point;
 
-          // Skip if coordinates are invalid
           if (!isFinite(x) || !isFinite(y)) return;
 
-          // Determine which logo to use based on dataset label or internal model key
           let logoImg = null;
           const modelKey = dataset.modelKey ? dataset.modelKey.toLowerCase() : '';
 
@@ -365,7 +355,6 @@ const buildGlobalChart = (ctx) => {
           const logoX = x - size / 2;
           const logoY = y - size / 2;
 
-          // Determine opacity based on hover state
           let opacity = 1.0;
           let isHovered = false;
           if (hoveredIndex !== null && hoveredIndex !== undefined) {
@@ -373,7 +362,6 @@ const buildGlobalChart = (ctx) => {
             isHovered = i === hoveredIndex;
           }
 
-          // Apply glow if hovered
           if (isHovered) {
             ctx.shadowColor = dataset.borderColor;
             ctx.shadowBlur = 20;
@@ -382,12 +370,10 @@ const buildGlobalChart = (ctx) => {
           }
 
           if (logoImg && logoImg.complete && logoImg.naturalHeight !== 0) {
-            // Draw logo with appropriate opacity
             ctx.globalAlpha = opacity;
             ctx.imageSmoothingEnabled = true;
             ctx.drawImage(logoImg, logoX, logoY, size, size);
           } else {
-            // Draw bold dot as fallback
             ctx.globalAlpha = opacity;
             ctx.beginPath();
             ctx.arc(x, y, 4, 0, 2 * Math.PI);
@@ -410,7 +396,6 @@ const globalChart = buildGlobalChart(chartCtx);
 
 chartCanvas.addEventListener('mouseleave', () => {
   if (globalChart && typeof globalChart.applyHoverStyles === 'function') {
-    // Reset highlighting when the cursor leaves the chart area
     globalChart.applyHoverStyles(null);
   }
 });
@@ -435,7 +420,7 @@ const nextColor = () => {
 
 function createGradient(ctx, color) {
   const gradient = ctx.createLinearGradient(0, 0, 0, 640);
-  gradient.addColorStop(0, color.replace('0.15)', '0.1)').replace('0.12)', '0.1)').replace('0.18)', '0.1)')); // Lighter fill
+  gradient.addColorStop(0, color.replace('0.15)', '0.1)').replace('0.12)', '0.1)').replace('0.18)', '0.1)'));
   gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
   return gradient;
 }
@@ -663,7 +648,6 @@ function connectSSE() {
 
 connectSSE();
 
-// AI Decisions Stream
 const aiDecisionsContainer = document.getElementById('aiDecisions');
 const modelFiltersContainer = document.getElementById('modelFilters');
 const MAX_DECISIONS = 1000;
@@ -676,12 +660,11 @@ const knownModels = [
 
 function filterDecisions(model) {
   if (currentFilter === model) {
-    currentFilter = null; // Toggle off
+    currentFilter = null;
   } else {
     currentFilter = model;
   }
 
-  // Update buttons
   const buttons = modelFiltersContainer.querySelectorAll('.filter-btn');
   buttons.forEach(btn => {
     if (btn.dataset.model === currentFilter) {
@@ -691,7 +674,6 @@ function filterDecisions(model) {
     }
   });
 
-  // Filter existing cards
   const cards = aiDecisionsContainer.querySelectorAll('.ai-decision-card');
   const filterTerm = currentFilter === 'xai' ? 'x-ai' : currentFilter;
   cards.forEach(card => {
@@ -730,12 +712,10 @@ function createDecisionCard(decision) {
   const card = document.createElement('div');
   card.className = 'ai-decision-card';
 
-  // Store model for filtering
   if (decision.model) {
     card.dataset.model = normalizeModel(decision.model).toLowerCase();
   }
 
-  // Apply initial filter state
   if (currentFilter && card.dataset.model) {
     const filterTerm = currentFilter === 'xai' ? 'x-ai' : currentFilter;
     if (!card.dataset.model.includes(filterTerm)) {
@@ -775,7 +755,6 @@ function createDecisionCard(decision) {
     positionSide.style.display = 'inline-block';
     positionSide.style.padding = '.3rem .6rem';
 
-    // Normalize position text and set border color
     const positionText = decision.position_side.toLowerCase().includes('short') ? 'short' : 'long';
     const borderColor = positionText === 'short' ? '#d7263d' : '#1b9aaa';
 
@@ -853,7 +832,6 @@ function connectAIDecisionSSE() {
       const card = createDecisionCard(decision);
       aiDecisionsContainer.insertBefore(card, aiDecisionsContainer.firstChild);
 
-      // Limit number of displayed decisions
       while (aiDecisionsContainer.children.length > MAX_DECISIONS) {
         aiDecisionsContainer.removeChild(aiDecisionsContainer.lastChild);
       }

@@ -18,13 +18,13 @@ const (
 	aiDecisionKeyPrefix    = "ai_decision_"
 )
 
-// WALStore persists AI decision events in a WAL for recovery/streaming purposes.
+// WALStore persists AI decision events in a WAL.
 type WALStore struct {
 	wal *gowal.Wal
 	mu  sync.RWMutex
 }
 
-// NewWALStore initializes a WAL-backed AI decision store under the provided directory.
+// NewWALStore initializes a WAL-backed AI decision store.
 func NewWALStore(dir string) (*WALStore, error) {
 	if dir == "" {
 		dir = defaultAIDecisionDir
@@ -46,7 +46,7 @@ func NewWALStore(dir string) (*WALStore, error) {
 	return &WALStore{wal: wal}, nil
 }
 
-// Save writes the AI decision event to WAL. Callers must ensure event.Pair is set.
+// Save writes the AI decision event to WAL.
 func (s *WALStore) Save(event domain.AIDecisionEvent) error {
 	if s == nil || s.wal == nil {
 		return errors.New("AI decision store is not initialized")

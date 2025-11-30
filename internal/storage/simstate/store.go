@@ -15,7 +15,7 @@ import (
 
 const defaultStateDir = "./wal/simulate"
 
-// Store persists simulator state per trading pair so restarts keep balances and open positions.
+// Store persists simulator state per trading pair.
 type Store struct {
 	path string
 }
@@ -27,7 +27,7 @@ func getStateDir() string {
 	return defaultStateDir
 }
 
-// NewStore creates a simulator state store for the given pair.
+// NewStore creates a simulator state store.
 func NewStore(pair domain.Pair, scope string) (*Store, error) {
 	stateDir := getStateDir()
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
@@ -90,7 +90,7 @@ func (s *Store) Load() (*State, error) {
 	return &state, nil
 }
 
-// Save writes simulator state to disk atomically via temp file.
+// Save writes simulator state to disk.
 func (s *Store) Save(state State) error {
 	if s == nil || s.path == "" {
 		return nil

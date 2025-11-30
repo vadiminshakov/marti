@@ -94,7 +94,7 @@ func (s *Server) StartWithAutoTLS(ctx context.Context, domains []string, cacheDi
 		Cache:      autocert.DirCache(cacheDir),
 	}
 
-	// hTTP server on port 80 for ACME challenges and HTTP->HTTPS redirects.
+	// HTTP server on port 80 for ACME challenges and HTTP->HTTPS redirects.
 	httpSrv := &http.Server{
 		Addr:              ":80",
 		Handler:           manager.HTTPHandler(nil),
@@ -102,7 +102,7 @@ func (s *Server) StartWithAutoTLS(ctx context.Context, domains []string, cacheDi
 		IdleTimeout:       120 * time.Second,
 	}
 
-	// hTTPS server serving the dashboard with automatic certificates.
+	// HTTPS server serving the dashboard with automatic certificates.
 	tlsConfig := manager.TLSConfig()
 	tlsConfig.MinVersion = tls.VersionTLS12
 

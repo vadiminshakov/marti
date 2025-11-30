@@ -18,13 +18,13 @@ const (
 	snapshotKeyPrefix    = "balance_snapshot_"
 )
 
-// WALStore persists balance snapshots in a WAL for recovery/streaming purposes.
+// WALStore persists balance snapshots in a WAL.
 type WALStore struct {
 	wal *gowal.Wal
 	mu  sync.RWMutex
 }
 
-// NewWALStore initializes a WAL-backed snapshot store under the provided directory.
+// NewWALStore initializes a WAL-backed snapshot store.
 func NewWALStore(dir string) (*WALStore, error) {
 	if dir == "" {
 		dir = defaultSnapshotDir
@@ -46,7 +46,7 @@ func NewWALStore(dir string) (*WALStore, error) {
 	return &WALStore{wal: wal}, nil
 }
 
-// Save writes the snapshot to WAL. Callers must ensure snapshot.Pair is set.
+// Save writes the snapshot to WAL.
 func (s *WALStore) Save(snapshot domain.BalanceSnapshot) error {
 	if s == nil || s.wal == nil {
 		return errors.New("balance snapshot store is not initialized")

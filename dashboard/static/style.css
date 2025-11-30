@@ -316,7 +316,6 @@ header {
   overflow-y: auto;
   flex: 1;
   padding-right: 4px;
-  /* Prevent scrollbar from overlapping content slightly */
 }
 
 #aiDecisions::-webkit-scrollbar {
