@@ -21,7 +21,7 @@ func NewBinanceKlineProvider(client *binance.Client) *BinanceKlineProvider {
 	return &BinanceKlineProvider{client: client}
 }
 
-// GetKlines fetches kline data from Binance.
+// GetKlines fetches kline data.
 func (p *BinanceKlineProvider) GetKlines(ctx context.Context, pair domain.Pair, interval string, limit int) ([]domain.MarketCandle, error) {
 	symbol := pair.Symbol()
 

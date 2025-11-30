@@ -11,7 +11,7 @@ import (
 
 const minCandlesForIndicators = 50
 
-// klineProvider defines the interface for fetching historical candles inside the package.
+// klineProvider defines the interface for fetching historical candles.
 type klineProvider interface {
 	GetKlines(ctx context.Context, pair domain.Pair, interval string, limit int) ([]domain.MarketCandle, error)
 }
@@ -30,7 +30,7 @@ func NewMarketDataCollector(provider klineProvider, pair domain.Pair) *MarketDat
 	}
 }
 
-// FetchTimeframeData fetches raw candles and derives indicator values for the requested timeframe.
+// FetchTimeframeData fetches raw candles and derives indicator values.
 func (c *MarketDataCollector) FetchTimeframeData(
 	ctx context.Context,
 	interval string,

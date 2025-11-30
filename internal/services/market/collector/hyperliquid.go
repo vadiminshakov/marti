@@ -51,7 +51,7 @@ func parseIntervalToDuration(interval string) (time.Duration, error) {
 	}
 }
 
-// GetKlines fetches kline data from Hyperliquid.
+// GetKlines fetches kline data.
 func (p *HyperliquidKlineProvider) GetKlines(ctx context.Context, pair domain.Pair, interval string, limit int) ([]domain.MarketCandle, error) {
 	if p.info == nil {
 		return nil, fmt.Errorf("hyperliquid info is nil")

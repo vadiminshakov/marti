@@ -9,7 +9,7 @@ import (
 	"github.com/vadiminshakov/marti/internal/domain"
 )
 
-// HyperliquidPricer fetches prices from Hyperliquid public Info API
+// HyperliquidPricer fetches prices from Hyperliquid public Info API.
 type HyperliquidPricer struct {
 	info *hyperliquid.Info
 }

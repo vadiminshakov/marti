@@ -1,6 +1,4 @@
 // Package promptbuilder provides optimized prompt generation for AI trading decisions.
-// It formats market data, technical indicators, and position information into
-// token-efficient prompts for LLM consumption.
 package promptbuilder
 
 import (
@@ -13,13 +11,13 @@ import (
 	"go.uber.org/zap"
 )
 
-// PromptBuilder constructs optimized prompts for the LLM
+// PromptBuilder constructs optimized prompts for the LLM.
 type PromptBuilder struct {
 	pair   domain.Pair
 	logger *zap.Logger
 }
 
-// NewPromptBuilder creates a new PromptBuilder instance
+// NewPromptBuilder creates a new PromptBuilder instance.
 func NewPromptBuilder(pair domain.Pair, logger *zap.Logger) *PromptBuilder {
 	return &PromptBuilder{
 		pair:   pair,
@@ -27,7 +25,7 @@ func NewPromptBuilder(pair domain.Pair, logger *zap.Logger) *PromptBuilder {
 	}
 }
 
-// MarketContext contains all data needed for prompt building
+// MarketContext data needed for prompt building.
 type MarketContext struct {
 	Primary         *domain.Timeframe
 	VolumeAnalysis  domain.VolumeAnalysis
@@ -36,7 +34,7 @@ type MarketContext struct {
 	Balance         decimal.Decimal
 }
 
-// BuildUserPrompt constructs the complete user prompt from market context
+// BuildUserPrompt constructs the complete user prompt.
 func (pb *PromptBuilder) BuildUserPrompt(ctx MarketContext) string {
 	var sb strings.Builder
 
@@ -83,8 +81,7 @@ func (pb *PromptBuilder) BuildUserPrompt(ctx MarketContext) string {
 	return sb.String()
 }
 
-// formatRecentData formats the last N candles with full OHLCV data and indicators
-// in a compact table format to save tokens while maintaining readability
+// formatRecentData formats the last N candles.
 func (pb *PromptBuilder) formatRecentData(primary *domain.Timeframe, limit int) string {
 	var sb strings.Builder
 
@@ -147,14 +144,13 @@ func (pb *PromptBuilder) formatRecentData(primary *domain.Timeframe, limit int) 
 	return sb.String()
 }
 
-// toFloat converts decimal.Decimal to float64 for formatting
+// toFloat converts decimal.Decimal to float64.
 func toFloat(d decimal.Decimal) float64 {
 	f, _ := d.Float64()
 	return f
 }
 
-// formatHistoricalSummary formats older candles (21-100) with only close prices
-// and key indicators in compact array format to minimize token usage
+// formatHistoricalSummary formats older candles.
 func (pb *PromptBuilder) formatHistoricalSummary(primary *domain.Timeframe) string {
 	var sb strings.Builder
 
@@ -215,8 +211,7 @@ func (pb *PromptBuilder) formatHistoricalSummary(primary *domain.Timeframe) stri
 	return sb.String()
 }
 
-// formatVolumeAnalysis formats volume metrics including current volume,
-// average volume, relative volume, and highlights volume spikes
+// formatVolumeAnalysis formats volume metrics.
 func (pb *PromptBuilder) formatVolumeAnalysis(volume domain.VolumeAnalysis) string {
 	var sb strings.Builder
 
@@ -265,8 +260,7 @@ func (pb *PromptBuilder) formatVolumeAnalysis(volume domain.VolumeAnalysis) stri
 	return sb.String()
 }
 
-// formatMultiTimeframe formats higher timeframe snapshot with key metrics
-// and shows trend alignment between timeframes in a compact format
+// formatMultiTimeframe formats higher timeframe snapshot.
 func (pb *PromptBuilder) formatMultiTimeframe(ctx MarketContext) string {
 	var sb strings.Builder
 
@@ -325,8 +319,7 @@ func (pb *PromptBuilder) formatMultiTimeframe(ctx MarketContext) string {
 	return sb.String()
 }
 
-// formatPosition formats open position information including entry price,
-// current P&L, time held, distance to stop-loss and take-profit, and risk-reward ratio
+// formatPosition formats open position information.
 func (pb *PromptBuilder) formatPosition(position *domain.Position, currentPrice decimal.Decimal) string {
 	var sb strings.Builder
 
@@ -419,7 +412,7 @@ func (pb *PromptBuilder) formatPosition(position *domain.Position, currentPrice 
 	return sb.String()
 }
 
-// formatDuration formats a time.Duration into a human-readable string
+// formatDuration formats a time.Duration.
 func formatDuration(d time.Duration) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%d seconds", int(d.Seconds()))

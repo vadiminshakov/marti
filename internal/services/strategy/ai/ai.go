@@ -18,7 +18,7 @@ import (
 // defaultHigherTimeframeLookback is used when not provided explicitly
 const defaultHigherTimeframeLookback = 60
 
-// tradersvc abstracts the exchange operations required for the AI margin strategy.
+// tradersvc abstracts the exchange operations.
 type tradersvc interface {
 	ExecuteAction(ctx context.Context, action domain.Action, amount decimal.Decimal, clientOrderID string) error
 	OrderExecuted(ctx context.Context, clientOrderID string) (executed bool, filledAmount decimal.Decimal, err error)
@@ -43,7 +43,7 @@ type aiDecisionWriter interface {
 	Save(event domain.AIDecisionEvent) error
 }
 
-// AIStrategy executes margin trades based on LLM decisions.
+// AIStrategy executes margin trades.
 type AIStrategy struct {
 	pair             domain.Pair
 	marketType       domain.MarketType
@@ -110,7 +110,7 @@ func (s *AIStrategy) Initialize(ctx context.Context) error {
 	return nil
 }
 
-// Trade performs one AI evaluation and action.
+// Trade performs one AI evaluation.
 func (s *AIStrategy) Trade(ctx context.Context) (*domain.TradeEvent, error) {
 	// collect market data and indicators
 	snapshot, position, err := s.gatherMarketData(ctx)
@@ -261,7 +261,7 @@ func (s *AIStrategy) getAndValidateDecision(
 	return decision, nil
 }
 
-// buildMarketContext assembles data passed to LLM.
+// buildMarketContext assembles data for LLM.
 func (s *AIStrategy) buildMarketContext(snapshot domain.MarketSnapshot, position *domain.Position) promptbuilder.MarketContext {
 	return promptbuilder.MarketContext{
 		Primary:         snapshot.PrimaryTimeFrame,

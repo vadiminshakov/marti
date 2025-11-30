@@ -53,7 +53,7 @@ type pricer interface {
 	GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error)
 }
 
-// DCAStrategy executes DCA trades for a pair.
+// DCAStrategy executes DCA trades.
 type DCAStrategy struct {
 	pair                    entity.Pair
 	amountPercent           decimal.Decimal
@@ -153,7 +153,7 @@ func NewDCAStrategy(l *zap.Logger, pair entity.Pair, amountPercent decimal.Decim
 	}, nil
 }
 
-// saveDCASeries persists series state to WAL.
+// saveDCASeries persists series state.
 func (d *DCAStrategy) saveDCASeries() error {
 	data, err := json.Marshal(d.dcaSeries)
 	if err != nil {
@@ -164,7 +164,7 @@ func (d *DCAStrategy) saveDCASeries() error {
 	return d.wal.Write(nextIndex, d.seriesKey, data)
 }
 
-// calculateIndividualBuyAmount returns quote amount per DCA leg.
+// calculateIndividualBuyAmount returns quote amount.
 func (d *DCAStrategy) calculateIndividualBuyAmount(ctx context.Context) (decimal.Decimal, error) {
 	quoteBalance, err := d.trader.GetBalance(ctx, d.pair.To)
 	if err != nil {
@@ -193,7 +193,7 @@ func (d *DCAStrategy) markTradeProcessed(intentID string) {
 	d.dcaSeries.ProcessedTradeIDs[intentID] = true
 }
 
-// AddDCAPurchase records a DCA purchase and updates averages.
+// AddDCAPurchase records a DCA purchase.
 func (d *DCAStrategy) AddDCAPurchase(intentID string, price, amount decimal.Decimal, purchaseTime time.Time, tradePartValue int) error {
 	if intentID != "" && d.isTradeProcessed(intentID) {
 		return nil
@@ -233,7 +233,7 @@ func (d *DCAStrategy) AddDCAPurchase(intentID string, price, amount decimal.Deci
 	return d.saveDCASeries()
 }
 
-// GetDCASeries exposes current DCA series snapshot.
+// GetDCASeries exposes current DCA series.
 func (d *DCAStrategy) GetDCASeries() *DCASeries {
 	return d.dcaSeries
 }
@@ -247,7 +247,7 @@ func (d *DCAStrategy) markIntentFailed(intent *tradeIntentRecord, cause error) {
 	}
 }
 
-// Trade performs one DCA evaluation cycle.
+// Trade performs one DCA evaluation.
 func (d *DCAStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 	price, err := d.getValidatedPrice(ctx)
 	if err != nil {
@@ -521,7 +521,7 @@ func isPercentDifferenceSignificant(currentPrice, referencePrice, thresholdPerce
 	return absPercentageDiffHundred.GreaterThanOrEqual(thresholdPercent)
 }
 
-// calculatePercentageChange returns (current-reference)/reference * 100.
+// calculatePercentageChange returns percentage change.
 func calculatePercentageChange(current, reference decimal.Decimal) decimal.Decimal {
 	if reference.IsZero() {
 		return decimal.Zero
@@ -529,7 +529,7 @@ func calculatePercentageChange(current, reference decimal.Decimal) decimal.Decim
 	return current.Sub(reference).Div(reference).Mul(decimal.NewFromInt(percentageMultiplier))
 }
 
-// calculateProfit returns (price-entry)/entry * 100.
+// calculateProfit returns profit percentage.
 func calculateProfit(price, avgEntryPrice decimal.Decimal) decimal.Decimal {
 	if avgEntryPrice.IsZero() {
 		return decimal.Zero
@@ -590,7 +590,7 @@ func (d *DCAStrategy) recalculateSeriesStats() {
 	d.dcaSeries.FirstBuyTime = d.dcaSeries.Purchases[0].Time
 }
 
-// Initialize loads WAL, reconciles intents, and performs initial buy if needed.
+// Initialize loads WAL and reconciles intents.
 func (d *DCAStrategy) Initialize(ctx context.Context) error {
 	// reconcile any pending trade intents from WAL
 	if err := d.reconcileTradeIntents(ctx); err != nil {

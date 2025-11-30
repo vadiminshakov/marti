@@ -158,8 +158,7 @@ func (t *SimulateTrader) UnrealizedPnL(ctx context.Context, price decimal.Decima
 	return t.position.PnL(price)
 }
 
-// buy simulates a market buy order, fetching the price from its pricer.
-// the 'amount' is expected to be in the base currency (e.g., BTC for BTC/USDT).
+// buy simulates a market buy order.
 func (t *SimulateTrader) buy(ctx context.Context, amount decimal.Decimal, id string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -186,8 +185,7 @@ func (t *SimulateTrader) buy(ctx context.Context, amount decimal.Decimal, id str
 	return actionErr
 }
 
-// sell simulates a market sell order, fetching the price from its pricer.
-// the 'amount' is expected to be in the base currency (e.g., BTC for BTC/USDT).
+// sell simulates a market sell order.
 func (t *SimulateTrader) sell(ctx context.Context, amount decimal.Decimal, id string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()

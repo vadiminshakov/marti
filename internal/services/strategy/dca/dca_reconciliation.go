@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// reconcileTradeIntents applies pending trade intents from WAL.
+// reconcileTradeIntents applies pending trade intents.
 func (d *DCAStrategy) reconcileTradeIntents(ctx context.Context) error {
 	if d.journal == nil {
 		return nil
@@ -106,7 +106,7 @@ func (d *DCAStrategy) processPendingIntent(ctx context.Context, intent *tradeInt
 	}
 }
 
-// applyExecutedBuy applies executed buy to series.
+// applyExecutedBuy applies executed buy.
 func (d *DCAStrategy) applyExecutedBuy(intent *tradeIntentRecord) error {
 	if d.isTradeProcessed(intent.ID) {
 		return nil
@@ -128,7 +128,7 @@ func (d *DCAStrategy) applyExecutedBuy(intent *tradeIntentRecord) error {
 	return nil
 }
 
-// applyExecutedSell applies executed sell (partial or full).
+// applyExecutedSell applies executed sell.
 func (d *DCAStrategy) applyExecutedSell(intent *tradeIntentRecord) error {
 	if d.isTradeProcessed(intent.ID) {
 		return nil
@@ -166,7 +166,7 @@ func (d *DCAStrategy) applyExecutedSell(intent *tradeIntentRecord) error {
 	return d.saveDCASeries()
 }
 
-// resetDCASeries clears series after full sell and sets dip wait.
+// resetDCASeries clears series.
 func (d *DCAStrategy) resetDCASeries(sellPrice decimal.Decimal) {
 	d.l.Info("Resetting DCA series and waiting for price drop",
 		zap.String("lastSellPrice", sellPrice.String()),

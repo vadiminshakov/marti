@@ -418,7 +418,7 @@ func (t *BinanceTrader) placeBinanceProtectiveOrder(
 	return nil
 }
 
-// ExecuteAction executes a trading action (supports both long and short positions)
+// ExecuteAction executes a trading action.
 func (t *BinanceTrader) ExecuteAction(ctx context.Context, action domain.Action, amount decimal.Decimal, clientOrderID string) error {
 	switch action {
 	case domain.ActionOpenLong:

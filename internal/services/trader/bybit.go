@@ -39,7 +39,7 @@ func NewBybitTrader(client *bybit.Client, pair domain.Pair, marketType domain.Ma
 	return trader, nil
 }
 
-// mapMarketTypeToCategory converts internal MarketType to Bybit's CategoryV5
+// mapMarketTypeToCategory converts internal MarketType to Bybit's CategoryV5.
 func (t *BybitTrader) mapMarketTypeToCategory() bybit.CategoryV5 {
 	switch t.marketType {
 	case domain.MarketTypeMargin:
@@ -49,7 +49,7 @@ func (t *BybitTrader) mapMarketTypeToCategory() bybit.CategoryV5 {
 	}
 }
 
-// setLeverage sets the leverage for margin trading (linear category only)
+// setLeverage sets the leverage for margin trading.
 func (t *BybitTrader) setLeverage() error {
 	if t.marketType != domain.MarketTypeMargin {
 		return nil
@@ -115,7 +115,7 @@ func (t *BybitTrader) Sell(ctx context.Context, amount decimal.Decimal, clientOr
 	return nil
 }
 
-// ExecuteAction executes a trading action (open/close long/short)
+// ExecuteAction executes a trading action.
 func (t *BybitTrader) ExecuteAction(ctx context.Context, action domain.Action, amount decimal.Decimal, clientOrderID string) error {
 	amount = amount.RoundFloor(4)
 	category := t.mapMarketTypeToCategory()

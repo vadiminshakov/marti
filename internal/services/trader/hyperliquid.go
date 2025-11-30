@@ -46,7 +46,7 @@ func NewHyperliquidTrader(ex *hyperliquid.Exchange, accountAddr string, pair dom
 	return t, nil
 }
 
-// convert a free-form client ID into a valid Hyperliquid cloid (0x + 32 hex chars)
+// cloidFromID converts a free-form client ID into a valid Hyperliquid cloid.
 func (t *HyperliquidTrader) cloidFromID(id string) string {
 	s := strings.TrimSpace(id)
 	if s == "" {
@@ -60,10 +60,10 @@ func (t *HyperliquidTrader) cloidFromID(id string) string {
 }
 
 func (t *HyperliquidTrader) executeOrder(ctx context.Context, isBuy bool, amount decimal.Decimal, clientOrderID string, reduceOnly bool) error {
-	// Convert base amount to float
+	// convert base amount to float
 	size, _ := amount.Round(8).Float64()
 
-	// Compute a limit price with small slippage to emulate market order and TIF IOC
+	// compute a limit price with small slippage to emulate market order and TIF IOC
 	px, err := t.ex.SlippagePrice(ctx, t.pair.From, isBuy, 0.005, nil) // 0.5% slippage
 	if err != nil {
 		return errors.Wrap(err, "slippage price")
@@ -87,7 +87,7 @@ func (t *HyperliquidTrader) executeOrder(ctx context.Context, isBuy bool, amount
 	return err
 }
 
-// ExecuteAction executes a trading action (open/close long/short)
+// ExecuteAction executes a trading action.
 func (t *HyperliquidTrader) ExecuteAction(ctx context.Context, action domain.Action, amount decimal.Decimal, clientOrderID string) error {
 	switch action {
 	case domain.ActionOpenLong:
@@ -97,10 +97,10 @@ func (t *HyperliquidTrader) ExecuteAction(ctx context.Context, action domain.Act
 		reduce := t.marketType == domain.MarketTypeMargin
 		return t.executeOrder(ctx, false, amount, clientOrderID, reduce)
 	case domain.ActionOpenShort:
-		// Opening short = sell
+		// opening short = sell
 		return t.executeOrder(ctx, false, amount, clientOrderID, false)
 	case domain.ActionCloseShort:
-		// Closing short = buy
+		// closing short = buy
 		reduce := t.marketType == domain.MarketTypeMargin
 		return t.executeOrder(ctx, true, amount, clientOrderID, reduce)
 	default:
@@ -150,14 +150,14 @@ func (t *HyperliquidTrader) OrderExecuted(ctx context.Context, clientOrderID str
 
 func (t *HyperliquidTrader) GetBalance(ctx context.Context, currency string) (decimal.Decimal, error) {
 	if t.marketType == domain.MarketTypeMargin {
-		// Margin: approximate quote as total account value in USD; base is not modeled
+		// margin: approximate quote as total account value in USD; base is not modeled
 		st, err := t.info.UserState(ctx, t.accountAddr)
 		if err != nil {
 			return decimal.Zero, errors.Wrap(err, "get user state")
 		}
 
 		if strings.EqualFold(currency, t.pair.To) {
-			// Try TotalRawUsd, fallback to Withdrawable
+			// try total raw usd, fallback to withdrawable
 			if st.MarginSummary.TotalRawUsd != "" {
 				if d, err := decimal.NewFromString(st.MarginSummary.TotalRawUsd); err == nil {
 					return d, nil
@@ -210,7 +210,7 @@ func (t *HyperliquidTrader) GetPosition(ctx context.Context, pair domain.Pair) (
 		if err != nil || size.Equal(decimal.Zero) {
 			continue
 		}
-		// Entry price may be nil if position doesn't exist
+		// entry price may be nil if position doesn't exist
 		var entryPrice decimal.Decimal
 		if ap.Position.EntryPx != nil {
 			if d, err := decimal.NewFromString(*ap.Position.EntryPx); err == nil {
@@ -252,8 +252,8 @@ func (t *HyperliquidTrader) SetPositionStops(ctx context.Context, pair domain.Pa
 		return nil
 	}
 
-	// Cancel existing position TP/SL triggers for this coin
-	// Use frontend open orders API to find triggers for this coin
+	// cancel existing position TP/SL triggers for this coin
+	// use frontend open orders API to find triggers for this coin
 	open, err := t.info.FrontendOpenOrders(ctx, t.accountAddr)
 	if err == nil && len(open) > 0 {
 		var cancels []hyperliquid.CancelOrderRequest
@@ -272,14 +272,14 @@ func (t *HyperliquidTrader) SetPositionStops(ctx context.Context, pair domain.Pa
 		}
 	}
 
-	// If neither TP nor SL set, we're done (just canceled existing ones)
+	// if neither TP nor SL set, we're done (just canceled existing ones)
 	if takeProfit.LessThanOrEqual(decimal.Zero) && stopLoss.LessThanOrEqual(decimal.Zero) {
 		return nil
 	}
 
 	// determine order side for protective orders
-	// For long: protective orders are buys (to close short) — on HL reduce-only, need opposite trade
-	// Actually for long, closing is sell; for short, closing is buy.
+	// for long: protective orders are buys (to close short) — on HL reduce-only, need opposite trade
+	// actually for long, closing is sell; for short, closing is buy.
 	isLong := pos.Side == domain.PositionSideLong
 
 	sizeF, _ := pos.Amount.Round(8).Float64()

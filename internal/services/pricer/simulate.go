@@ -9,19 +9,17 @@ import (
 	"github.com/vadiminshakov/marti/internal/domain"
 )
 
-// SimulatePricer fetches real market prices from Binance public API
-// without requiring authentication
+// SimulatePricer fetches real market prices from Binance public API.
 type SimulatePricer struct {
 	client *binance.Client
 }
 
-// NewSimulatePricer creates a new simulate pricer that uses
-// Binance public API for real market prices
+// NewSimulatePricer creates a new simulate pricer.
 func NewSimulatePricer(client *binance.Client) *SimulatePricer {
 	return &SimulatePricer{client: client}
 }
 
-// GetPrice fetches the current market price from Binance public API
+// GetPrice fetches the current market price.
 func (p *SimulatePricer) GetPrice(ctx context.Context, pair domain.Pair) (decimal.Decimal, error) {
 	prices, err := p.client.NewListPricesService().Symbol(pair.Symbol()).Do(ctx)
 	if err != nil {

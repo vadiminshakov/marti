@@ -18,7 +18,7 @@ func NewBybitKlineProvider(client *bybit.Client) *BybitKlineProvider {
 	return &BybitKlineProvider{client: client}
 }
 
-// GetKlines fetches kline data from Bybit.
+// GetKlines fetches kline data.
 func (p *BybitKlineProvider) GetKlines(context.Context, domain.Pair, string, int) ([]domain.MarketCandle, error) {
 	return nil, fmt.Errorf("Bybit kline provider for AI strategy is not yet implemented - please use Binance or Simulate platform for AI strategy")
 }
