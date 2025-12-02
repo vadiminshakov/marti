@@ -28,6 +28,10 @@ const (
 var dataHoursAgo int
 
 func TestProfit(t *testing.T) {
+	if os.Getenv("BINANCE_API_KEY") == "" || os.Getenv("BINANCE_API_SECRET") == "" {
+		t.Skip("history test requires BINANCE_* env vars")
+	}
+
 	if testing.Short() {
 		t.Skip("Skipping historical test in short mode.")
 	}

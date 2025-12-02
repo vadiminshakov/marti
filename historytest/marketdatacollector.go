@@ -34,8 +34,8 @@ func DataCollectorFactory(filePath string, pair *domain.Pair) (func(fromHoursAgo
 	}
 
 	secretkey := os.Getenv("BINANCE_API_SECRET")
-	if len(apikey) == 0 {
-		return nil, errors.New("SECRETKEY env is not set")
+	if len(secretkey) == 0 {
+		return nil, errors.New("BINANCE_API_SECRET env is not set")
 	}
 
 	client := binance.NewClient(apikey, secretkey)
