@@ -44,7 +44,12 @@ type DCASeries struct {
 }
 
 type tradersvc interface {
+	// ExecuteAction executes a trade action.
+	// For ActionOpenLong (buy): amount is in QUOTE currency (e.g., USDT to spend).
+	// For ActionCloseLong (sell): amount is in BASE currency (e.g., BTC to sell).
 	ExecuteAction(ctx context.Context, action entity.Action, amount decimal.Decimal, clientOrderID string) error
+	// OrderExecuted checks if an order is fully executed.
+	// Returns filledAmount in BASE currency (e.g., how many BTC were bought/sold).
 	OrderExecuted(ctx context.Context, clientOrderID string) (executed bool, filledAmount decimal.Decimal, err error)
 	GetBalance(ctx context.Context, currency string) (decimal.Decimal, error)
 }
@@ -118,6 +123,10 @@ func NewDCAStrategy(l *zap.Logger, pair entity.Pair, amountPercent decimal.Decim
 			if err := json.Unmarshal(msg.Value, dcaSeries); err != nil {
 				l.Error("failed to unmarshal DCA series", zap.Error(err))
 				continue
+			}
+			// ensure ProcessedTradeIDs is not nil after unmarshaling old WAL records.
+			if dcaSeries.ProcessedTradeIDs == nil {
+				dcaSeries.ProcessedTradeIDs = make(map[string]bool)
 			}
 			continue
 		}

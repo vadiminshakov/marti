@@ -61,10 +61,15 @@ func (d *DCAStrategy) processPendingIntent(ctx context.Context, intent *tradeInt
 			return errors.Wrapf(err, "failed to check order execution for intent %s", intent.ID)
 		}
 
-		// track partial fill progress by updating the intent amount in journal
-		if filledAmount.GreaterThan(decimal.Zero) && !filledAmount.Equal(intent.Amount) {
-			_ = d.journal.UpdateAmount(intent, filledAmount)
-			intent.Amount = filledAmount
+		// track partial fill progress by updating the intent amount in journal.
+		// filledAmount from OrderExecuted is in BASE currency (e.g., BTC),
+		// but intent.Amount is stored in QUOTE currency (e.g., USDT).
+		// Convert filledAmount to quote using intent.Price.
+		// Round to 8 decimal places to avoid floating point precision issues.
+		filledQuoteAmount := filledAmount.Mul(intent.Price).Round(8)
+		if filledQuoteAmount.GreaterThan(decimal.Zero) && !filledQuoteAmount.Equal(intent.Amount.Round(8)) {
+			_ = d.journal.UpdateAmount(intent, filledQuoteAmount)
+			intent.Amount = filledQuoteAmount
 		}
 
 		if !executed {
@@ -172,9 +177,14 @@ func (d *DCAStrategy) resetDCASeries(sellPrice decimal.Decimal) {
 		zap.String("lastSellPrice", sellPrice.String()),
 		zap.String("requiredDropPercent", d.dcaPercentThresholdBuy.String()))
 
+	processedIDs := d.dcaSeries.ProcessedTradeIDs
+	if processedIDs == nil {
+		processedIDs = make(map[string]bool)
+	}
+
 	d.dcaSeries = &DCASeries{
 		Purchases:         make([]DCAPurchase, 0),
-		ProcessedTradeIDs: d.dcaSeries.ProcessedTradeIDs,
+		ProcessedTradeIDs: processedIDs,
 	}
 	d.tradePart = decimal.Zero
 	d.updateSellState(sellPrice, true)

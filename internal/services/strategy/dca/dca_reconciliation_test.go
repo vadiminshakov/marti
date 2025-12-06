@@ -36,7 +36,10 @@ func TestDCAStrategy_ReconcileExecutedBuyIntent(t *testing.T) {
 	ts.journal.intents = append(ts.journal.intents, intent)
 	ts.journal.index[intent.ID] = intent
 
-	mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(true, intent.Amount, nil)
+	// OrderExecuted returns filledAmount in BASE currency (e.g., BTC).
+	// intent.Amount is in QUOTE (1000 USDT), price is 48000, so base = 1000/48000.
+	filledBaseAmount := intent.Amount.Div(intent.Price)
+	mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(true, filledBaseAmount, nil)
 
 	err := ts.reconcileTradeIntents(context.Background())
 	require.NoError(t, err)
@@ -76,7 +79,9 @@ func TestDCAStrategy_ReconcileExecutedSellIntentFullReset(t *testing.T) {
 	ts.journal.intents = append(ts.journal.intents, intent)
 	ts.journal.index[intent.ID] = intent
 
-	mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(true, intent.Amount, nil)
+	// OrderExecuted returns filledAmount in BASE currency.
+	filledBaseAmount := intent.Amount.Div(intent.Price)
+	mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(true, filledBaseAmount, nil)
 
 	err = ts.reconcileTradeIntents(context.Background())
 	require.NoError(t, err)
@@ -172,7 +177,10 @@ func TestDCAStrategy_ReconcilePartialSell(t *testing.T) {
 	ts.journal.intents = append(ts.journal.intents, intent)
 	ts.journal.index[intent.ID] = intent
 
-	mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(true, sellAmount, nil)
+	// OrderExecuted returns filledAmount in BASE currency.
+	// sellAmount is in QUOTE, convert to base.
+	filledBaseAmount := sellAmount.Div(intent.Price)
+	mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(true, filledBaseAmount, nil)
 
 	err = ts.reconcileTradeIntents(context.Background())
 	require.NoError(t, err)
@@ -269,13 +277,16 @@ func TestDCAStrategy_ReconcileAmountUpdateOnPartialFill(t *testing.T) {
 	ts.journal.intents = append(ts.journal.intents, intent)
 	ts.journal.index[intent.ID] = intent
 
-	mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(true, actualFilledAmount, nil)
+	// OrderExecuted returns filledAmount in BASE currency.
+	// actualFilledAmount is in QUOTE (800 USDT), convert to base using intent.Price.
+	filledBaseAmount := actualFilledAmount.Div(intent.Price)
+	mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(true, filledBaseAmount, nil)
 
 	err := ts.reconcileTradeIntents(context.Background())
 	require.NoError(t, err)
 
 	require.Equal(t, tradeIntentStatusDone, ts.journal.index[intent.ID].Status, "intent should be marked done")
-	require.True(t, ts.journal.index[intent.ID].Amount.Equal(actualFilledAmount), "intent amount should be updated to actual filled amount")
+	require.True(t, ts.journal.index[intent.ID].Amount.Equal(actualFilledAmount), "intent amount should be updated to actual filled amount (in quote)")
 	require.Len(t, ts.dcaSeries.Purchases, 1, "should have one purchase")
 	require.True(t, ts.dcaSeries.TotalAmount.Equal(actualFilledAmount), "total amount should match actual filled amount")
 }
@@ -322,9 +333,10 @@ func TestDCAStrategy_ReconcileMultiplePendingIntents(t *testing.T) {
 	ts.journal.index[intent2.ID] = intent2
 	ts.journal.index[intent3.ID] = intent3
 
-	mockTrader.On("OrderExecuted", mock.Anything, intent1.ID).Return(true, intent1.Amount, nil)
-	mockTrader.On("OrderExecuted", mock.Anything, intent2.ID).Return(true, intent2.Amount, nil)
-	mockTrader.On("OrderExecuted", mock.Anything, intent3.ID).Return(true, intent3.Amount, nil)
+	// OrderExecuted returns filledAmount in BASE currency.
+	mockTrader.On("OrderExecuted", mock.Anything, intent1.ID).Return(true, intent1.Amount.Div(intent1.Price), nil)
+	mockTrader.On("OrderExecuted", mock.Anything, intent2.ID).Return(true, intent2.Amount.Div(intent2.Price), nil)
+	mockTrader.On("OrderExecuted", mock.Anything, intent3.ID).Return(true, intent3.Amount.Div(intent3.Price), nil)
 
 	err := ts.reconcileTradeIntents(context.Background())
 	require.NoError(t, err)
