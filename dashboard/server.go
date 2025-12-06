@@ -153,11 +153,13 @@ func (s *Server) handleBalanceStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	// send a comment heartbeat every 30s so proxies keep connection
-	heartbeat := time.NewTicker(30 * time.Second)
+	// send a comment heartbeat every 20s so proxies keep connection
+	heartbeat := time.NewTicker(20 * time.Second)
 	defer heartbeat.Stop()
 
 	pollTicker := time.NewTicker(snapshotPollInterval)
@@ -183,12 +185,6 @@ func (s *Server) handleBalanceStream(w http.ResponseWriter, r *http.Request) {
 			recordsToSend = thinRecords(records)
 		}
 
-		// send records with throttling
-		sendDelay := 0 * time.Millisecond
-		if isFirstLoad && len(recordsToSend) > 50 {
-			sendDelay = 10 * time.Millisecond
-		}
-
 		for _, record := range recordsToSend {
 			payload, err := json.Marshal(record.Snapshot)
 			if err != nil {
@@ -199,10 +195,6 @@ func (s *Server) handleBalanceStream(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "data: %s\n\n", payload)
 			flusher.Flush()
 			lastIndex = record.Index
-
-			if sendDelay > 0 {
-				time.Sleep(sendDelay)
-			}
 		}
 		if isFirstLoad {
 			isFirstLoad = false
@@ -252,8 +244,10 @@ func (s *Server) handleAIDecisionStream(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	heartbeat := time.NewTicker(30 * time.Second)
 	defer heartbeat.Stop()
@@ -392,8 +386,8 @@ func thinRecords(records []entity.BalanceSnapshotRecord) []entity.BalanceSnapsho
 		thinned = append([]entity.BalanceSnapshotRecord{older[i]}, thinned...)
 		// skip next 'skip' records
 		i -= skip
-		// double skip every 6 records (exponential)
-		if (len(older)-1-i)%6 == 0 {
+		// double skip every 12 records (exponential)
+		if (len(older)-1-i)%12 == 0 {
 			skip *= 2
 		}
 	}

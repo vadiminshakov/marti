@@ -3,6 +3,7 @@
 
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Marti</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"
@@ -27,7 +28,9 @@
 
       </header>
       <section class="overview">
-        <canvas id="globalChart" class="global-chart" height="640"></canvas>
+        <div class="chart-container">
+          <canvas id="globalChart" class="global-chart"></canvas>
+        </div>
       </section>
       <section id="pairs" class="pair-grid">
         <div id="emptyState" class="empty-state">

@@ -123,7 +123,8 @@ loadLogos();
 
 const buildGlobalChart = (ctx) => {
   let hoveredDatasetIndex = null;
-  const hoverThreshold = 12;
+  const isMobile = window.innerWidth <= 768;
+  const hoverThreshold = isMobile ? 20 : 12;
 
   const applyHoverStyles = (chart, newHoveredIndex) => {
     if (newHoveredIndex === hoveredDatasetIndex) {
@@ -243,6 +244,7 @@ const buildGlobalChart = (ctx) => {
     options: {
       animation: false,
       responsive: true,
+      maintainAspectRatio: false,
       interaction: { intersect: false, mode: 'index' },
       layout: {
         padding: {
@@ -261,13 +263,18 @@ const buildGlobalChart = (ctx) => {
       },
       scales: {
         x: {
-          ticks: { color: '#888888', maxRotation: 0, autoSkip: true, font: { size: 10 } },
+          ticks: { 
+            color: '#888888', 
+            maxRotation: 0, 
+            autoSkip: true, 
+            font: { size: isMobile ? 8 : 10 } 
+          },
           grid: { display: false, drawBorder: false }
         },
         y: {
           ticks: {
             color: '#888888',
-            font: { size: 10 },
+            font: { size: isMobile ? 8 : 10 },
             callback: function (value) {
               return value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
             }
@@ -278,7 +285,7 @@ const buildGlobalChart = (ctx) => {
       elements: { line: { borderCapStyle: 'round' } },
       plugins: {
 
-        legend: { display: true, labels: { usePointStyle: true, boxWidth: 20, font: { size: 10 } } },
+        legend: { display: true, labels: { usePointStyle: true, boxWidth: isMobile ? 16 : 20, font: { size: isMobile ? 8 : 10 } } },
         tooltip: {
           enabled: false,
           external: () => { },
@@ -348,7 +355,7 @@ const buildGlobalChart = (ctx) => {
             }
           }
 
-          const size = 32;
+          const size = isMobile ? 24 : 32;
 
           ctx.save();
 
@@ -393,6 +400,17 @@ const buildGlobalChart = (ctx) => {
 const chartCtx = chartCanvas.getContext('2d');
 chartCtx.imageSmoothingEnabled = false;
 const globalChart = buildGlobalChart(chartCtx);
+
+let chartUpdateScheduled = false;
+
+function scheduleChartUpdate() {
+  if (chartUpdateScheduled) return;
+  chartUpdateScheduled = true;
+  requestAnimationFrame(() => {
+    globalChart.update('none');
+    chartUpdateScheduled = false;
+  });
+}
 
 chartCanvas.addEventListener('mouseleave', () => {
   if (globalChart && typeof globalChart.applyHoverStyles === 'function') {
@@ -484,7 +502,7 @@ function updateGlobalChart(model, _quoteCurrency, totalBalance, ts) {
   appendGlobalLabel(tickLabel);
   const dataset = ensureDataset(model);
   dataset.data[dataset.data.length - 1] = totalBalance;
-  globalChart.update('none');
+  scheduleChartUpdate();
 }
 
 let emptyStateRemoveTimeout = null;
@@ -616,8 +634,11 @@ function connectSSE() {
 
   balanceSource = new EventSource('/balance/stream');
 
-
-
+  balanceSource.onerror = () => {
+    if (balanceSource.readyState === EventSource.CLOSED) {
+      setTimeout(connectSSE, 3000);
+    }
+  };
 
   balanceSource.addEventListener('no_data', () => {
     if (datasetByPair.size === 0) {
@@ -825,6 +846,12 @@ function connectAIDecisionSSE() {
   }
 
   aiDecisionSource = new EventSource('/ai/decisions/stream');
+
+  aiDecisionSource.onerror = () => {
+    if (aiDecisionSource.readyState === EventSource.CLOSED) {
+      setTimeout(connectAIDecisionSSE, 3000);
+    }
+  };
 
   aiDecisionSource.addEventListener('ai_decision', (event) => {
     try {
