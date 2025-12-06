@@ -13,8 +13,8 @@ import (
 
 const (
 	defaultAIDecisionDir   = "./wal/aidecisions"
-	aiDecisionSegmentLimit = 200
-	aiDecisionMaxSegments  = 100
+	aiDecisionSegmentLimit = 100
+	aiDecisionMaxSegments  = 10
 	aiDecisionKeyPrefix    = "ai_decision_"
 )
 

@@ -392,8 +392,8 @@ func thinRecords(records []entity.BalanceSnapshotRecord) []entity.BalanceSnapsho
 		thinned = append([]entity.BalanceSnapshotRecord{older[i]}, thinned...)
 		// skip next 'skip' records
 		i -= skip
-		// double skip every 10 records (exponential)
-		if (len(older)-1-i)%10 == 0 {
+		// double skip every 6 records (exponential)
+		if (len(older)-1-i)%6 == 0 {
 			skip *= 2
 		}
 	}
