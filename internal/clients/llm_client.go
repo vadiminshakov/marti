@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/vadiminshakov/marti/internal/services/promptbuilder"
+	"github.com/vadiminshakov/marti/internal/domain"
 	"github.com/vadiminshakov/marti/pkg/retrier"
 )
 
@@ -26,7 +26,7 @@ const (
 // LLMClient interface for interacting with LLM services.
 type LLMClient interface {
 	// GetDecision sends market data to the LLM and returns a trading decision.
-	GetDecision(ctx context.Context, marketContext promptbuilder.MarketContext) (string, error)
+	GetDecision(ctx context.Context, prompt *domain.Prompt) (string, error)
 }
 
 type OpenAICompatibleClient struct {
@@ -34,13 +34,12 @@ type OpenAICompatibleClient struct {
 	apiKey        string
 	model         string
 	httpClient    *http.Client
-	promptBuilder *promptbuilder.PromptBuilder
 	retrier       *retrier.Retrier
 	customHeaders map[string]string
 }
 
 // NewOpenAICompatibleClient creates a new client for OpenAI-compatible APIs.
-func NewOpenAICompatibleClient(apiURL, apiKey, model, proxyURL string, promptBuilder *promptbuilder.PromptBuilder) (*OpenAICompatibleClient, error) {
+func NewOpenAICompatibleClient(apiURL, apiKey, model, proxyURL string) (*OpenAICompatibleClient, error) {
 	transport := &http.Transport{}
 	if proxyURL != "" {
 		proxy, err := url.Parse(proxyURL)
@@ -51,10 +50,9 @@ func NewOpenAICompatibleClient(apiURL, apiKey, model, proxyURL string, promptBui
 	}
 
 	client := &OpenAICompatibleClient{
-		apiURL:        apiURL,
-		apiKey:        apiKey,
-		model:         model,
-		promptBuilder: promptBuilder,
+		apiURL: apiURL,
+		apiKey: apiKey,
+		model:  model,
 		httpClient: &http.Client{
 			Timeout:   defaultTimeout,
 			Transport: transport,
@@ -143,12 +141,12 @@ func (c *OpenAICompatibleClient) isYandexAPI() bool {
 }
 
 // GetDecision builds prompts, sends a chat request to the LLM API, and returns the response.
-func (c *OpenAICompatibleClient) GetDecision(ctx context.Context, marketContext promptbuilder.MarketContext) (string, error) {
+func (c *OpenAICompatibleClient) GetDecision(ctx context.Context, prompt *domain.Prompt) (string, error) {
 	if c.apiKey == "" {
 		return "", errors.New("LLM API key is empty")
 	}
 
-	userPrompt := c.promptBuilder.BuildUserPrompt(marketContext)
+	userPrompt := prompt.String()
 
 	return retrier.DoWithData(c.retrier, ctx, func(ctx context.Context) (string, error) {
 		if c.isYandexAPI() {
@@ -165,7 +163,7 @@ func (c *OpenAICompatibleClient) getOpenAIDecision(ctx context.Context, userProm
 		Messages: []message{
 			{
 				Role:    "system",
-				Content: promptbuilder.SystemPrompt,
+				Content: domain.SystemPrompt,
 			},
 			{
 				Role:    "user",
@@ -182,7 +180,7 @@ func (c *OpenAICompatibleClient) getOpenAIDecision(ctx context.Context, userProm
 func (c *OpenAICompatibleClient) getYandexDecision(ctx context.Context, userPrompt string) (string, error) {
 	reqBody := yandexRequest{
 		Model:           c.model,
-		Instructions:    promptbuilder.SystemPrompt,
+		Instructions:    domain.SystemPrompt,
 		Input:           userPrompt,
 		Temperature:     0.0, // deterministic responses for trading decisions
 		MaxOutputTokens: 8000,

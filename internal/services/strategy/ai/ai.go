@@ -11,7 +11,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/internal/domain"
-	"github.com/vadiminshakov/marti/internal/services/promptbuilder"
 	"go.uber.org/zap"
 )
 
@@ -32,7 +31,7 @@ type pricer interface {
 }
 
 type llmClient interface {
-	GetDecision(ctx context.Context, marketContext promptbuilder.MarketContext) (string, error)
+	GetDecision(ctx context.Context, prompt *domain.Prompt) (string, error)
 }
 
 type marketDataCollector interface {
@@ -225,7 +224,7 @@ func (s *AIStrategy) getAndValidateDecision(
 	snapshot domain.MarketSnapshot,
 	position *domain.Position,
 ) (*domain.Decision, error) {
-	response, err := s.llmClient.GetDecision(ctx, s.buildMarketContext(snapshot, position))
+	response, err := s.llmClient.GetDecision(ctx, s.buildPrompt(snapshot, position))
 	if err != nil {
 		s.logger.Error("Failed to get AI response", zap.Error(err))
 		return nil, errors.Wrap(err, "failed to get AI decision")
@@ -261,15 +260,15 @@ func (s *AIStrategy) getAndValidateDecision(
 	return decision, nil
 }
 
-// buildMarketContext assembles data for LLM.
-func (s *AIStrategy) buildMarketContext(snapshot domain.MarketSnapshot, position *domain.Position) promptbuilder.MarketContext {
-	return promptbuilder.MarketContext{
-		Primary:         snapshot.PrimaryTimeFrame,
-		VolumeAnalysis:  snapshot.VolumeAnalysis,
-		HigherTimeframe: snapshot.HigherTimeFrame,
-		CurrentPosition: position,
-		Balance:         snapshot.QuoteBalance,
-	}
+// buildPrompt assembles the prompt entity for LLM.
+func (s *AIStrategy) buildPrompt(snapshot domain.MarketSnapshot, position *domain.Position) *domain.Prompt {
+	return domain.NewPrompt(s.pair).WithMarketContext(
+		snapshot.PrimaryTimeFrame,
+		snapshot.HigherTimeFrame,
+		snapshot.VolumeAnalysis,
+		position,
+		snapshot.QuoteBalance,
+	)
 }
 
 // executeDecision routes decision to handler.

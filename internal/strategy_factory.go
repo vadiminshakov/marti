@@ -11,7 +11,6 @@ import (
 	"github.com/vadiminshakov/marti/internal/clients"
 	entity "github.com/vadiminshakov/marti/internal/domain"
 	"github.com/vadiminshakov/marti/internal/services/market/collector"
-	"github.com/vadiminshakov/marti/internal/services/promptbuilder"
 	"github.com/vadiminshakov/marti/internal/services/strategy/ai"
 	"github.com/vadiminshakov/marti/internal/services/strategy/dca"
 )
@@ -87,11 +86,8 @@ func (f *strategyFactory) createAIStrategy(
 	klineProvider klineService,
 	decisionStore aiDecisionWriter,
 ) (TradingStrategy, error) {
-	// create PromptBuilder
-	promptBuilder := promptbuilder.NewPromptBuilder(conf.Pair, f.logger)
-
 	// create LLM client
-	llmClient, err := clients.NewOpenAICompatibleClient(conf.LLMAPIURL, conf.LLMAPIKey, conf.Model, conf.LLMProxyURL, promptBuilder)
+	llmClient, err := clients.NewOpenAICompatibleClient(conf.LLMAPIURL, conf.LLMAPIKey, conf.Model, conf.LLMProxyURL)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create LLM client")
 	}
