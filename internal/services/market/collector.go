@@ -1,4 +1,4 @@
-package collector
+package market
 
 import (
 	"context"

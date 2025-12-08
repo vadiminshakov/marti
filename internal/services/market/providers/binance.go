@@ -1,5 +1,4 @@
-// Package collector provides market data collection utilities.
-package collector
+package providers
 
 import (
 	"context"

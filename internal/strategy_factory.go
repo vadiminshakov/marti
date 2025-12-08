@@ -10,7 +10,7 @@ import (
 	"github.com/vadiminshakov/marti/config"
 	"github.com/vadiminshakov/marti/internal/clients"
 	entity "github.com/vadiminshakov/marti/internal/domain"
-	"github.com/vadiminshakov/marti/internal/services/market/collector"
+	"github.com/vadiminshakov/marti/internal/services/market"
 	"github.com/vadiminshakov/marti/internal/services/strategy/ai"
 	"github.com/vadiminshakov/marti/internal/services/strategy/dca"
 )
@@ -93,7 +93,7 @@ func (f *strategyFactory) createAIStrategy(
 	}
 
 	// create market data collector
-	marketDataCollector := collector.NewMarketDataCollector(
+	marketDataCollector := market.NewMarketDataCollector(
 		klineProvider,
 		conf.Pair,
 	)
