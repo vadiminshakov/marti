@@ -21,6 +21,10 @@ const (
 	dcaSeriesKeyPrefix        = "dca_series_"
 	percentageMultiplier      = 100
 	defaultOrderCheckInterval = 1 * time.Minute
+	walSegmentThreshold       = 1000
+	walMaxSegments            = 100
+	walDirPermissions         = 0o755
+	doubleProfitMultiplier    = 2
 )
 
 // DCAPurchase represents a single DCA purchase.
@@ -78,6 +82,24 @@ type DCAStrategy struct {
 	orderCheckInterval time.Duration
 }
 
+// createWAL initializes WAL for the given pair.
+func createWAL(pair entity.Pair) (*gowal.Wal, error) {
+	walDir := filepath.Join("./wal", pair.String())
+	if err := os.MkdirAll(walDir, walDirPermissions); err != nil {
+		return nil, errors.Wrapf(err, "failed to ensure WAL directory %s", walDir)
+	}
+
+	walCfg := gowal.Config{
+		Dir:              walDir,
+		Prefix:           "log_",
+		SegmentThreshold: walSegmentThreshold,
+		MaxSegments:      walMaxSegments,
+		IsInSyncDiskMode: true,
+	}
+
+	return gowal.NewWAL(walCfg)
+}
+
 // NewDCAStrategy returns a configured DCA strategy.
 func NewDCAStrategy(l *zap.Logger, pair entity.Pair, amountPercent decimal.Decimal, pricer pricer, trader tradersvc,
 	maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell decimal.Decimal) (*DCAStrategy, error) {
@@ -90,24 +112,11 @@ func NewDCAStrategy(l *zap.Logger, pair entity.Pair, amountPercent decimal.Decim
 		return nil, fmt.Errorf("amountPercent must be between 1 and 100, got %s", amountPercent.String())
 	}
 
-	walDir := filepath.Join("./wal", pair.String())
-	if err := os.MkdirAll(walDir, 0o755); err != nil {
-		return nil, errors.Wrapf(err, "failed to ensure WAL directory %s", walDir)
-	}
-
 	seriesKey := fmt.Sprintf("%s%s", dcaSeriesKeyPrefix, pair.String())
 
-	walCfg := gowal.Config{
-		Dir:              walDir,
-		Prefix:           "log_",
-		SegmentThreshold: 1000,
-		MaxSegments:      100,
-		IsInSyncDiskMode: true,
-	}
-
-	wal, err := gowal.NewWAL(walCfg)
+	wal, err := createWAL(pair)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create WAL")
+		return nil, err
 	}
 
 	// try to recover DCA series from WAL
@@ -185,7 +194,7 @@ func (d *DCAStrategy) calculateIndividualBuyAmount(ctx context.Context) (decimal
 }
 
 func (d *DCAStrategy) isTradeProcessed(intentID string) bool {
-	if intentID == "" || d.dcaSeries == nil {
+	if intentID == "" {
 		return false
 	}
 	if len(d.dcaSeries.ProcessedTradeIDs) == 0 {
@@ -196,7 +205,7 @@ func (d *DCAStrategy) isTradeProcessed(intentID string) bool {
 }
 
 func (d *DCAStrategy) markTradeProcessed(intentID string) {
-	if intentID == "" || d.dcaSeries == nil {
+	if intentID == "" {
 		return
 	}
 	d.dcaSeries.ProcessedTradeIDs[intentID] = true
@@ -263,21 +272,21 @@ func (d *DCAStrategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 		return nil, err
 	}
 
-	tradeEvent, shouldReturn, err := d.checkWaitingForDip(ctx, price)
-	if shouldReturn {
-		return tradeEvent, err
+	// check if we're waiting for a dip after a sell.
+	if d.dcaSeries.WaitingForDip && !d.dcaSeries.LastSellPrice.IsZero() {
+		return d.handleWaitingForDip(ctx, price)
 	}
 
 	if len(d.dcaSeries.Purchases) == 0 {
 		return nil, nil
 	}
 
-	if tradeEvent, err := d.checkDCABuy(ctx, price); tradeEvent != nil || err != nil {
-		return tradeEvent, err
+	if d.shouldBuy(price) {
+		return d.actBuy(ctx, price)
 	}
 
-	if tradeEvent, err := d.checkProfitTaking(ctx, price); tradeEvent != nil || err != nil {
-		return tradeEvent, err
+	if d.shouldTakeProfit(price) {
+		return d.actSell(ctx, price)
 	}
 
 	return nil, nil
@@ -292,15 +301,11 @@ func (d *DCAStrategy) getValidatedPrice(ctx context.Context) (decimal.Decimal, e
 	return price, nil
 }
 
-// checkWaitingForDip handles post-sell dip wait logic.
-func (d *DCAStrategy) checkWaitingForDip(ctx context.Context, price decimal.Decimal) (*entity.TradeEvent, bool, error) {
-	if !d.dcaSeries.WaitingForDip || d.dcaSeries.LastSellPrice.IsZero() {
-		return nil, false, nil
-	}
-
-	percentChange := calculatePercentageChange(price, d.dcaSeries.LastSellPrice)
+// handleWaitingForDip handles post-sell dip wait logic.
+func (d *DCAStrategy) handleWaitingForDip(ctx context.Context, price decimal.Decimal) (*entity.TradeEvent, error) {
+	percentChange := percentageDiff(price, d.dcaSeries.LastSellPrice)
 	if percentChange.GreaterThan(d.dcaPercentThresholdBuy.Neg()) {
-		return nil, true, nil
+		return nil, nil
 	}
 
 	d.l.Info("Price dropped from last sell price, initiating new DCA series.",
@@ -315,51 +320,26 @@ func (d *DCAStrategy) checkWaitingForDip(ctx context.Context, price decimal.Deci
 	if err != nil {
 		d.l.Error("Failed to record initial purchase after price drop", zap.Error(err))
 		d.updateSellState(d.dcaSeries.LastSellPrice, wasWaitingForDip)
-		return tradeEvent, true, err
+		return tradeEvent, err
 	}
 
 	d.l.Info("Initial purchase recorded successfully",
 		zap.String("price", price.String()),
 		zap.String("amount", tradeEvent.Amount.String()))
-	return tradeEvent, true, nil
+	return tradeEvent, nil
 }
 
-// checkDCABuy evaluates dip-buy conditions.
-func (d *DCAStrategy) checkDCABuy(ctx context.Context, price decimal.Decimal) (*entity.TradeEvent, error) {
-	if !price.LessThan(d.dcaSeries.AvgEntryPrice) {
-		return nil, nil
-	}
-
-	if !isPercentDifferenceSignificant(price, d.dcaSeries.AvgEntryPrice, d.dcaPercentThresholdBuy) {
-		return nil, nil
-	}
-
-	if !d.tradePart.LessThan(decimal.NewFromInt(int64(d.maxDcaTrades))) {
-		return nil, nil
-	}
-
-	d.l.Info("Price significantly lower than average, attempting DCA buy.",
-		zap.String("price", price.String()),
-		zap.String("avgEntryPrice", d.dcaSeries.AvgEntryPrice.String()))
-
-	return d.actBuy(ctx, price)
+// shouldBuy evaluates dip-buy conditions.
+func (d *DCAStrategy) shouldBuy(price decimal.Decimal) bool {
+	return price.LessThan(d.dcaSeries.AvgEntryPrice) &&
+		isPercentDifferenceSignificant(price, d.dcaSeries.AvgEntryPrice, d.dcaPercentThresholdBuy) &&
+		d.tradePart.LessThan(decimal.NewFromInt(int64(d.maxDcaTrades)))
 }
 
-// checkProfitTaking evaluates profit-taking conditions.
-func (d *DCAStrategy) checkProfitTaking(ctx context.Context, price decimal.Decimal) (*entity.TradeEvent, error) {
-	if !price.GreaterThan(d.dcaSeries.AvgEntryPrice) {
-		return nil, nil
-	}
-
-	if !isPercentDifferenceSignificant(price, d.dcaSeries.AvgEntryPrice, d.dcaPercentThresholdSell) {
-		return nil, nil
-	}
-
-	d.l.Info("Price significantly higher than average, attempting sell.",
-		zap.String("price", price.String()),
-		zap.String("avgEntryPrice", d.dcaSeries.AvgEntryPrice.String()))
-
-	return d.actSell(ctx, price)
+// shouldTakeProfit evaluates profit-taking conditions.
+func (d *DCAStrategy) shouldTakeProfit(price decimal.Decimal) bool {
+	return price.GreaterThan(d.dcaSeries.AvgEntryPrice) &&
+		isPercentDifferenceSignificant(price, d.dcaSeries.AvgEntryPrice, d.dcaPercentThresholdSell)
 }
 
 func (d *DCAStrategy) actBuy(ctx context.Context, price decimal.Decimal) (*entity.TradeEvent, error) {
@@ -367,6 +347,10 @@ func (d *DCAStrategy) actBuy(ctx context.Context, price decimal.Decimal) (*entit
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to calculate buy amount")
 	}
+
+	d.l.Info("Price significantly lower than average, attempting DCA buy.",
+		zap.String("price", price.String()),
+		zap.String("avgEntryPrice", d.dcaSeries.AvgEntryPrice.String()))
 
 	operationTime := time.Now()
 	tradePartValue := int(d.tradePart.IntPart()) + 1
@@ -397,16 +381,11 @@ func (d *DCAStrategy) actBuy(ctx context.Context, price decimal.Decimal) (*entit
 		return nil, err
 	}
 
-	baseBalance, _ := d.trader.GetBalance(ctx, d.pair.From)
-	quoteBalance, _ := d.trader.GetBalance(ctx, d.pair.To)
-
-	d.l.Info("DCA buy executed",
+	d.logBalances(ctx, "DCA buy executed",
 		zap.Int("trade_part", int(d.tradePart.IntPart())),
 		zap.String("price", price.String()),
 		zap.String("amount", individualBuyAmount.String()),
-		zap.String("avg_entry_price", d.dcaSeries.AvgEntryPrice.String()),
-		zap.String(d.pair.From+"_balance", baseBalance.String()),
-		zap.String(d.pair.To+"_balance", quoteBalance.String()))
+		zap.String("avg_entry_price", d.dcaSeries.AvgEntryPrice.String()))
 
 	return &entity.TradeEvent{
 		Action: entity.ActionOpenLong,
@@ -416,39 +395,56 @@ func (d *DCAStrategy) actBuy(ctx context.Context, price decimal.Decimal) (*entit
 	}, nil
 }
 
-func (d *DCAStrategy) calculateSellAmount(profit decimal.Decimal) decimal.Decimal {
-	doubleThreshold := d.dcaPercentThresholdSell.Mul(decimal.NewFromInt(2))
+func (d *DCAStrategy) getTotalBaseAmount() decimal.Decimal {
+	return d.dcaSeries.TotalAmount.Div(d.dcaSeries.AvgEntryPrice)
+}
 
-	// calculate total base currency holdings from quote currency position and average entry price
-	// totalAmount is in quote currency (e.g., USDT), need to convert to base currency (e.g., BTC)
-	totalBaseAmount := d.dcaSeries.TotalAmount.Div(d.dcaSeries.AvgEntryPrice)
+func (d *DCAStrategy) shouldSellAll(profit decimal.Decimal) bool {
+	doubleThreshold := d.dcaPercentThresholdSell.Mul(decimal.NewFromInt(doubleProfitMultiplier))
+	return profit.GreaterThan(doubleThreshold)
+}
 
-	if profit.GreaterThan(doubleThreshold) {
+func (d *DCAStrategy) shouldSellPartial(profit decimal.Decimal) bool {
+	return profit.GreaterThan(d.dcaPercentThresholdSell)
+}
+
+func (d *DCAStrategy) getPartialSellAmount(totalBaseAmount decimal.Decimal) decimal.Decimal {
+	numPurchases := decimal.NewFromInt(int64(len(d.dcaSeries.Purchases)))
+	if numPurchases.IsZero() {
+		return decimal.Zero
+	}
+
+	avgPurchaseAmount := d.dcaSeries.TotalAmount.Div(numPurchases)
+	individualBaseAmount := avgPurchaseAmount.Div(d.dcaSeries.AvgEntryPrice)
+
+	// cap at total base amount if individual amount exceeds it.
+	if individualBaseAmount.GreaterThan(totalBaseAmount) {
 		return totalBaseAmount
 	}
 
-	if profit.GreaterThan(d.dcaPercentThresholdSell) {
-		numPurchases := decimal.NewFromInt(int64(len(d.dcaSeries.Purchases)))
-		if numPurchases.IsZero() {
-			return decimal.Zero
-		}
+	return individualBaseAmount
+}
 
-		avgPurchaseAmount := d.dcaSeries.TotalAmount.Div(numPurchases)
-		individualBaseAmount := avgPurchaseAmount.Div(d.dcaSeries.AvgEntryPrice)
+func (d *DCAStrategy) calculateSellAmount(profit decimal.Decimal) decimal.Decimal {
+	totalBaseAmount := d.getTotalBaseAmount()
 
-		// cap at total base amount if individual amount exceeds it
-		if individualBaseAmount.GreaterThan(totalBaseAmount) {
-			return totalBaseAmount
-		}
+	if d.shouldSellAll(profit) {
+		return totalBaseAmount
+	}
 
-		return individualBaseAmount
+	if d.shouldSellPartial(profit) {
+		return d.getPartialSellAmount(totalBaseAmount)
 	}
 
 	return decimal.Zero
 }
 
 func (d *DCAStrategy) actSell(ctx context.Context, price decimal.Decimal) (*entity.TradeEvent, error) {
-	profit := calculateProfit(price, d.dcaSeries.AvgEntryPrice)
+	profit := percentageDiff(price, d.dcaSeries.AvgEntryPrice)
+
+	d.l.Info("Price significantly higher than average, attempting sell.",
+		zap.String("price", price.String()),
+		zap.String("avgEntryPrice", d.dcaSeries.AvgEntryPrice.String()))
 
 	amountBaseCurrency := d.calculateSellAmount(profit)
 	if amountBaseCurrency.LessThanOrEqual(decimal.Zero) {
@@ -460,8 +456,8 @@ func (d *DCAStrategy) actSell(ctx context.Context, price decimal.Decimal) (*enti
 
 	operationTime := time.Now()
 
-	// calculate total base amount to check if this is a full sell
-	totalBaseAmount := d.dcaSeries.TotalAmount.Div(d.dcaSeries.AvgEntryPrice)
+	// calculate total base amount to check if this is a full sell.
+	totalBaseAmount := d.getTotalBaseAmount()
 	isFullSell := amountBaseCurrency.Equal(totalBaseAmount)
 
 	intent, err := d.journal.Prepare(intentActionSell, price, amountQuoteCurrency, operationTime, 0, isFullSell)
@@ -491,10 +487,6 @@ func (d *DCAStrategy) actSell(ctx context.Context, price decimal.Decimal) (*enti
 		return nil, err
 	}
 
-	// get current balances for logging
-	baseBalance, _ := d.trader.GetBalance(ctx, d.pair.From)
-	quoteBalance, _ := d.trader.GetBalance(ctx, d.pair.To)
-
 	tradeEvent := &entity.TradeEvent{
 		Action: entity.ActionCloseLong,
 		Amount: amountBaseCurrency,
@@ -502,13 +494,11 @@ func (d *DCAStrategy) actSell(ctx context.Context, price decimal.Decimal) (*enti
 		Price:  price,
 	}
 
-	d.l.Info("sell executed",
+	d.logBalances(ctx, "sell executed",
 		zap.String("price", price.String()),
 		zap.String("amountBase", amountBaseCurrency.String()),
 		zap.String("amountQuote", amountQuoteCurrency.String()),
-		zap.String("profit_percent", profit.String()),
-		zap.String(d.pair.From+"_balance", baseBalance.String()),
-		zap.String(d.pair.To+"_balance", quoteBalance.String()))
+		zap.String("profit_percent", profit.String()))
 
 	return tradeEvent, nil
 }
@@ -530,27 +520,17 @@ func isPercentDifferenceSignificant(currentPrice, referencePrice, thresholdPerce
 	return absPercentageDiffHundred.GreaterThanOrEqual(thresholdPercent)
 }
 
-// calculatePercentageChange returns percentage change.
-func calculatePercentageChange(current, reference decimal.Decimal) decimal.Decimal {
+// percentageDiff returns percentage difference between current and reference values.
+func percentageDiff(current, reference decimal.Decimal) decimal.Decimal {
 	if reference.IsZero() {
 		return decimal.Zero
 	}
 	return current.Sub(reference).Div(reference).Mul(decimal.NewFromInt(percentageMultiplier))
 }
 
-// calculateProfit returns profit percentage.
-func calculateProfit(price, avgEntryPrice decimal.Decimal) decimal.Decimal {
-	if avgEntryPrice.IsZero() {
-		return decimal.Zero
-	}
-	return price.Sub(avgEntryPrice).Div(avgEntryPrice).Mul(decimal.NewFromInt(percentageMultiplier))
-}
-
 func (d *DCAStrategy) updateSellState(price decimal.Decimal, waitingForDip bool) {
-	if d.dcaSeries != nil {
-		d.dcaSeries.LastSellPrice = price
-		d.dcaSeries.WaitingForDip = waitingForDip
-	}
+	d.dcaSeries.LastSellPrice = price
+	d.dcaSeries.WaitingForDip = waitingForDip
 }
 
 func (d *DCAStrategy) removeAmountFromPurchases(amount decimal.Decimal) {
@@ -599,26 +579,25 @@ func (d *DCAStrategy) recalculateSeriesStats() {
 	d.dcaSeries.FirstBuyTime = d.dcaSeries.Purchases[0].Time
 }
 
+func (d *DCAStrategy) logBalances(ctx context.Context, action string, extraFields ...zap.Field) {
+	baseBalance, _ := d.trader.GetBalance(ctx, d.pair.From)
+	quoteBalance, _ := d.trader.GetBalance(ctx, d.pair.To)
+
+	fields := append(extraFields,
+		zap.String(d.pair.From+"_balance", baseBalance.String()),
+		zap.String(d.pair.To+"_balance", quoteBalance.String()))
+
+	d.l.Info(action, fields...)
+}
+
 // Initialize loads WAL and reconciles intents.
 func (d *DCAStrategy) Initialize(ctx context.Context) error {
-	// reconcile any pending trade intents from WAL
+	// reconcile any pending trade intents from WAL.
 	if err := d.reconcileTradeIntents(ctx); err != nil {
 		return err
 	}
 
-	// log current balances
-	baseBalance, err := d.trader.GetBalance(ctx, d.pair.From)
-	if err != nil {
-		d.l.Warn("Failed to get base currency balance", zap.Error(err))
-	}
-	quoteBalance, err := d.trader.GetBalance(ctx, d.pair.To)
-	if err != nil {
-		d.l.Warn("Failed to get quote currency balance", zap.Error(err))
-	}
-	d.l.Info("Starting bot",
-		zap.String("pair", d.pair.String()),
-		zap.String(d.pair.From+"_balance", baseBalance.String()),
-		zap.String(d.pair.To+"_balance", quoteBalance.String()))
+	d.logBalances(ctx, "Starting bot", zap.String("pair", d.pair.String()))
 
 	currentPrice, err := d.pricer.GetPrice(ctx, d.pair)
 	if err != nil {
@@ -626,12 +605,7 @@ func (d *DCAStrategy) Initialize(ctx context.Context) error {
 		return errors.Wrapf(err, "failed to get current price for %s", d.pair.String())
 	}
 
-	if d.maxDcaTrades < 1 {
-		d.l.Error("MaxDcaTrades must be at least 1", zap.Int("maxDcaTrades", d.maxDcaTrades))
-		return fmt.Errorf("MaxDcaTrades must be at least 1, configured value: %d", d.maxDcaTrades)
-	}
-
-	// validate that we can calculate initial buy amount
+	// validate that we can calculate initial buy amount.
 	calculatedInitialBuyAmount, err := d.calculateIndividualBuyAmount(ctx)
 	if err != nil {
 		d.l.Error("Failed to calculate initial buy amount", zap.Error(err))
@@ -644,19 +618,19 @@ func (d *DCAStrategy) Initialize(ctx context.Context) error {
 		return fmt.Errorf("calculated initial buy amount is zero, check AmountPercent (%s%%) and current balance", d.amountPercent.String())
 	}
 
-	// set initial reference price if not already set
+	// set initial reference price if not already set.
 	if d.dcaSeries.LastSellPrice.IsZero() {
 		d.updateSellState(currentPrice, d.dcaSeries.WaitingForDip)
 	}
 
-	// check if we need to execute initial buy
+	// check if we need to execute initial buy.
 	if len(d.dcaSeries.Purchases) > 0 {
 		d.l.Info("DCA series already exists (loaded from WAL). Continuing with existing trades.",
 			zap.Int("existingPurchases", len(d.dcaSeries.Purchases)))
 		return nil
 	}
 
-	// execute initial buy
+	// execute initial buy.
 	d.l.Info("No existing DCA series. Executing initial buy.",
 		zap.String("currentPrice", currentPrice.String()),
 		zap.String("amount", calculatedInitialBuyAmount.String()))
