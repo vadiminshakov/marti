@@ -47,30 +47,30 @@ func TestProfit(t *testing.T) {
 		{
 			name:                    "1 year - Conservative",
 			duration:                8760,
-			maxDcaTrades:            20,
-			dcaPercentThresholdBuy:  2,
-			dcaPercentThresholdSell: 20,
+			maxDcaTrades:            10,
+			dcaPercentThresholdBuy:  1.6,
+			dcaPercentThresholdSell: 13,
 		},
 		{
 			name:                    "2 years - Conservative",
 			duration:                17520,
-			maxDcaTrades:            40,
-			dcaPercentThresholdBuy:  2,
-			dcaPercentThresholdSell: 20,
+			maxDcaTrades:            20,
+			dcaPercentThresholdBuy:  1.6,
+			dcaPercentThresholdSell: 13,
 		},
 		{
 			name:                    "1 year - Aggressive",
 			duration:                8760,
 			maxDcaTrades:            100,
 			dcaPercentThresholdBuy:  0.5,
-			dcaPercentThresholdSell: 4,
+			dcaPercentThresholdSell: 6,
 		},
 		{
 			name:                    "2 years - Aggressive",
 			duration:                17520,
 			maxDcaTrades:            200,
 			dcaPercentThresholdBuy:  0.5,
-			dcaPercentThresholdSell: 4,
+			dcaPercentThresholdSell: 6,
 		},
 	}
 
