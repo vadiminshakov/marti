@@ -95,9 +95,11 @@ func createDCAStrategyWithWALDir(l *zap.Logger, pair domain.Pair, amountPercent 
 		return nil, fmt.Errorf("failed to create WAL: %w", err)
 	}
 
-	dcaSeries := &DCASeries{
-		Purchases:         make([]DCAPurchase, 0),
-		ProcessedTradeIDs: make(map[string]bool),
+	dcaSeries := domain.NewDCASeries()
+
+	thresholds, err := domain.NewDCAThresholds(dcaPercentThresholdBuy, dcaPercentThresholdSell, maxDcaTrades)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create thresholds: %w", err)
 	}
 
 	return &DCAStrategy{
@@ -106,15 +108,13 @@ func createDCAStrategyWithWALDir(l *zap.Logger, pair domain.Pair, amountPercent 
 		tradePart:               decimal.Zero,
 		pricer:                  pricer,
 		trader:                  trader,
-		l:                       l,
-		wal:                     wal,
-		journal:                 newTradeJournal(wal, []*tradeIntentRecord{}),
-		dcaSeries:               dcaSeries,
-		maxDcaTrades:            maxDcaTrades,
-		dcaPercentThresholdBuy:  dcaPercentThresholdBuy,
-		dcaPercentThresholdSell: dcaPercentThresholdSell,
-		seriesKey:               seriesKey,
-		orderCheckInterval:      defaultOrderCheckInterval,
+		l:       l,
+		wal:     wal,
+		journal: newTradeJournal(wal, []*tradeIntentRecord{}),
+		dcaSeries: dcaSeries,
+		thresholds: thresholds,
+		seriesKey:          seriesKey,
+		orderCheckInterval: defaultOrderCheckInterval,
 	}, nil
 }
 
@@ -225,9 +225,15 @@ func TestDCAStrategy_Trade_DCABuy_MaxTradesReached(t *testing.T) {
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
+	// add 4 purchases to reach max trades (maxDcaTrades = 4)
 	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 1)
-	require.NoError(t, err, "Failed to add initial DCA purchase")
-	ts.tradePart = decimal.NewFromInt(4) // Max trades reached
+	require.NoError(t, err, "Failed to add purchase 1")
+	err = ts.AddDCAPurchase("", decimal.NewFromInt(49000), decimal.NewFromInt(1000), time.Now(), 2)
+	require.NoError(t, err, "Failed to add purchase 2")
+	err = ts.AddDCAPurchase("", decimal.NewFromInt(48000), decimal.NewFromInt(1000), time.Now(), 3)
+	require.NoError(t, err, "Failed to add purchase 3")
+	err = ts.AddDCAPurchase("", decimal.NewFromInt(47000), decimal.NewFromInt(1000), time.Now(), 4)
+	require.NoError(t, err, "Failed to add purchase 4")
 
 	ctx := context.Background()
 	tradeEvent, err := ts.Trade(ctx)
@@ -470,8 +476,8 @@ func TestIsPercentDifferenceSignificant(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isPercentDifferenceSignificant(tt.currentPrice, tt.referencePrice, tt.thresholdPercent)
-			require.Equal(t, tt.expected, got, "isPercentDifferenceSignificant(%s, %s, %s) = %v, want %v",
+			got := domain.IsPercentDifferenceSignificant(tt.currentPrice, tt.referencePrice, tt.thresholdPercent)
+			require.Equal(t, tt.expected, got, "IsPercentDifferenceSignificant(%s, %s, %s) = %v, want %v",
 				tt.currentPrice.String(), tt.referencePrice.String(), tt.thresholdPercent.String(), got, tt.expected)
 		})
 	}

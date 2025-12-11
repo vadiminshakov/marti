@@ -12,7 +12,7 @@ import (
 
 	"github.com/vadiminshakov/marti/internal/clients"
 	entity "github.com/vadiminshakov/marti/internal/domain"
-	"github.com/vadiminshakov/marti/internal/services/market/providers"
+	"github.com/vadiminshakov/marti/internal/services/market/collector"
 	"github.com/vadiminshakov/marti/internal/services/pricer"
 	"github.com/vadiminshakov/marti/internal/services/trader"
 )
@@ -75,7 +75,7 @@ func (p *binanceProvider) Pricer() (priceService, error) {
 }
 
 func (p *binanceProvider) KlineProvider() (klineService, error) {
-	return providers.NewBinanceKlineProvider(p.client), nil
+	return collector.NewBinanceKlineProvider(p.client), nil
 }
 
 type bybitProvider struct {
@@ -96,7 +96,7 @@ func (p *bybitProvider) Pricer() (priceService, error) {
 }
 
 func (p *bybitProvider) KlineProvider() (klineService, error) {
-	return providers.NewBybitKlineProvider(p.client), nil
+	return collector.NewBybitKlineProvider(p.client), nil
 }
 
 type simulateProvider struct {
@@ -128,7 +128,7 @@ func (p *simulateProvider) Pricer() (priceService, error) {
 }
 
 func (p *simulateProvider) KlineProvider() (klineService, error) {
-	return providers.NewBinanceKlineProvider(p.client.GetBinanceClient()), nil
+	return collector.NewBinanceKlineProvider(p.client.GetBinanceClient()), nil
 }
 
 type hyperliquidProvider struct {
@@ -149,5 +149,5 @@ func (p *hyperliquidProvider) Pricer() (priceService, error) {
 }
 
 func (p *hyperliquidProvider) KlineProvider() (klineService, error) {
-	return providers.NewHyperliquidKlineProvider(p.client.Exchange().Info()), nil
+	return collector.NewHyperliquidKlineProvider(p.client.Exchange().Info()), nil
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
+	entity "github.com/vadiminshakov/marti/internal/domain"
 	"go.uber.org/zap"
 )
 
@@ -157,7 +158,8 @@ func (d *DCAStrategy) applyExecutedSell(intent *tradeIntentRecord) error {
 		d.resetDCASeries(intent.Price)
 	} else {
 		d.l.Info("Partial sell executed", zap.String("amountSoldQuote", amountQuoteCurrency.String()))
-		d.removeAmountFromPurchases(amountQuoteCurrency)
+		d.dcaSeries.RemoveAmount(amountQuoteCurrency)
+		d.tradePart = decimal.NewFromInt(int64(len(d.dcaSeries.Purchases)))
 
 		// check if series is now empty after partial sell
 		if len(d.dcaSeries.Purchases) == 0 || d.dcaSeries.TotalAmount.LessThanOrEqual(decimal.Zero) {
@@ -175,17 +177,15 @@ func (d *DCAStrategy) applyExecutedSell(intent *tradeIntentRecord) error {
 func (d *DCAStrategy) resetDCASeries(sellPrice decimal.Decimal) {
 	d.l.Info("Resetting DCA series and waiting for price drop",
 		zap.String("lastSellPrice", sellPrice.String()),
-		zap.String("requiredDropPercent", d.dcaPercentThresholdBuy.String()))
+		zap.String("requiredDropPercent", d.thresholds.BuyThresholdPercent.String()))
 
 	processedIDs := d.dcaSeries.ProcessedTradeIDs
 	if processedIDs == nil {
 		processedIDs = make(map[string]bool)
 	}
 
-	d.dcaSeries = &DCASeries{
-		Purchases:         make([]DCAPurchase, 0),
-		ProcessedTradeIDs: processedIDs,
-	}
+	d.dcaSeries = entity.NewDCASeries()
+	d.dcaSeries.ProcessedTradeIDs = processedIDs
 	d.tradePart = decimal.Zero
 	d.updateSellState(sellPrice, true)
 }
