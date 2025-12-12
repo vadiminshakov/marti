@@ -22,7 +22,7 @@ type DCAPurchase struct {
 }
 
 // newDCAPurchase creates a validated DCAPurchase.
-func newDCAPurchase(id string, price, amount decimal.Decimal, time time.Time, tradePart int) (DCAPurchase, error) {
+func newDCAPurchase(id string, price, amount decimal.Decimal, purchaseTime time.Time, tradePart int) (DCAPurchase, error) {
 	if price.LessThanOrEqual(decimal.Zero) {
 		return DCAPurchase{}, fmt.Errorf("price must be positive, got %s", price.String())
 	}
@@ -37,7 +37,7 @@ func newDCAPurchase(id string, price, amount decimal.Decimal, time time.Time, tr
 		ID:        id,
 		Price:     price,
 		Amount:    amount,
-		Time:      time,
+		Time:      purchaseTime,
 		TradePart: tradePart,
 	}, nil
 }
@@ -77,18 +77,7 @@ func (s *DCASeries) AddPurchase(id string, price, amount decimal.Decimal, purcha
 	}
 
 	s.Purchases = append(s.Purchases, purchase)
-
-	// update stats
-	if len(s.Purchases) == 1 {
-		s.AvgEntryPrice = price
-		s.FirstBuyTime = purchaseTime
-		s.TotalAmount = amount
-	} else {
-		oldTotalAmount := s.TotalAmount
-		s.TotalAmount = oldTotalAmount.Add(amount)
-		totalWeightedPrice := s.AvgEntryPrice.Mul(oldTotalAmount).Add(price.Mul(amount))
-		s.AvgEntryPrice = totalWeightedPrice.Div(s.TotalAmount)
-	}
+	s.recalculateStats()
 
 	return nil
 }
@@ -135,16 +124,23 @@ func (s *DCASeries) recalculateStats() {
 		return
 	}
 
-	totalAmount := decimal.Zero
-	weightedPriceSum := decimal.Zero
+	totalQuoteAmount := decimal.Zero
+	totalBaseAmount := decimal.Zero
 
 	for _, purchase := range s.Purchases {
-		totalAmount = totalAmount.Add(purchase.Amount)
-		weightedPriceSum = weightedPriceSum.Add(purchase.Price.Mul(purchase.Amount))
+		totalQuoteAmount = totalQuoteAmount.Add(purchase.Amount)
+
+		baseAmount := purchase.Amount.Div(purchase.Price)
+		totalBaseAmount = totalBaseAmount.Add(baseAmount)
 	}
 
-	s.TotalAmount = totalAmount
-	s.AvgEntryPrice = weightedPriceSum.Div(totalAmount)
+	s.TotalAmount = totalQuoteAmount
+
+	if totalBaseAmount.LessThanOrEqual(decimal.Zero) {
+		s.AvgEntryPrice = decimal.Zero
+	} else {
+		s.AvgEntryPrice = totalQuoteAmount.Div(totalBaseAmount)
+	}
 	s.FirstBuyTime = s.Purchases[0].Time
 }
 

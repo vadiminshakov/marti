@@ -7,9 +7,10 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
 	"github.com/vadiminshakov/marti/internal/domain"
 	"github.com/vadiminshakov/marti/internal/services/trader"
-	"go.uber.org/zap"
 )
 
 func setupSimStateDir(t *testing.T) {
@@ -17,17 +18,18 @@ func setupSimStateDir(t *testing.T) {
 	t.Setenv("MARTI_SIMULATE_STATE_DIR", t.TempDir())
 }
 
-// mockSimulatePricer is a simple pricer for testing simulation
+// mockSimulatePricer is a simple pricer for testing simulation.
 type mockSimulatePricer struct {
 	price decimal.Decimal
 }
 
-func (m *mockSimulatePricer) GetPrice(ctx context.Context, pair domain.Pair) (decimal.Decimal, error) {
+func (m *mockSimulatePricer) GetPrice(_ context.Context, _ domain.Pair) (decimal.Decimal, error) {
 	return m.price, nil
 }
 
 func TestDCAStrategy_WithSimulationTrader(t *testing.T) {
 	setupSimStateDir(t)
+
 	pair := domain.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 
@@ -60,8 +62,8 @@ func TestDCAStrategy_WithSimulationTrader(t *testing.T) {
 	usdtBalance, err := simTrader.GetBalance(context.Background(), "USDT")
 	require.NoError(t, err)
 
-	expectedBTC := baseAmount                                            // 0.1
-	expectedUSDT := decimal.NewFromInt(10000).Sub(baseAmount.Mul(price)) // 10000 - 0.1*50000 = 5000
+	expectedBTC := baseAmount // 0.1
+	expectedUSDT := decimal.NewFromInt(10000).Sub(baseAmount.Mul(price))
 
 	assert.True(t, btcBalance.Equal(expectedBTC), "BTC balance should be %s, got %s", expectedBTC, btcBalance)
 	assert.True(t, usdtBalance.Equal(expectedUSDT), "USDT balance should be %s, got %s", expectedUSDT, usdtBalance)
@@ -69,6 +71,7 @@ func TestDCAStrategy_WithSimulationTrader(t *testing.T) {
 
 func TestDCAStrategy_SimulationApplyTrade(t *testing.T) {
 	setupSimStateDir(t)
+
 	pair := domain.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
 
@@ -90,6 +93,7 @@ func TestDCAStrategy_SimulationApplyTrade(t *testing.T) {
 	require.NoError(t, err)
 	usdtAfterBuy, err := simTrader.GetBalance(context.Background(), "USDT")
 	require.NoError(t, err)
+
 	expectedBTC := buyBase // 0.1
 	assert.True(t, btcAfterBuy.Equal(expectedBTC))
 	assert.True(t, usdtAfterBuy.Equal(decimal.NewFromInt(5000))) // 10000 - 5000

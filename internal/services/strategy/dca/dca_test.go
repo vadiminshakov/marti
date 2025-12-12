@@ -12,40 +12,37 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/vadiminshakov/gowal"
+	"go.uber.org/zap"
+
 	"github.com/vadiminshakov/marti/internal/domain"
 	pricerMock "github.com/vadiminshakov/marti/mocks/pricer"
 	traderMock "github.com/vadiminshakov/marti/mocks/trader"
-	"go.uber.org/zap"
 )
 
 func decimalMatcher(expected decimal.Decimal) interface{} {
-	return mock.MatchedBy(func(actual decimal.Decimal) bool {
-		return expected.Equal(actual)
-	})
+	return mock.MatchedBy(expected.Equal)
 }
 
-// mockStandardBalances sets up standard balance mocks for tests
-// Returns 10000 USDT (so that 10% = 1000 USDT per trade)
-// Returns 0 BTC initially
+// mockStandardBalances sets up standard balance mocks for tests.
 func mockStandardBalances(mockTrader *traderMock.Trader) {
 	mockTrader.On("GetBalance", mock.Anything, "USDT").Return(decimal.NewFromInt(10000), nil).Maybe()
 	mockTrader.On("GetBalance", mock.Anything, "BTC").Return(decimal.Zero, nil).Maybe()
 }
 
-func createTestDCAStrategy(t *testing.T, pricer pricer, trader tradersvc) *DCAStrategy {
+func createTestDCAStrategy(t *testing.T, pricer pricer, trader tradersvc) *Strategy {
 	logger := zap.NewNop()
 	pair := domain.Pair{From: "BTC", To: "USDT"}
 	amountPercent := decimal.NewFromInt(10) // 10% of balance
 
 	tempDir, err := os.MkdirTemp("", "test_wal_*")
-	require.NoError(t, err, "Failed to create temp directory")
+	require.NoError(t, err, "failed to create temp directory")
 
 	t.Cleanup(func() {
 		os.RemoveAll(tempDir)
 	})
 
 	ts, err := createDCAStrategyWithWALDir(logger, pair, amountPercent, pricer, trader, 4, decimal.NewFromInt(5), decimal.NewFromInt(10), tempDir)
-	require.NoError(t, err, "Failed to create DCAStrategy")
+	require.NoError(t, err, "failed to create DCA strategy")
 
 	return ts
 }
@@ -58,7 +55,8 @@ func TestDCAStrategy_Initialize(t *testing.T) {
 	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(50000), nil)
 	mockTrader.On("GetBalance", mock.Anything, "USDT").Return(decimal.NewFromInt(10000), nil)
 	mockTrader.On("GetBalance", mock.Anything, "BTC").Return(decimal.Zero, nil)
-	mockTrader.On("ExecuteAction", mock.Anything, domain.ActionOpenLong, decimalMatcher(decimal.NewFromInt(1000)), mock.AnythingOfType("string")).Return(nil)
+	expectedBuyBase := decimal.NewFromInt(1000).Div(decimal.NewFromInt(50000)).RoundFloor(8)
+	mockTrader.On("ExecuteAction", mock.Anything, domain.ActionOpenLong, decimalMatcher(expectedBuyBase), mock.AnythingOfType("string")).Return(nil)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
@@ -70,10 +68,10 @@ func TestDCAStrategy_Initialize(t *testing.T) {
 }
 
 func createDCAStrategyWithWALDir(l *zap.Logger, pair domain.Pair, amountPercent decimal.Decimal, pricer pricer, trader tradersvc,
-	maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell decimal.Decimal, walDir string) (*DCAStrategy, error) {
-
+	maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell decimal.Decimal, walDir string,
+) (*Strategy, error) {
 	if maxDcaTrades < 1 {
-		return nil, fmt.Errorf("MaxDcaTrades must be at least 1, got %d", maxDcaTrades)
+		return nil, fmt.Errorf("maxDcaTrades must be at least 1, got %d", maxDcaTrades)
 	}
 
 	if amountPercent.LessThan(decimal.NewFromInt(1)) || amountPercent.GreaterThan(decimal.NewFromInt(100)) {
@@ -102,19 +100,21 @@ func createDCAStrategyWithWALDir(l *zap.Logger, pair domain.Pair, amountPercent 
 		return nil, fmt.Errorf("failed to create thresholds: %w", err)
 	}
 
-	return &DCAStrategy{
-		pair:                    pair,
-		amountPercent:           amountPercent,
-		tradePart:               decimal.Zero,
-		pricer:                  pricer,
-		trader:                  trader,
-		l:       l,
-		wal:     wal,
-		journal: newTradeJournal(wal, []*tradeIntentRecord{}),
-		dcaSeries: dcaSeries,
-		thresholds: thresholds,
+	thresholdsCopy := thresholds
+
+	return &Strategy{
+		pair:               pair,
+		amountPercent:      amountPercent,
+		tradePart:          decimal.Zero,
+		pricer:             pricer,
+		trader:             trader,
+		l:                  l,
+		wal:                wal,
+		journal:            newTradeJournal(wal, []*tradeIntentRecord{}),
+		dcaSeries:          dcaSeries,
+		thresholds:         &thresholdsCopy,
+		orderCheckInterval: time.Millisecond,
 		seriesKey:          seriesKey,
-		orderCheckInterval: defaultOrderCheckInterval,
 	}, nil
 }
 
@@ -158,7 +158,9 @@ func TestDCAStrategy_Trade_WaitingForDip_PriceDropped(t *testing.T) {
 
 	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(45000), nil) // 10% drop from 50000
 	mockStandardBalances(mockTrader)
-	mockTrader.On("ExecuteAction", mock.Anything, domain.ActionOpenLong, decimalMatcher(decimal.NewFromInt(1000)), mock.AnythingOfType("string")).Return(nil)
+
+	expectedBuyBase := decimal.NewFromInt(1000).Div(decimal.NewFromInt(45000)).RoundFloor(8)
+	mockTrader.On("ExecuteAction", mock.Anything, domain.ActionOpenLong, decimalMatcher(expectedBuyBase), mock.AnythingOfType("string")).Return(nil)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
@@ -170,7 +172,7 @@ func TestDCAStrategy_Trade_WaitingForDip_PriceDropped(t *testing.T) {
 	require.NoError(t, err, "unexpected error")
 	require.NotNil(t, tradeEvent, "expected TradeEvent when price drops during dip waiting")
 	require.Equal(t, domain.ActionOpenLong, tradeEvent.Action, "expected OpenLong action")
-	require.True(t, tradeEvent.Amount.Equal(decimal.NewFromInt(1000)), "expected amount 1000, got %v", tradeEvent.Amount)
+	require.True(t, tradeEvent.Amount.Equal(expectedBuyBase), "expected amount %s, got %s", expectedBuyBase, tradeEvent.Amount)
 }
 
 func TestDCAStrategy_Trade_WaitingForDip_PriceNotDroppedEnough(t *testing.T) {
@@ -198,13 +200,16 @@ func TestDCAStrategy_Trade_DCABuy_PriceSignificantlyLower(t *testing.T) {
 
 	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(45000), nil) // significantly lower price
 	mockStandardBalances(mockTrader)
-	mockTrader.On("ExecuteAction", mock.Anything, domain.ActionOpenLong, decimalMatcher(decimal.NewFromInt(1000)), mock.AnythingOfType("string")).Return(nil)
+
+	expectedBuyBase := decimal.NewFromInt(1000).Div(decimal.NewFromInt(45000)).RoundFloor(8)
+	mockTrader.On("ExecuteAction", mock.Anything, domain.ActionOpenLong, decimalMatcher(expectedBuyBase), mock.AnythingOfType("string")).Return(nil)
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
 	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 1)
 	require.NoError(t, err, "Failed to add initial DCA purchase")
+
 	ts.tradePart = decimal.NewFromInt(1)
 
 	ctx := context.Background()
@@ -212,7 +217,7 @@ func TestDCAStrategy_Trade_DCABuy_PriceSignificantlyLower(t *testing.T) {
 	require.NoError(t, err, "unexpected error")
 	require.NotNil(t, tradeEvent, "expected TradeEvent for DCA buy")
 	require.Equal(t, domain.ActionOpenLong, tradeEvent.Action, "expected OpenLong action")
-	require.True(t, tradeEvent.Amount.Equal(decimal.NewFromInt(1000)), "expected amount 1000, got %v", tradeEvent.Amount)
+	require.True(t, tradeEvent.Amount.Equal(expectedBuyBase), "expected amount %s, got %s", expectedBuyBase, tradeEvent.Amount)
 }
 
 func TestDCAStrategy_Trade_DCABuy_MaxTradesReached(t *testing.T) {
@@ -251,6 +256,7 @@ func TestDCAStrategy_Trade_Sell_PriceSignificantlyHigher(t *testing.T) {
 	// Purchase: 1000 USDT at price 50000 = 0.005 BTC
 	// Expected sell amount: 0.005 BTC (1000 USDT / 50000 avg entry price)
 	expectedSellBTC := decimal.NewFromInt(1000).Div(decimal.NewFromInt(50000))
+
 	mockStandardBalances(mockTrader)
 	mockTrader.On("ExecuteAction", mock.Anything, domain.ActionCloseLong, decimalMatcher(expectedSellBTC), mock.AnythingOfType("string")).Return(nil)
 
@@ -277,6 +283,7 @@ func TestDCAStrategy_Trade_Sell_FullSellOnDoubleThreshold(t *testing.T) {
 	// Purchase: 1000 USDT at price 50000 = 0.005 BTC
 	// Expected sell amount: 0.005 BTC (full position)
 	expectedSellBTC := decimal.NewFromInt(1000).Div(decimal.NewFromInt(50000))
+
 	mockStandardBalances(mockTrader)
 	mockTrader.On("ExecuteAction", mock.Anything, domain.ActionCloseLong, decimalMatcher(expectedSellBTC), mock.AnythingOfType("string")).Return(nil)
 
@@ -320,7 +327,9 @@ func TestDCAStrategy_Trade_BuyError(t *testing.T) {
 
 	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(45000), nil) // significantly lower price
 	mockStandardBalances(mockTrader)
-	mockTrader.On("ExecuteAction", mock.Anything, domain.ActionOpenLong, decimalMatcher(decimal.NewFromInt(1000)), mock.AnythingOfType("string")).Return(errors.New("buy failed"))
+
+	expectedBuyBase := decimal.NewFromInt(1000).Div(decimal.NewFromInt(45000)).RoundFloor(8)
+	mockTrader.On("ExecuteAction", mock.Anything, domain.ActionOpenLong, decimalMatcher(expectedBuyBase), mock.AnythingOfType("string")).Return(errors.New("buy failed"))
 
 	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()

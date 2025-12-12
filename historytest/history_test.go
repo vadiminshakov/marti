@@ -47,30 +47,30 @@ func TestProfit(t *testing.T) {
 		{
 			name:                    "1 year - Conservative",
 			duration:                8760,
-			maxDcaTrades:            10,
-			dcaPercentThresholdBuy:  1.6,
+			maxDcaTrades:            40,
+			dcaPercentThresholdBuy:  1.2,
 			dcaPercentThresholdSell: 13,
 		},
 		{
 			name:                    "2 years - Conservative",
 			duration:                17520,
-			maxDcaTrades:            20,
-			dcaPercentThresholdBuy:  1.6,
+			maxDcaTrades:            40,
+			dcaPercentThresholdBuy:  1.2,
 			dcaPercentThresholdSell: 13,
 		},
 		{
 			name:                    "1 year - Aggressive",
 			duration:                8760,
-			maxDcaTrades:            100,
+			maxDcaTrades:            80,
 			dcaPercentThresholdBuy:  0.5,
-			dcaPercentThresholdSell: 6,
+			dcaPercentThresholdSell: 3,
 		},
 		{
 			name:                    "2 years - Aggressive",
 			duration:                17520,
-			maxDcaTrades:            200,
+			maxDcaTrades:            80,
 			dcaPercentThresholdBuy:  0.5,
-			dcaPercentThresholdSell: 6,
+			dcaPercentThresholdSell: 3,
 		},
 	}
 
@@ -119,35 +119,40 @@ func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell fl
 	balanceBTC, _ := decimal.NewFromString(btcBalanceInWallet)
 	balanceUSDT, _ := decimal.NewFromString(usdtBalanceInWallet)
 
-	trader, strategyFactory := createStrategyFactory(logger, pair, prices, balanceBTC, balanceUSDT, maxDcaTrades, dcaPercentThresholdBuy, dcaPercentThresholdSell)
-
-	price, ok := <-prices
-	if !ok {
-		return botSummary{}, fmt.Errorf("prices channel is closed")
-	}
+	feed := newPriceFeed()
+	trader, strategyFactory := createStrategyFactory(logger, pair, feed, balanceBTC, balanceUSDT, maxDcaTrades, dcaPercentThresholdBuy, dcaPercentThresholdSell)
 
 	var (
-		lastPriceBTC    = price
+		lastPriceBTC    decimal.Decimal
 		tradingStrategy internal.TradingStrategy
 	)
 
-	tradingStrategy, err = strategyFactory()
-	if err != nil {
-		if !strings.Contains(err.Error(), "channel less than min") {
-			log.Fatalf("failed to create trading strategy: %s", err)
-		}
-	}
-
 	ctx := context.Background()
 
-	if tradingStrategy != nil {
-		if err := tradingStrategy.Initialize(ctx); err != nil {
-			log.Fatalf("failed to initialize strategy: %s", err)
-		}
-		defer tradingStrategy.Close()
-	}
-
 	for range klines {
+		price, ok := <-prices
+		if !ok {
+			return botSummary{}, fmt.Errorf("prices channel is closed")
+		}
+
+		feed.Set(price)
+		lastPriceBTC = price
+
+		if tradingStrategy == nil {
+			tradingStrategy, err = strategyFactory()
+			if err != nil {
+				if !strings.Contains(err.Error(), "channel less than min") {
+					log.Fatalf("failed to create trading strategy: %s", err)
+				}
+				return botSummary{}, err
+			}
+
+			if err := tradingStrategy.Initialize(ctx); err != nil {
+				log.Fatalf("failed to initialize strategy: %s", err)
+			}
+			defer tradingStrategy.Close()
+		}
+
 		// execute trade
 		tradeEvent, err := tradingStrategy.Trade(ctx)
 		if err != nil {
@@ -227,9 +232,9 @@ func prepareData(filePath string, pair *domain.Pair) (chan decimal.Decimal, chan
 	return prices, klines, cleanup, nil
 }
 
-func createStrategyFactory(logger *zap.Logger, pair *domain.Pair, prices chan decimal.Decimal, balanceBTC, balanceUSDT decimal.Decimal, maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell float64) (*traderCsv, func() (internal.TradingStrategy, error)) {
-	pricer := &pricerCsv{pricesCh: prices}
-	trader := &traderCsv{pair: pair, balance1: balanceBTC, balance2: balanceUSDT, pricesCh: prices, executed: make(map[string]decimal.Decimal)}
+func createStrategyFactory(logger *zap.Logger, pair *domain.Pair, feed *priceFeed, balanceBTC, balanceUSDT decimal.Decimal, maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell float64) (*traderCsv, func() (internal.TradingStrategy, error)) {
+	pricer := &pricerCsv{feed: feed}
+	trader := &traderCsv{pair: pair, balance1: balanceBTC, balance2: balanceUSDT, executed: make(map[string]decimal.Decimal), feed: feed}
 
 	return trader, func() (internal.TradingStrategy, error) {
 		dcaPercentThresholdBuyDecimal := decimal.NewFromFloat(dcaPercentThresholdBuy)

@@ -6,23 +6,27 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
-	entity "github.com/vadiminshakov/marti/internal/domain"
 	"go.uber.org/zap"
+
+	entity "github.com/vadiminshakov/marti/internal/domain"
 )
 
 // reconcileTradeIntents applies pending trade intents.
-func (d *DCAStrategy) reconcileTradeIntents(ctx context.Context) error {
+func (d *Strategy) reconcileTradeIntents(ctx context.Context) error {
 	if d.journal == nil {
 		return nil
 	}
 
 	intents := d.journal.Intents()
+
 	pending := make([]*tradeIntentRecord, 0, len(intents))
+
 	for _, it := range intents {
 		if it != nil && it.Status == tradeIntentStatusPending {
 			pending = append(pending, it)
 		}
 	}
+
 	if len(pending) == 0 {
 		return nil
 	}
@@ -36,84 +40,106 @@ func (d *DCAStrategy) reconcileTradeIntents(ctx context.Context) error {
 				zap.Error(err),
 				zap.String("intent_id", intent.ID))
 
-			continue
+			return err
 		}
 	}
 
 	return nil
 }
 
-// processPendingIntent polls until intent execution is applied.
-func (d *DCAStrategy) processPendingIntent(ctx context.Context, intent *tradeIntentRecord) error {
+// processPendingIntent waits for intent execution and applies it.
+func (d *Strategy) processPendingIntent(ctx context.Context, intent *tradeIntentRecord) error {
 	// if already applied to series, ensure journal reflects done and return
 	if d.isTradeProcessed(intent.ID) {
 		_ = d.journal.MarkDone(intent)
+
 		return nil
 	}
 
-	// defensive default for polling interval
+	// defensive default for polling interval.
 	if d.orderCheckInterval <= 0 {
 		d.orderCheckInterval = defaultOrderCheckInterval
 	}
 
 	for {
-		executed, filledAmount, err := d.trader.OrderExecuted(ctx, intent.ID)
+		executed, filledBaseAmount, err := d.trader.OrderExecuted(ctx, intent.ID)
 		if err != nil {
 			return errors.Wrapf(err, "failed to check order execution for intent %s", intent.ID)
 		}
 
 		// track partial fill progress by updating the intent amount in journal.
-		// filledAmount from OrderExecuted is in BASE currency (e.g., BTC),
-		// but intent.Amount is stored in QUOTE currency (e.g., USDT).
-		// Convert filledAmount to quote using intent.Price.
-		// Round to 8 decimal places to avoid floating point precision issues.
-		filledQuoteAmount := filledAmount.Mul(intent.Price).Round(8)
+		// filledBaseAmount from OrderExecuted is in BASE currency (e.g., BTC),
+		// intent.Amount is stored in QUOTE currency (e.g., USDT).
+		// For buys, QUOTE reflects actual spent quote at execution price.
+		// For sells, QUOTE reflects removed cost basis and is scaled by filledBaseAmount/BaseAmount.
+		var filledQuoteAmount decimal.Decimal
+
+		switch intent.Action {
+		case intentActionSell:
+			if intent.BaseAmount.GreaterThan(decimal.Zero) {
+				filledQuoteAmount = intent.Amount.Mul(filledBaseAmount).Div(intent.BaseAmount).Round(8)
+			}
+		default:
+			filledQuoteAmount = filledBaseAmount.Mul(intent.Price).Round(8)
+		}
+
 		if filledQuoteAmount.GreaterThan(decimal.Zero) && !filledQuoteAmount.Equal(intent.Amount.Round(8)) {
 			_ = d.journal.UpdateAmount(intent, filledQuoteAmount)
 			intent.Amount = filledQuoteAmount
 		}
 
 		if !executed {
-			// not yet completed — wait and retry
-			time.Sleep(d.orderCheckInterval)
+			timer := time.NewTimer(d.orderCheckInterval)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+
+				return errors.Wrap(ctx.Err(), "reconciliation canceled")
+			case <-timer.C:
+			}
+
 			continue
 		}
 
 		d.l.Info("Order executed, applying to DCA series",
 			zap.String("intent_id", intent.ID),
 			zap.String("action", string(intent.Action)),
-			zap.String("filled_amount", filledAmount.String()))
+			zap.String("filled_amount_base", filledBaseAmount.String()),
+			zap.String("filled_amount_quote", filledQuoteAmount.String()))
 
 		switch intent.Action {
 		case intentActionBuy:
-			// executed buy with zero amount is invalid → mark failed
-			if filledAmount.LessThanOrEqual(decimal.Zero) {
-				if err := d.journal.MarkFailed(intent, errors.New("zero filled amount")); err != nil {
-					return err
+			// executed buy with zero amount is invalid -> mark failed.
+			if filledBaseAmount.LessThanOrEqual(decimal.Zero) {
+				if markErr := d.journal.MarkFailed(intent, errors.New("zero filled amount")); markErr != nil {
+					return markErr
 				}
+
 				return nil
 			}
-			if err := d.applyExecutedBuy(intent); err != nil {
-				return errors.Wrapf(err, "failed to apply executed buy for intent %s", intent.ID)
+
+			if applyErr := d.applyExecutedBuy(intent); applyErr != nil {
+				return errors.Wrapf(applyErr, "failed to apply executed buy for intent %s", intent.ID)
 			}
 		case intentActionSell:
-			if err := d.applyExecutedSell(intent); err != nil {
-				return errors.Wrapf(err, "failed to apply executed sell for intent %s", intent.ID)
+			if applyErr := d.applyExecutedSell(intent); applyErr != nil {
+				return errors.Wrapf(applyErr, "failed to apply executed sell for intent %s", intent.ID)
 			}
 		default:
 			return errors.Errorf("unknown intent action: %s", intent.Action)
 		}
 
-		// mark intent done after applying to series
+		// mark intent done after applying to series.
 		if err := d.journal.MarkDone(intent); err != nil {
 			return errors.Wrapf(err, "failed to mark intent as done: %s", intent.ID)
 		}
+
 		return nil
 	}
 }
 
 // applyExecutedBuy applies executed buy.
-func (d *DCAStrategy) applyExecutedBuy(intent *tradeIntentRecord) error {
+func (d *Strategy) applyExecutedBuy(intent *tradeIntentRecord) error {
 	if d.isTradeProcessed(intent.ID) {
 		return nil
 	}
@@ -135,7 +161,7 @@ func (d *DCAStrategy) applyExecutedBuy(intent *tradeIntentRecord) error {
 }
 
 // applyExecutedSell applies executed sell.
-func (d *DCAStrategy) applyExecutedSell(intent *tradeIntentRecord) error {
+func (d *Strategy) applyExecutedSell(intent *tradeIntentRecord) error {
 	if d.isTradeProcessed(intent.ID) {
 		return nil
 	}
@@ -148,6 +174,7 @@ func (d *DCAStrategy) applyExecutedSell(intent *tradeIntentRecord) error {
 
 	if amountQuoteCurrency.LessThanOrEqual(decimal.Zero) {
 		d.markTradeProcessed(intent.ID)
+
 		return d.saveDCASeries()
 	}
 
@@ -170,11 +197,12 @@ func (d *DCAStrategy) applyExecutedSell(intent *tradeIntentRecord) error {
 	}
 
 	d.markTradeProcessed(intent.ID)
+
 	return d.saveDCASeries()
 }
 
 // resetDCASeries clears series.
-func (d *DCAStrategy) resetDCASeries(sellPrice decimal.Decimal) {
+func (d *Strategy) resetDCASeries(sellPrice decimal.Decimal) {
 	d.l.Info("Resetting DCA series and waiting for price drop",
 		zap.String("lastSellPrice", sellPrice.String()),
 		zap.String("requiredDropPercent", d.thresholds.BuyThresholdPercent.String()))

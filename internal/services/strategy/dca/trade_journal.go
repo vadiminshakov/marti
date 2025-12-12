@@ -26,21 +26,22 @@ const (
 )
 
 type tradeIntentRecord struct {
+	Amount     decimal.Decimal   `json:"amount"`
+	BaseAmount decimal.Decimal   `json:"base_amount,omitempty"`
+	Price      decimal.Decimal   `json:"price"`
+	Time       time.Time         `json:"time"`
 	ID         string            `json:"id"`
 	Status     string            `json:"status"`
 	Action     tradeIntentAction `json:"action"`
-	Amount     decimal.Decimal   `json:"amount"`
-	Price      decimal.Decimal   `json:"price"`
-	Time       time.Time         `json:"time"`
+	Error      string            `json:"error,omitempty"`
 	TradePart  int               `json:"trade_part,omitempty"`
 	IsFullSell bool              `json:"is_full_sell,omitempty"`
-	Error      string            `json:"error,omitempty"`
 }
 
 type tradeJournal struct {
+	index   map[string]*tradeIntentRecord
 	wal     *gowal.Wal
 	intents []*tradeIntentRecord
-	index   map[string]*tradeIntentRecord
 }
 
 func newTradeJournal(wal *gowal.Wal, intents []*tradeIntentRecord) *tradeJournal {
@@ -48,6 +49,7 @@ func newTradeJournal(wal *gowal.Wal, intents []*tradeIntentRecord) *tradeJournal
 	for _, intent := range intents {
 		index[intent.ID] = intent
 	}
+
 	return &tradeJournal{
 		wal:     wal,
 		intents: intents,
@@ -55,12 +57,13 @@ func newTradeJournal(wal *gowal.Wal, intents []*tradeIntentRecord) *tradeJournal
 	}
 }
 
-func (j *tradeJournal) Prepare(action tradeIntentAction, price, amount decimal.Decimal, eventTime time.Time, tradePart int, isFullSell bool) (*tradeIntentRecord, error) {
+func (j *tradeJournal) Prepare(action tradeIntentAction, price, amountQuote, amountBase decimal.Decimal, eventTime time.Time, tradePart int, isFullSell bool) (*tradeIntentRecord, error) {
 	intent := &tradeIntentRecord{
 		ID:         uuid.New().String(),
 		Status:     tradeIntentStatusPending,
 		Action:     action,
-		Amount:     amount,
+		Amount:     amountQuote,
+		BaseAmount: amountBase,
 		Price:      price,
 		Time:       eventTime,
 		TradePart:  tradePart,
@@ -73,6 +76,7 @@ func (j *tradeJournal) Prepare(action tradeIntentAction, price, amount decimal.D
 
 	j.intents = append(j.intents, intent)
 	j.index[intent.ID] = intent
+
 	return intent, nil
 }
 
@@ -80,12 +84,14 @@ func (j *tradeJournal) MarkFailed(intent *tradeIntentRecord, err error) error {
 	if intent == nil {
 		return nil
 	}
+
 	intent.Status = tradeIntentStatusFailed
 	if err != nil {
 		intent.Error = err.Error()
 	} else {
 		intent.Error = ""
 	}
+
 	return j.persist(intent)
 }
 
@@ -93,8 +99,10 @@ func (j *tradeJournal) MarkDone(intent *tradeIntentRecord) error {
 	if intent == nil {
 		return nil
 	}
+
 	intent.Status = tradeIntentStatusDone
 	intent.Error = ""
+
 	return j.persist(intent)
 }
 
@@ -102,7 +110,9 @@ func (j *tradeJournal) UpdateAmount(intent *tradeIntentRecord, amount decimal.De
 	if intent == nil {
 		return nil
 	}
+
 	intent.Amount = amount
+
 	return j.persist(intent)
 }
 
@@ -115,7 +125,13 @@ func (j *tradeJournal) persist(intent *tradeIntentRecord) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to marshal trade intent")
 	}
+
 	key := fmt.Sprintf("%s%s", tradeIntentKeyPrefix, intent.ID)
 	nextIndex := j.wal.CurrentIndex() + 1
-	return j.wal.Write(nextIndex, key, data)
+
+	if err := j.wal.Write(nextIndex, key, data); err != nil {
+		return errors.Wrap(err, "failed to write trade intent")
+	}
+
+	return nil
 }

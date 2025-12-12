@@ -3,6 +3,7 @@ package historytest
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
@@ -14,11 +15,37 @@ const (
 )
 
 type pricerCsv struct {
-	pricesCh chan decimal.Decimal
+	feed *priceFeed
+}
+
+type priceFeed struct {
+	mu    sync.RWMutex
+	price decimal.Decimal
+}
+
+func newPriceFeed() *priceFeed {
+	return &priceFeed{price: decimal.Zero}
+}
+
+func (f *priceFeed) Set(price decimal.Decimal) {
+	f.mu.Lock()
+	f.price = price
+	f.mu.Unlock()
+}
+
+func (f *priceFeed) Get() decimal.Decimal {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.price
 }
 
 func (p *pricerCsv) GetPrice(ctx context.Context, pair domain.Pair) (decimal.Decimal, error) {
-	return <-p.pricesCh, nil
+	price := p.feed.Get()
+	if price.LessThanOrEqual(decimal.Zero) {
+		return decimal.Zero, errors.New("price is not set")
+	}
+
+	return price, nil
 }
 
 type traderCsv struct {
@@ -27,23 +54,22 @@ type traderCsv struct {
 	balance2      decimal.Decimal
 	oldbalance2   decimal.Decimal
 	firstbalance2 decimal.Decimal
-	pricesCh      chan decimal.Decimal
 	fee           decimal.Decimal
 	dealsCount    uint
 	executed      map[string]decimal.Decimal
+	feed          *priceFeed
 }
 
 // Buy buys amount of asset in trade pair.
 func (t *traderCsv) Buy(ctx context.Context, amount decimal.Decimal, clientOrderID string) error {
-	price, ok := <-t.pricesCh
-	if !ok && price.IsZero() {
-		return errors.New("prices channel is closed")
+	price := t.feed.Get()
+	if price.LessThanOrEqual(decimal.Zero) {
+		return errors.New("price is not set")
 	}
 
-	// when starting with USDT, the amount parameter is in USDT
-	// we need to calculate how much BTC we can buy with this amount of USDT
-	usdtAmount := amount
-	btcAmount := usdtAmount.Div(price) // Convert USDT to BTC based on current price
+	// In production, DCA sends BASE amount to buy.
+	btcAmount := amount
+	usdtAmount := btcAmount.Mul(price)
 
 	result := t.balance2.Sub(usdtAmount)
 	if result.LessThan(decimal.Zero) {
@@ -83,9 +109,9 @@ func (t *traderCsv) Sell(ctx context.Context, amount decimal.Decimal, clientOrde
 
 	// subtract the BTC amount from our balance
 	t.balance1 = t.balance1.Sub(amountToSell)
-	price, ok := <-t.pricesCh
-	if !ok && price.IsZero() {
-		return errors.New("prices channel is closed")
+	price := t.feed.Get()
+	if price.LessThanOrEqual(decimal.Zero) {
+		return errors.New("price is not set")
 	}
 
 	// calculate how much USDT we get for the BTC
