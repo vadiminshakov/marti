@@ -188,6 +188,9 @@ func (d *Strategy) applyExecutedSell(intent *tradeIntentRecord) error {
 		d.dcaSeries.RemoveAmount(amountQuoteCurrency)
 		d.tradePart = decimal.NewFromInt(int64(len(d.dcaSeries.Purchases)))
 
+		// update LastSellPrice for step-by-step sell strategy
+		d.updateSellState(intent.Price, false)
+
 		// check if series is now empty after partial sell
 		if len(d.dcaSeries.Purchases) == 0 || d.dcaSeries.TotalAmount.LessThanOrEqual(decimal.Zero) {
 			d.l.Info("Total amount became zero after partial sell",

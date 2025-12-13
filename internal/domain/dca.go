@@ -8,8 +8,7 @@ import (
 )
 
 const (
-	percentageMultiplier   = 100
-	doubleProfitMultiplier = 2
+	percentageMultiplier = 100
 )
 
 // DCAPurchase represents a single DCA purchase.
@@ -49,6 +48,7 @@ type DCASeries struct {
 	FirstBuyTime      time.Time       `json:"first_buy_time"`
 	TotalAmount       decimal.Decimal `json:"total_amount"`
 	LastSellPrice     decimal.Decimal `json:"last_sell_price"`
+	LastBuyPrice      decimal.Decimal `json:"last_buy_price"`
 	WaitingForDip     bool            `json:"waiting_for_dip"`
 	ProcessedTradeIDs map[string]bool `json:"processed_trade_ids"`
 }
@@ -61,6 +61,7 @@ func NewDCASeries() *DCASeries {
 		AvgEntryPrice:     decimal.Zero,
 		TotalAmount:       decimal.Zero,
 		LastSellPrice:     decimal.Zero,
+		LastBuyPrice:      decimal.Zero,
 	}
 }
 
@@ -78,6 +79,7 @@ func (s *DCASeries) AddPurchase(id string, price, amount decimal.Decimal, purcha
 
 	s.Purchases = append(s.Purchases, purchase)
 	s.recalculateStats()
+	s.LastBuyPrice = price
 
 	return nil
 }
@@ -145,20 +147,25 @@ func (s *DCASeries) recalculateStats() {
 }
 
 // ShouldBuyAtPrice evaluates buy conditions at given price.
+// Only considers additional buys within an active series (not for WaitingForDip logic).
 func (s *DCASeries) ShouldBuyAtPrice(price decimal.Decimal, thresholds DCAThresholds) BuyDecision {
-	// guard: no average price
-	if s.AvgEntryPrice.IsZero() {
-		return BuyDecision{ShouldBuy: false, Reason: "no_avg_price"}
+	// guard: empty series (should not happen in active series context)
+	if s.IsEmpty() {
+		return BuyDecision{ShouldBuy: false, Reason: "empty_series"}
 	}
 
-	// check: price not below average
-	if !price.LessThan(s.AvgEntryPrice) {
-		return BuyDecision{ShouldBuy: false, Reason: "price_not_below_avg"}
+	if s.LastBuyPrice.IsZero() {
+		return BuyDecision{ShouldBuy: false, Reason: "no_last_buy_price"}
+	}
+
+	// check: price not below last buy
+	if !price.LessThan(s.LastBuyPrice) {
+		return BuyDecision{ShouldBuy: false, Reason: "price_not_below_last_buy"}
 	}
 
 	// check: dip not significant
-	if !IsPercentDifferenceSignificant(price, s.AvgEntryPrice, thresholds.BuyThresholdPercent) {
-		return BuyDecision{ShouldBuy: false, Reason: "dip_not_significant"}
+	if !IsPercentDifferenceSignificant(price, s.LastBuyPrice, thresholds.BuyThresholdPercent) {
+		return BuyDecision{ShouldBuy: false, Reason: "price_not_below_threshold"}
 	}
 
 	// check: max trades reached
@@ -166,10 +173,11 @@ func (s *DCASeries) ShouldBuyAtPrice(price decimal.Decimal, thresholds DCAThresh
 		return BuyDecision{ShouldBuy: false, Reason: "max_trades_reached"}
 	}
 
-	return BuyDecision{ShouldBuy: true, Reason: "price_dipped_below_avg"}
+	return BuyDecision{ShouldBuy: true, Reason: "price_dipped_below_last_buy"}
 }
 
 // ShouldTakeProfitAtPrice evaluates sell conditions at given price.
+// First sell is relative to AvgEntryPrice, subsequent sells are relative to LastSellPrice.
 func (s *DCASeries) ShouldTakeProfitAtPrice(price decimal.Decimal, thresholds DCAThresholds) SellDecision {
 	// guard: no average price
 	if s.AvgEntryPrice.IsZero() {
@@ -181,14 +189,24 @@ func (s *DCASeries) ShouldTakeProfitAtPrice(price decimal.Decimal, thresholds DC
 		return SellDecision{ShouldSell: false, Reason: "price_not_above_avg"}
 	}
 
+	// determine reference price: AvgEntryPrice for first sell, LastSellPrice for subsequent
+	reference := s.AvgEntryPrice
+	if !s.LastSellPrice.IsZero() {
+		reference = s.LastSellPrice
+	}
+
+	// check: price not above reference
+	if !price.GreaterThan(reference) {
+		return SellDecision{ShouldSell: false, Reason: "price_not_above_reference"}
+	}
+
 	// check: gain not significant
-	if !IsPercentDifferenceSignificant(price, s.AvgEntryPrice, thresholds.SellThresholdPercent) {
+	if !IsPercentDifferenceSignificant(price, reference, thresholds.SellThresholdPercent) {
 		return SellDecision{ShouldSell: false, Reason: "gain_not_significant"}
 	}
 
-	// calculate profit and sell amount
-	profit := PercentageDiff(price, s.AvgEntryPrice)
-	amount := s.calculateSellAmountInternal(profit, thresholds)
+	// calculate sell amount
+	amount := s.calculateSellAmountInternal()
 
 	if amount.LessThanOrEqual(decimal.Zero) {
 		return SellDecision{ShouldSell: false, Reason: "no_amount_to_sell"}
@@ -197,9 +215,9 @@ func (s *DCASeries) ShouldTakeProfitAtPrice(price decimal.Decimal, thresholds DC
 	totalBase := s.TotalBaseAmount()
 	isFullSell := amount.Equal(totalBase)
 
-	reason := "partial_sell"
+	reason := "partial_sell_step"
 	if isFullSell {
-		reason = "full_sell_double_threshold"
+		reason = "full_sell_by_cap"
 	}
 
 	return SellDecision{
@@ -210,31 +228,28 @@ func (s *DCASeries) ShouldTakeProfitAtPrice(price decimal.Decimal, thresholds DC
 	}
 }
 
-// calculateSellAmountInternal calculates amount to sell based on profit.
-func (s *DCASeries) calculateSellAmountInternal(profit decimal.Decimal, thresholds DCAThresholds) decimal.Decimal {
+// calculateSellAmountInternal calculates amount to sell.
+// Returns the base amount for one step in the staircase sell strategy.
+func (s *DCASeries) calculateSellAmountInternal() decimal.Decimal {
 	totalBase := s.TotalBaseAmount()
-
-	// full sell if profit > 2x threshold
-	doubleThreshold := thresholds.SellThresholdPercent.Mul(decimal.NewFromInt(doubleProfitMultiplier))
-	if profit.GreaterThan(doubleThreshold) {
-		return totalBase
-	}
-
-	// partial sell: sell one "part"
-	numPurchases := decimal.NewFromInt(int64(len(s.Purchases)))
-	if numPurchases.IsZero() {
+	if totalBase.LessThanOrEqual(decimal.Zero) {
 		return decimal.Zero
 	}
 
-	avgPurchaseAmount := s.TotalAmount.Div(numPurchases)
-	individualBaseAmount := avgPurchaseAmount.Div(s.AvgEntryPrice)
+	numPurchases := len(s.Purchases)
+	if numPurchases <= 0 {
+		return decimal.Zero
+	}
 
-	// cap at total base amount if individual exceeds it
-	if individualBaseAmount.GreaterThan(totalBase) {
+	// one "part" = total base / number of purchases
+	partBase := totalBase.Div(decimal.NewFromInt(int64(numPurchases)))
+
+	// cap at total base if part exceeds it
+	if partBase.GreaterThan(totalBase) {
 		return totalBase
 	}
 
-	return individualBaseAmount
+	return partBase
 }
 
 // DCAThresholds encapsulates DCA decision thresholds.
