@@ -263,11 +263,21 @@ const buildGlobalChart = (ctx) => {
       },
       scales: {
         x: {
-          ticks: { 
-            color: '#888888', 
-            maxRotation: 0, 
-            autoSkip: true, 
-            font: { size: isMobile ? 8 : 10 } 
+          type: 'time',
+          time: {
+            displayFormats: {
+              millisecond: 'HH:mm:ss.SSS',
+              second: 'HH:mm:ss',
+              minute: 'HH:mm',
+              hour: 'dd.MM HH:mm',
+              day: 'dd.MM.yyyy'
+            }
+          },
+          ticks: {
+            color: '#888888',
+            maxRotation: 0,
+            autoSkip: true,
+            font: { size: isMobile ? 8 : 10 }
           },
           grid: { display: false, drawBorder: false }
         },
@@ -498,8 +508,7 @@ function appendGlobalLabel(label) {
 function updateGlobalChart(model, _quoteCurrency, totalBalance, ts) {
   const tsDate = ts ? new Date(ts) : new Date();
   const labelDate = Number.isNaN(tsDate.getTime()) ? new Date() : tsDate;
-  const tickLabel = labelDate.toLocaleTimeString([], { hour12: false });
-  appendGlobalLabel(tickLabel);
+  appendGlobalLabel(labelDate);
   const dataset = ensureDataset(model);
   dataset.data[dataset.data.length - 1] = totalBalance;
   scheduleChartUpdate();
