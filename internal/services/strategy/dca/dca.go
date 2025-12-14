@@ -42,6 +42,10 @@ type pricer interface {
 	GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error)
 }
 
+type decisionRecorder interface {
+	SaveDCA(event entity.DCADecisionEvent) error
+}
+
 // Strategy executes DCA trades.
 type Strategy struct {
 	pair          entity.Pair
@@ -49,6 +53,7 @@ type Strategy struct {
 	tradePart     decimal.Decimal
 	pricer        pricer
 	trader        tradersvc
+	recorder      decisionRecorder
 	l             *zap.Logger
 	wal           *gowal.Wal
 	journal       *tradeJournal
@@ -66,6 +71,7 @@ func NewDCAStrategy(
 	amountPercent decimal.Decimal,
 	pricer pricer,
 	trader tradersvc,
+	recorder decisionRecorder,
 	maxDcaTrades int,
 	dcaPercentThresholdBuy decimal.Decimal,
 	dcaPercentThresholdSell decimal.Decimal,
@@ -129,6 +135,7 @@ func NewDCAStrategy(
 		tradePart:          initialTradePart,
 		pricer:             pricer,
 		trader:             trader,
+		recorder:           recorder,
 		l:                  l,
 		wal:                wal,
 		journal:            newTradeJournal(wal, tradeIntents),
@@ -221,6 +228,18 @@ func (d *Strategy) Initialize(ctx context.Context) error {
 	d.l.Info("Initial buy executed successfully.",
 		zap.String("amount_quote", calculatedInitialBuyQuoteAmount.String()),
 		zap.String("amount_base", calculatedInitialBuyBaseAmount.String()))
+
+	if err := d.recorder.SaveDCA(entity.DCADecisionEvent{
+		Timestamp:         operationTime,
+		Pair:              d.pair.String(),
+		Action:            "buy",
+		CurrentPrice:      currentPrice,
+		AverageEntryPrice: d.dcaSeries.AvgEntryPrice,
+		TradePart:         1,
+		QuoteBalance:      calculatedInitialBuyQuoteAmount,
+	}); err != nil {
+		d.l.Error("failed to save DCA decision", zap.Error(err))
+	}
 
 	return nil
 }
@@ -406,6 +425,18 @@ func (d *Strategy) executeBuy(ctx context.Context, price decimal.Decimal) (*enti
 		zap.String("amount_base", buyBaseAmount.String()),
 		zap.String("avg_entry_price", d.dcaSeries.AvgEntryPrice.String()))
 
+	if err := d.recorder.SaveDCA(entity.DCADecisionEvent{
+		Timestamp:         operationTime,
+		Pair:              d.pair.String(),
+		Action:            "buy",
+		CurrentPrice:      price,
+		AverageEntryPrice: d.dcaSeries.AvgEntryPrice,
+		TradePart:         tradePartValue,
+		QuoteBalance:      buyQuoteAmount,
+	}); err != nil {
+		d.l.Error("failed to save DCA decision", zap.Error(err))
+	}
+
 	return &entity.TradeEvent{
 		Action: entity.ActionOpenLong,
 		Amount: buyBaseAmount,
@@ -472,6 +503,18 @@ func (d *Strategy) executeSell(ctx context.Context, price decimal.Decimal, sell 
 		zap.String("amountQuoteProceeds", amountQuoteProceeds.String()),
 		zap.String("amountQuoteCost", amountQuoteCost.String()),
 		zap.String("profit_percent", profit.String()))
+
+	if err := d.recorder.SaveDCA(entity.DCADecisionEvent{
+		Timestamp:         operationTime,
+		Pair:              d.pair.String(),
+		Action:            "sell",
+		CurrentPrice:      price,
+		AverageEntryPrice: d.dcaSeries.AvgEntryPrice,
+		TradePart:         0,
+		QuoteBalance:      amountQuoteProceeds,
+	}); err != nil {
+		d.l.Error("failed to save DCA decision", zap.Error(err))
+	}
 
 	return tradeEvent, nil
 }

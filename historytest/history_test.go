@@ -61,16 +61,16 @@ func TestProfit(t *testing.T) {
 		{
 			name:                    "1 year - Aggressive",
 			duration:                8760,
-			maxDcaTrades:            30,
+			maxDcaTrades:            25,
 			dcaPercentThresholdBuy:  0.5,
-			dcaPercentThresholdSell: 1,
+			dcaPercentThresholdSell: 0.8,
 		},
 		{
 			name:                    "2 years - Aggressive",
 			duration:                17520,
-			maxDcaTrades:            30,
+			maxDcaTrades:            25,
 			dcaPercentThresholdBuy:  0.5,
-			dcaPercentThresholdSell: 1,
+			dcaPercentThresholdSell: 0.8,
 		},
 	}
 
@@ -253,6 +253,7 @@ func createStrategyFactory(logger *zap.Logger, pair *domain.Pair, feed *priceFee
 			amountPercent,
 			pricer,
 			trader,
+			&dummyRecorder{},
 			maxDcaTrades,
 			dcaPercentThresholdBuyDecimal,
 			dcaPercentThresholdSellDecimal,

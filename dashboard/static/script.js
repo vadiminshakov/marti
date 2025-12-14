@@ -685,7 +685,7 @@ let currentFilter = null;
 
 const knownModels = [
   'yandex', 'deepseek', 'qwen', 'moonshot',
-  'openai', 'google', 'anthropic', 'xai'
+  'openai', 'google', 'anthropic', 'xai', 'dca'
 ];
 
 function filterDecisions(model) {
@@ -833,6 +833,20 @@ function createDecisionCard(decision) {
     meta.appendChild(sl);
   }
 
+  if (decision.avg_entry_price && parseFloat(decision.avg_entry_price) > 0) {
+    const avgPrice = document.createElement('span');
+    avgPrice.className = 'ai-meta-pill';
+    avgPrice.textContent = 'Avg Entry: ' + parseFloat(decision.avg_entry_price).toFixed(2);
+    meta.appendChild(avgPrice);
+  }
+
+  if (decision.trade_part) {
+    const part = document.createElement('span');
+    part.className = 'ai-meta-pill';
+    part.textContent = 'Trade Part: ' + decision.trade_part;
+    meta.appendChild(part);
+  }
+
   if (meta.children.length > 0) {
     card.appendChild(meta);
   }
@@ -854,7 +868,7 @@ function connectAIDecisionSSE() {
     aiDecisionSource.close();
   }
 
-  aiDecisionSource = new EventSource('/ai/decisions/stream');
+  aiDecisionSource = new EventSource('/decisions/stream');
 
   aiDecisionSource.onerror = () => {
     if (aiDecisionSource.readyState === EventSource.CLOSED) {
@@ -862,9 +876,16 @@ function connectAIDecisionSSE() {
     }
   };
 
-  aiDecisionSource.addEventListener('ai_decision', (event) => {
+  aiDecisionSource.addEventListener('decision', (event) => {
     try {
-      const decision = JSON.parse(event.data);
+      const payload = JSON.parse(event.data);
+      const decision = payload.data;
+      const type = payload.type;
+
+      if (type === 'dca') {
+        decision.model = 'DCA';
+      }
+
       const card = createDecisionCard(decision);
       aiDecisionsContainer.insertBefore(card, aiDecisionsContainer.firstChild);
 
@@ -872,12 +893,12 @@ function connectAIDecisionSSE() {
         aiDecisionsContainer.removeChild(aiDecisionsContainer.lastChild);
       }
     } catch (err) {
-      console.error('AI decision parse error', err);
+      console.error('Decision parse error', err);
     }
   });
 
   aiDecisionSource.addEventListener('error', () => {
-    console.log('AI decision stream reconnecting...');
+    console.log('Decision stream reconnecting...');
   });
 }
 

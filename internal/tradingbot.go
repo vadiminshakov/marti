@@ -39,14 +39,15 @@ type balanceSnapshotWriter interface {
 	Save(snapshot entity.BalanceSnapshot) error
 }
 
-type aiDecisionWriter interface {
-	Save(event entity.AIDecisionEvent) error
+type decisionStore interface {
+	SaveAI(event entity.AIDecisionEvent) error
+	SaveDCA(event entity.DCADecisionEvent) error
 }
 
 // NewTradingBot creates a new trading bot instance with the specified configuration, exchange client, and logger.
 // It initializes the appropriate trader and pricer components based on the platform specified in the config,
 // and sets up the trading strategy with the provided parameters.
-func NewTradingBot(logger *zap.Logger, conf config.Config, client any, balanceStore balanceSnapshotWriter, decisionStore aiDecisionWriter) (*TradingBot, error) {
+func NewTradingBot(logger *zap.Logger, conf config.Config, client any, balanceStore balanceSnapshotWriter, decisions decisionStore) (*TradingBot, error) {
 	provider, err := newServiceProvider(client, logger)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create service provider")
@@ -88,7 +89,7 @@ func NewTradingBot(logger *zap.Logger, conf config.Config, client any, balanceSt
 		currentPricer,
 		currentTrader,
 		currentKlineProvider,
-		decisionStore,
+		decisions,
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create trading strategy")
@@ -216,10 +217,16 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 		}
 	}
 
+	model := b.Config.Model
+
+	if b.Config.StrategyType == "dca" {
+		model = "DCA"
+	}
+
 	err = b.balanceStore.Save(entity.NewBalanceSnapshot(
 		time.Now().UTC(),
 		b.Config.Pair.String(),
-		b.Config.Model,
+		model,
 		base.String(),
 		quote.String(),
 		total.StringFixed(2),

@@ -39,7 +39,7 @@ type marketDataCollector interface {
 }
 
 type aiDecisionWriter interface {
-	Save(event domain.AIDecisionEvent) error
+	SaveAI(event domain.AIDecisionEvent) error
 }
 
 // AIStrategy executes margin trades.
@@ -453,7 +453,7 @@ func (s *AIStrategy) saveDecision(decision *domain.Decision, snapshot domain.Mar
 		positionEntryPrice,
 	)
 
-	return s.decisionStore.Save(event)
+	return s.decisionStore.SaveAI(event)
 }
 
 // Close logs shutdown.

@@ -24,20 +24,20 @@ type balanceSnapshotReader interface {
 	SnapshotsAfter(index uint64) ([]entity.BalanceSnapshotRecord, error)
 }
 
-type aiDecisionReader interface {
-	EventsAfter(index uint64) ([]entity.AIDecisionEventRecord, error)
+type decisionReader interface {
+	EventsAfter(index uint64) ([]entity.DecisionEventRecord, error)
 }
 
 // Server exposes HTTP endpoints serving the HTML UI and an SSE stream.
 type Server struct {
-	Addr            string
-	Store           balanceSnapshotReader
-	AIDecisionStore aiDecisionReader
+	Addr          string
+	Store         balanceSnapshotReader
+	DecisionStore decisionReader
 }
 
 // NewServer creates a new web server instance.
-func NewServer(addr string, store balanceSnapshotReader, aiDecisionStore aiDecisionReader) *Server {
-	return &Server{Addr: addr, Store: store, AIDecisionStore: aiDecisionStore}
+func NewServer(addr string, store balanceSnapshotReader, decisions decisionReader) *Server {
+	return &Server{Addr: addr, Store: store, DecisionStore: decisions}
 }
 
 // Start runs the HTTP server (blocking) and shuts it down when ctx is cancelled.
@@ -48,7 +48,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.Handle("/", s.staticHandler())
 	mux.HandleFunc("/balance/stream", s.handleBalanceStream)
-	mux.HandleFunc("/ai/decisions/stream", s.handleAIDecisionStream)
+	mux.HandleFunc("/decisions/stream", s.handleDecisionStream)
 
 	server := &http.Server{
 		Addr:              s.Addr,
@@ -86,7 +86,7 @@ func (s *Server) StartWithAutoTLS(ctx context.Context, domains []string, cacheDi
 	mux := http.NewServeMux()
 	mux.Handle("/", s.staticHandler())
 	mux.HandleFunc("/balance/stream", s.handleBalanceStream)
-	mux.HandleFunc("/ai/decisions/stream", s.handleAIDecisionStream)
+	mux.HandleFunc("/decisions/stream", s.handleDecisionStream)
 
 	manager := &autocert.Manager{
 		Prompt:     autocert.AcceptTOS,
@@ -231,10 +231,10 @@ func (s *Server) handleBalanceStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleAIDecisionStream(w http.ResponseWriter, r *http.Request) {
-	if s.AIDecisionStore == nil {
+func (s *Server) handleDecisionStream(w http.ResponseWriter, r *http.Request) {
+	if s.DecisionStore == nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprint(w, "AI decision store not available")
+		fmt.Fprint(w, "decision store not available")
 		return
 	}
 	flusher, ok := w.(http.Flusher)
@@ -257,7 +257,7 @@ func (s *Server) handleAIDecisionStream(w http.ResponseWriter, r *http.Request) 
 
 	lastIndex := parseLastEventID(r.Header.Get("Last-Event-ID"), r.URL.Query().Get("last_event_id"))
 	sendDecisions := func() error {
-		records, err := s.AIDecisionStore.EventsAfter(lastIndex)
+		records, err := s.DecisionStore.EventsAfter(lastIndex)
 		if err != nil {
 			return err
 		}
@@ -265,12 +265,21 @@ func (s *Server) handleAIDecisionStream(w http.ResponseWriter, r *http.Request) 
 			return nil
 		}
 		for _, record := range records {
-			payload, err := json.Marshal(record.Event)
+			// Wrap event to include type
+			wrapper := struct {
+				Type string      `json:"type"`
+				Data interface{} `json:"data"`
+			}{
+				Type: string(record.Type), // "ai" or "dca"
+				Data: record.Event,
+			}
+
+			payload, err := json.Marshal(wrapper)
 			if err != nil {
 				return err
 			}
 			fmt.Fprintf(w, "id: %d\n", record.Index)
-			fmt.Fprintf(w, "event: ai_decision\n")
+			fmt.Fprintf(w, "event: decision\n")
 			fmt.Fprintf(w, "data: %s\n\n", payload)
 			flusher.Flush()
 			lastIndex = record.Index
@@ -279,8 +288,8 @@ func (s *Server) handleAIDecisionStream(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := sendDecisions(); err != nil {
-		http.Error(w, "failed to load AI decisions", http.StatusInternalServerError)
-		log.Printf("AI decision stream initial load: %v", err)
+		http.Error(w, "failed to load decisions", http.StatusInternalServerError)
+		log.Printf("decision stream initial load: %v", err)
 		return
 	}
 
@@ -293,7 +302,7 @@ func (s *Server) handleAIDecisionStream(w http.ResponseWriter, r *http.Request) 
 			flusher.Flush()
 		case <-pollTicker.C:
 			if err := sendDecisions(); err != nil {
-				log.Printf("AI decision stream poll err: %v", err)
+				log.Printf("decision stream poll err: %v", err)
 			}
 		}
 	}

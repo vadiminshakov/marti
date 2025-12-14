@@ -491,6 +491,14 @@ header {
   color: #9c9c9c;
 }
 
+.ai-decision-action.buy {
+  color: #1b9aaa;
+}
+
+.ai-decision-action.sell {
+  color: #d7263d;
+}
+
 .ai-decision-time {
   font-size: .6rem;
   color: var(--ink-mid);

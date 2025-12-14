@@ -21,7 +21,7 @@ func TestDCAStrategy_ReconcileExecutedBuyIntent(t *testing.T) {
 	mockTrader := traderMock.NewTrader(t)
 	mockStandardBalances(mockTrader)
 
-	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
+	ts, _ := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
 	intent := &tradeIntentRecord{
@@ -59,7 +59,7 @@ func TestDCAStrategy_ReconcileExecutedSellIntentFullReset(t *testing.T) {
 	mockTrader := traderMock.NewTrader(t)
 	mockStandardBalances(mockTrader)
 
-	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
+	ts, _ := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
 	// seed series with one purchase
@@ -98,7 +98,7 @@ func TestDCAStrategy_ReconcilePendingIntentPartialFillThenComplete(t *testing.T)
 	mockTrader := traderMock.NewTrader(t)
 	mockStandardBalances(mockTrader)
 
-	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
+	ts, _ := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
 	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), testBuyAmount, time.Now(), 1)
@@ -138,7 +138,7 @@ func TestDCAStrategy_ReconcilePartialSell(t *testing.T) {
 	mockTrader := traderMock.NewTrader(t)
 	mockStandardBalances(mockTrader)
 
-	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
+	ts, _ := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
 	// add two purchases to have enough balance
@@ -181,7 +181,7 @@ func TestDCAStrategy_ReconcileValidationFailureZeroAmount(t *testing.T) {
 	mockTrader := traderMock.NewTrader(t)
 	mockStandardBalances(mockTrader)
 
-	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
+	ts, _ := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
 	intent := &tradeIntentRecord{
@@ -210,7 +210,7 @@ func TestDCAStrategy_ReconcileAlreadyProcessedIntent(t *testing.T) {
 	mockTrader := traderMock.NewTrader(t)
 	mockStandardBalances(mockTrader)
 
-	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
+	ts, _ := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
 	intent := &tradeIntentRecord{
@@ -244,7 +244,7 @@ func TestDCAStrategy_ReconcileAmountUpdateOnPartialFill(t *testing.T) {
 	mockTrader := traderMock.NewTrader(t)
 	mockStandardBalances(mockTrader)
 
-	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
+	ts, _ := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
 	requestedAmount := testBuyAmount
@@ -281,7 +281,7 @@ func TestDCAStrategy_ReconcileMultiplePendingIntents(t *testing.T) {
 	mockTrader := traderMock.NewTrader(t)
 	mockStandardBalances(mockTrader)
 
-	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
+	ts, _ := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
 	// create three buy intents
@@ -338,7 +338,7 @@ func TestDCAStrategy_ReconcilePartialSellLeadingToZeroBalance(t *testing.T) {
 	mockTrader := traderMock.NewTrader(t)
 	mockStandardBalances(mockTrader)
 
-	ts := createTestDCAStrategy(t, mockPricer, mockTrader)
+	ts, _ := createTestDCAStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
 	// add one purchase

@@ -31,7 +31,7 @@ func (f *strategyFactory) createTradingStrategy(
 	pricer priceService,
 	tradeSvc traderService,
 	klineProvider klineService,
-	decisionStore aiDecisionWriter,
+	decisions decisionStore,
 ) (TradingStrategy, error) {
 	switch conf.StrategyType {
 	case "dca":
@@ -43,9 +43,10 @@ func (f *strategyFactory) createTradingStrategy(
 			conf.MaxDcaTrades,
 			conf.DcaPercentThresholdBuy,
 			conf.DcaPercentThresholdSell,
+			decisions,
 		)
 	case "ai":
-		return f.createAIStrategy(conf, pricer, tradeSvc, klineProvider, decisionStore)
+		return f.createAIStrategy(conf, pricer, tradeSvc, klineProvider, decisions)
 	default:
 		return nil, fmt.Errorf("unsupported strategy type: %s", conf.StrategyType)
 	}
@@ -60,6 +61,7 @@ func (f *strategyFactory) createDCAStrategy(
 	maxDcaTrades int,
 	dcaPercentThresholdBuy decimal.Decimal,
 	dcaPercentThresholdSell decimal.Decimal,
+	decisions decisionStore,
 ) (TradingStrategy, error) {
 	dcaStrategy, err := dca.NewDCAStrategy(
 		f.logger,
@@ -67,6 +69,7 @@ func (f *strategyFactory) createDCAStrategy(
 		amountPercent,
 		pricer,
 		tradeSvc,
+		decisions,
 		maxDcaTrades,
 		dcaPercentThresholdBuy,
 		dcaPercentThresholdSell,
@@ -84,7 +87,7 @@ func (f *strategyFactory) createAIStrategy(
 	pricer priceService,
 	tradeSvc traderService,
 	klineProvider klineService,
-	decisionStore aiDecisionWriter,
+	decisions decisionStore,
 ) (TradingStrategy, error) {
 	// create LLM client
 	llmClient, err := clients.NewOpenAICompatibleClient(conf.LLMAPIURL, conf.LLMAPIKey, conf.Model, conf.LLMProxyURL)
@@ -115,7 +118,7 @@ func (f *strategyFactory) createAIStrategy(
 		conf.HigherTimeframe,
 		conf.LookbackPeriods,
 		conf.HigherLookbackPeriods,
-		decisionStore,
+		decisions,
 		conf.Model,
 	)
 	if err != nil {

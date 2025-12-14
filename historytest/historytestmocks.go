@@ -180,3 +180,9 @@ func (t *traderCsv) ExecuteAction(ctx context.Context, action domain.Action, amo
 		return fmt.Errorf("unknown action: %s", action)
 	}
 }
+
+type dummyRecorder struct{}
+
+func (d *dummyRecorder) SaveDCA(event domain.DCADecisionEvent) error {
+	return nil
+}

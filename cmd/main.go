@@ -27,8 +27,8 @@ import (
 	"github.com/vadiminshakov/marti/dashboard"
 	"github.com/vadiminshakov/marti/internal"
 	"github.com/vadiminshakov/marti/internal/clients"
-	"github.com/vadiminshakov/marti/internal/storage/aidecisions"
 	"github.com/vadiminshakov/marti/internal/storage/balancesnapshots"
+	"github.com/vadiminshakov/marti/internal/storage/decisions"
 	"go.uber.org/zap"
 )
 
@@ -73,13 +73,13 @@ func main() {
 		}
 	}()
 
-	aiDecisionStore, err := aidecisions.NewWALStore("")
+	decisionStore, err := decisions.NewWALStore("")
 	if err != nil {
-		logger.Fatal("Failed to initialize AI decision store", zap.Error(err))
+		logger.Fatal("Failed to initialize decision store", zap.Error(err))
 	}
 	defer func() {
-		if err := aiDecisionStore.Close(); err != nil {
-			logger.Warn("Failed to close AI decision store", zap.Error(err))
+		if err := decisionStore.Close(); err != nil {
+			logger.Warn("Failed to close decision store", zap.Error(err))
 		}
 	}()
 
@@ -144,7 +144,7 @@ func main() {
 			zap.String("pair", cfg.Pair.String()),
 		)
 
-		bot, err := internal.NewTradingBot(botLogger, cfg, client, snapshotStore, aiDecisionStore)
+		bot, err := internal.NewTradingBot(botLogger, cfg, client, snapshotStore, decisionStore)
 		if err != nil {
 			botLogger.Fatal("Failed to create trading bot", zap.Error(err))
 		}
@@ -165,7 +165,7 @@ func main() {
 		go func() {
 			defer wg.Done()
 			webLogger := logger.With(zap.String("component", "web"))
-			srv := dashboard.NewServer(webAddr, snapshotStore, aiDecisionStore)
+			srv := dashboard.NewServer(webAddr, snapshotStore, decisionStore)
 			if len(tlsDomains) > 0 {
 				webLogger.Info("Starting web UI with automatic TLS",
 					zap.String("addr", webAddr),
