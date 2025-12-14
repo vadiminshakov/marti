@@ -142,14 +142,16 @@ func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
 			}
 
 			if tradeEvent != nil {
-				logger.Info("Trade event occurred", zap.Any("event", tradeEvent))
-
-				go func() {
-					if err := b.publishBalanceSnapshot(ctx); err != nil {
-						logger.Debug("balance snapshot skipped", zap.Error(err))
-					}
-				}()
+				continue
 			}
+
+			logger.Info("Trade event occurred", zap.Any("event", tradeEvent))
+
+			go func() {
+				if err := b.publishBalanceSnapshot(ctx); err != nil {
+					logger.Debug("balance snapshot skipped", zap.Error(err))
+				}
+			}()
 		}
 	}
 }
