@@ -141,7 +141,7 @@ func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
 				continue
 			}
 
-			if tradeEvent != nil {
+			if tradeEvent == nil {
 				continue
 			}
 
