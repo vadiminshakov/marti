@@ -23,10 +23,12 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/bytedance/gopkg/util/logger"
 	"github.com/vadiminshakov/marti/config"
 	"github.com/vadiminshakov/marti/dashboard"
 	"github.com/vadiminshakov/marti/internal"
 	"github.com/vadiminshakov/marti/internal/clients"
+	"github.com/vadiminshakov/marti/internal/setup"
 	"github.com/vadiminshakov/marti/internal/storage/balancesnapshots"
 	"github.com/vadiminshakov/marti/internal/storage/decisions"
 	"go.uber.org/zap"
@@ -36,11 +38,26 @@ func main() {
 	var webAddr string
 	var tlsDomainsArg string
 	var tlsCacheDir string
+	var uiFlag bool
 
 	flag.StringVar(&webAddr, "web", ":8000", "address for web UI (disable with empty string)")
 	flag.StringVar(&tlsDomainsArg, "tls-domain", "", "comma-separated list of domains for automatic TLS via ACME (e.g. Let's Encrypt); requires ports 80 and 443")
 	flag.StringVar(&tlsCacheDir, "tls-cache-dir", "cert-cache", "directory to cache automatic TLS certificates")
+	flag.BoolVar(&uiFlag, "ui", false, "open terminal UI configuration wizard if config is missing")
 	flag.Parse()
+
+	// check if we need to run setup ui
+	configFlag := flag.Lookup("config")
+	if uiFlag && (configFlag == nil || configFlag.Value.String() == "") {
+		logger.Info("Starting TUI configuration wizard...")
+		if err := setup.RunTUI(); err != nil {
+			logger.Fatal("Setup failed", zap.Error(err))
+		}
+
+		if err := flag.Set("config", "config.gen.yaml"); err != nil {
+			logger.Fatal("Failed to set config flag after setup", zap.Error(err))
+		}
+	}
 
 	var tlsDomains []string
 	if tlsDomainsArg != "" {
