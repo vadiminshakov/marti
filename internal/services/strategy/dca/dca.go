@@ -536,12 +536,26 @@ func (d *Strategy) updateSellState(price decimal.Decimal, waitingForDip bool) {
 }
 
 func (d *Strategy) calculateBuyQuoteAmount(ctx context.Context) (decimal.Decimal, error) {
+	// if ongoing series, use stored allocated balance
+	if d.dcaSeries.AllocatedQuoteAmount.GreaterThan(decimal.Zero) {
+		return d.dcaSeries.AllocatedQuoteAmount.Div(decimal.NewFromInt(int64(d.thresholds.MaxTrades))), nil
+	}
+
+	// new series: fetch current balance
 	quoteBalance, err := d.trader.GetBalance(ctx, d.pair.To)
 	if err != nil {
 		return decimal.Decimal{}, errors.Wrapf(err, "failed to get %s balance", d.pair.To)
 	}
 
-	individualQuoteAmount := quoteBalance.Mul(d.amountPercent).Div(decimal.NewFromInt(percentageMultiplier))
+	// calculate allocated amount for the entire series
+	// allocated = total balance * amount percent / 100
+	allocatedAmount := quoteBalance.Mul(d.amountPercent).Div(decimal.NewFromInt(percentageMultiplier))
+
+	// store it for subsequent steps in this series
+	d.dcaSeries.AllocatedQuoteAmount = allocatedAmount
+
+	// calculate individual trade amount: allocated / max trades
+	individualQuoteAmount := allocatedAmount.Div(decimal.NewFromInt(int64(d.thresholds.MaxTrades)))
 
 	return individualQuoteAmount, nil
 }

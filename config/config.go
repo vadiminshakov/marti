@@ -23,7 +23,9 @@ type Config struct {
 	Pair domain.Pair
 	// StrategyType selects strategy ("dca" or "ai").
 	StrategyType string
-	// AmountPercent is % of quote balance per trade (DCA only).
+	// AmountPercent is the % of total balance to allocate for the entire DCA series.
+	// The individual trade amount will be allocated / max_dca_trades.
+	// Example: balance 1000, amount 10% -> allocated 100. If max_dca_trades 5 -> buy 20 each time.
 	AmountPercent decimal.Decimal
 	// PollPriceInterval defines price polling interval.
 	PollPriceInterval time.Duration

@@ -8,6 +8,9 @@
   # NOTE: leverage > 1 can ONLY be used with market_type: margin, NOT with spot
   leverage: 1
   # The percentage of available balance to be used for trading. The value should be in the range of 1 to 100.
+  # 'amount' is the % of total balance to allocate for the entire DCA series.
+  # The individual trade amount will be allocated / max_dca_trades.
+  # Example: balance 1000, amount 10% -> allocated 100. If max_dca_trades 5 -> buy 20 each time.
   amount: 20
   # The time interval between polling market prices to make trading decision (buy/sell/do nothing).
   pollpriceinterval: 5m

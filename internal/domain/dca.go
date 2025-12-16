@@ -51,17 +51,21 @@ type DCASeries struct {
 	LastBuyPrice      decimal.Decimal `json:"last_buy_price"`
 	WaitingForDip     bool            `json:"waiting_for_dip"`
 	ProcessedTradeIDs map[string]bool `json:"processed_trade_ids"`
+	// AllocatedQuoteAmount is the total allocated quote currency amount for this DCA series.
+	// Individual trades are calculated as AllocatedQuoteAmount / MaxDcaTrades.
+	AllocatedQuoteAmount decimal.Decimal `json:"allocated_quote_amount"`
 }
 
 // NewDCASeries creates a new empty DCASeries with initialized collections.
 func NewDCASeries() *DCASeries {
 	return &DCASeries{
-		Purchases:         make([]DCAPurchase, 0),
-		ProcessedTradeIDs: make(map[string]bool),
-		AvgEntryPrice:     decimal.Zero,
-		TotalAmount:       decimal.Zero,
-		LastSellPrice:     decimal.Zero,
-		LastBuyPrice:      decimal.Zero,
+		Purchases:            make([]DCAPurchase, 0),
+		ProcessedTradeIDs:    make(map[string]bool),
+		AvgEntryPrice:        decimal.Zero,
+		TotalAmount:          decimal.Zero,
+		LastSellPrice:        decimal.Zero,
+		LastBuyPrice:         decimal.Zero,
+		AllocatedQuoteAmount: decimal.Zero,
 	}
 }
 
