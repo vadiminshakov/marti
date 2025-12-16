@@ -238,6 +238,42 @@ header {
   text-transform: uppercase;
 }
 
+.stats-row {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px dashed #e0e0e0;
+  gap: 1rem;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.stat-label {
+  font-size: .55rem;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--ink-mid);
+}
+
+.stat-value {
+  font-size: .8rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.stat-value.pnl-positive {
+  color: #1b9aaa;
+}
+
+.stat-value.pnl-negative {
+  color: #d7263d;
+}
+
 .meta {
   display: flex;
   flex-wrap: wrap;
@@ -534,33 +570,37 @@ header {
   padding-bottom: .8rem;
   border-bottom: 1px solid #e0e0e0;
 }
+
 .model-filters {
-  display:flex;
-  flex-wrap:wrap;
-  gap:.5rem;
-  margin-bottom:1rem;
-  padding-bottom:1rem;
-  border-bottom:1px dashed var(--ink-soft);
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px dashed var(--ink-soft);
 }
+
 .filter-btn {
-  background:var(--panel);
-  border:1px solid #e0e0e0;
-  padding:.3rem .6rem;
-  font-size:.6rem;
-  font-family:'Space Mono','JetBrains Mono',monospace;
-  cursor:pointer;
-  border-radius:4px;
-  color:var(--ink-mid);
-  transition:all 0.2s ease;
+  background: var(--panel);
+  border: 1px solid #e0e0e0;
+  padding: .3rem .6rem;
+  font-size: .6rem;
+  font-family: 'Space Mono', 'JetBrains Mono', monospace;
+  cursor: pointer;
+  border-radius: 4px;
+  color: var(--ink-mid);
+  transition: all 0.2s ease;
 }
+
 .filter-btn:hover {
-  border-color:var(--ink);
-  color:var(--ink);
+  border-color: var(--ink);
+  color: var(--ink);
 }
+
 .filter-btn.active {
-  background:var(--ink);
-  color:#fff;
-  border-color:var(--ink);
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
 }
 
 @media (max-width:640px) {
@@ -658,7 +698,7 @@ header {
     flex: 1;
     min-height: 0;
   }
-  
+
   .ai-decision-card {
     font-size: 0.65rem;
   }

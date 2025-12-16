@@ -556,12 +556,38 @@ function ensureModelView(model) {
   totalValue.textContent = '0';
   equity.append(label, totalValue);
 
-  card.append(header, equity);
+  // stats row
+  const statsRow = document.createElement('div');
+  statsRow.className = 'stats-row';
+
+  const createStat = (label, value) => {
+    const el = document.createElement('div');
+    el.className = 'stat-item';
+    const l = document.createElement('div');
+    l.className = 'stat-label';
+    l.textContent = label;
+    const v = document.createElement('div');
+    v.className = 'stat-value';
+    v.textContent = value;
+    el.append(l, v);
+    return { container: el, val: v };
+  };
+
+  const pnl = createStat('PnL', '—');
+  const base = createStat('Base', '0');
+  const quote = createStat('Quote', '0');
+
+  statsRow.append(pnl.container, base.container, quote.container);
+
+  card.append(header, equity, statsRow);
   pairContainer.appendChild(card);
 
   const view = {
     totalEl: totalValue,
-    updatedEl: updated
+    updatedEl: updated,
+    pnlEl: pnl.val,
+    baseEl: base.val,
+    quoteEl: quote.val
   };
   pairViews.set(safeModel, view);
   return view;
@@ -582,6 +608,19 @@ function deriveTotal(payload) {
 function renderModelNumbers(view, aggregate) {
   const quoteCurrency = aggregate.quoteCurrency || '';
   view.totalEl.textContent = aggregate.totalBalance.toFixed(2) + (quoteCurrency ? ' ' + quoteCurrency : '');
+
+  // render stats
+  view.baseEl.textContent = aggregate.totalBase.toFixed(4);
+  view.quoteEl.textContent = aggregate.totalQuote.toFixed(2);
+
+  if (aggregate.initialBalance) {
+    const pnl = aggregate.totalBalance - aggregate.initialBalance;
+    const pnlPercent = (pnl / aggregate.initialBalance) * 100;
+    const sign = pnl >= 0 ? '+' : '';
+    view.pnlEl.textContent = `${sign}${pnl.toFixed(2)} (${sign}${pnlPercent.toFixed(2)}%)`;
+
+    view.pnlEl.className = 'stat-value ' + (pnl >= 0 ? 'pnl-positive' : 'pnl-negative');
+  }
 
   let latestTimestamp = null;
   for (const [, pairData] of aggregate.pairs) {
@@ -620,14 +659,26 @@ function handlePayload(payload) {
   const total = deriveTotal(payload);
   aggregate.pairs.set(pairLabel, {
     totalQuote: total.numeric,
-    timestamp: payload.ts
+    timestamp: payload.ts,
+    base: parseNum(payload.base),
+    quote: parseNum(payload.quote)
   });
 
   let totalBalance = 0;
+  let totalBase = 0;
+  let totalQuote = 0;
   for (const [, pairData] of aggregate.pairs) {
     totalBalance += pairData.totalQuote;
+    totalBase += (pairData.base || 0);
+    totalQuote += (pairData.quote || 0);
   }
   aggregate.totalBalance = totalBalance;
+  aggregate.totalBase = totalBase;
+  aggregate.totalQuote = totalQuote;
+
+  if (!aggregate.initialBalance && totalBalance > 0) {
+    aggregate.initialBalance = totalBalance;
+  }
 
   const view = ensureModelView(model);
   renderModelNumbers(view, aggregate);
