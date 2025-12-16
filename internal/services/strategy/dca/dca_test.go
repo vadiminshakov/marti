@@ -58,7 +58,8 @@ func TestDCAStrategy_Initialize(t *testing.T) {
 	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(50000), nil)
 	mockTrader.On("GetBalance", mock.Anything, "USDT").Return(decimal.NewFromInt(10000), nil)
 	mockTrader.On("GetBalance", mock.Anything, "BTC").Return(decimal.Zero, nil)
-	expectedBuyBase := decimal.NewFromInt(1000).Div(decimal.NewFromInt(50000)).RoundFloor(8)
+	// maxDcaTrades is 4, so initial buy is 1000 / 4 = 250
+	expectedBuyBase := decimal.NewFromInt(250).Div(decimal.NewFromInt(50000)).RoundFloor(8)
 	mockTrader.On("ExecuteAction", mock.Anything, domain.ActionOpenLong, decimalMatcher(expectedBuyBase), mock.AnythingOfType("string")).Return(nil)
 
 	ts, recorder := createTestDCAStrategy(t, mockPricer, mockTrader)
@@ -164,7 +165,8 @@ func TestDCAStrategy_Trade_WaitingForDip_PriceDropped(t *testing.T) {
 	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(45000), nil) // 10% drop from 50000
 	mockStandardBalances(mockTrader)
 
-	expectedBuyBase := decimal.NewFromInt(1000).Div(decimal.NewFromInt(45000)).RoundFloor(8)
+	// maxDcaTrades is 4, so buy amount is 1000 / 4 = 250
+	expectedBuyBase := decimal.NewFromInt(250).Div(decimal.NewFromInt(45000)).RoundFloor(8)
 	mockTrader.On("ExecuteAction", mock.Anything, domain.ActionOpenLong, decimalMatcher(expectedBuyBase), mock.AnythingOfType("string")).Return(nil)
 
 	ts, recorder := createTestDCAStrategy(t, mockPricer, mockTrader)
@@ -207,7 +209,8 @@ func TestDCAStrategy_Trade_DCABuy_PriceSignificantlyLower(t *testing.T) {
 	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(45000), nil) // significantly lower price
 	mockStandardBalances(mockTrader)
 
-	expectedBuyBase := decimal.NewFromInt(1000).Div(decimal.NewFromInt(45000)).RoundFloor(8)
+	// maxDcaTrades is 4, so buy amount is 1000 / 4 = 250
+	expectedBuyBase := decimal.NewFromInt(250).Div(decimal.NewFromInt(45000)).RoundFloor(8)
 	mockTrader.On("ExecuteAction", mock.Anything, domain.ActionOpenLong, decimalMatcher(expectedBuyBase), mock.AnythingOfType("string")).Return(nil)
 
 	ts, recorder := createTestDCAStrategy(t, mockPricer, mockTrader)
@@ -337,7 +340,8 @@ func TestDCAStrategy_Trade_BuyError(t *testing.T) {
 	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(45000), nil) // significantly lower price
 	mockStandardBalances(mockTrader)
 
-	expectedBuyBase := decimal.NewFromInt(1000).Div(decimal.NewFromInt(45000)).RoundFloor(8)
+	// maxDcaTrades is 4, so buy amount is 1000 / 4 = 250
+	expectedBuyBase := decimal.NewFromInt(250).Div(decimal.NewFromInt(45000)).RoundFloor(8)
 	mockTrader.On("ExecuteAction", mock.Anything, domain.ActionOpenLong, decimalMatcher(expectedBuyBase), mock.AnythingOfType("string")).Return(errors.New("buy failed"))
 
 	ts, _ := createTestDCAStrategy(t, mockPricer, mockTrader)
