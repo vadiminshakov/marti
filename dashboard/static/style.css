@@ -254,14 +254,14 @@ header {
 }
 
 .stat-label {
-  font-size: .55rem;
+  font-size: .75rem;
   text-transform: uppercase;
   letter-spacing: .1em;
   color: var(--ink-mid);
 }
 
 .stat-value {
-  font-size: .8rem;
+  font-size: .9rem;
   font-weight: 700;
   color: var(--ink);
 }

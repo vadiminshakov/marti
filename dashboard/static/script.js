@@ -30,6 +30,12 @@ const extractQuoteCurrency = (pair) => {
   return parts.length > 1 ? parts[parts.length - 1] : 'UNKNOWN';
 };
 
+const extractBaseCurrency = (pair) => {
+  if (!pair || typeof pair !== 'string') { return 'UNKNOWN'; }
+  const parts = pair.split('_');
+  return parts.length > 1 ? parts[0] : 'UNKNOWN';
+};
+
 const shortenModelName = (model) => {
   if (!model || typeof model !== 'string') { return '—'; }
   if (model.startsWith('gpt://')) {
@@ -570,7 +576,7 @@ function ensureModelView(model) {
     v.className = 'stat-value';
     v.textContent = value;
     el.append(l, v);
-    return { container: el, val: v };
+    return { container: el, lbl: l, val: v };
   };
 
   const pnl = createStat('PnL', '—');
@@ -587,7 +593,9 @@ function ensureModelView(model) {
     updatedEl: updated,
     pnlEl: pnl.val,
     baseEl: base.val,
-    quoteEl: quote.val
+    baseLabelEl: base.lbl,
+    quoteEl: quote.val,
+    quoteLabelEl: quote.lbl
   };
   pairViews.set(safeModel, view);
   return view;
@@ -610,7 +618,9 @@ function renderModelNumbers(view, aggregate) {
   view.totalEl.textContent = aggregate.totalBalance.toFixed(2) + (quoteCurrency ? ' ' + quoteCurrency : '');
 
   // render stats
+  view.baseLabelEl.textContent = aggregate.baseCurrency || 'Base';
   view.baseEl.textContent = aggregate.totalBase.toFixed(4);
+  view.quoteLabelEl.textContent = aggregate.quoteCurrency || 'Quote';
   view.quoteEl.textContent = aggregate.totalQuote.toFixed(2);
 
   if (aggregate.initialBalance) {
@@ -645,15 +655,19 @@ function handlePayload(payload) {
     return;
   }
 
+  const baseCurrency = extractBaseCurrency(pairLabel);
   let aggregate = modelAggregates.get(model);
   if (!aggregate) {
     aggregate = {
       model: model,
       quoteCurrency: quoteCurrency,
+      baseCurrency: baseCurrency,
       pairs: new Map(),
       totalBalance: 0
     };
     modelAggregates.set(model, aggregate);
+  } else if (aggregate.baseCurrency !== 'Base' && aggregate.baseCurrency !== baseCurrency) {
+    aggregate.baseCurrency = 'Base';
   }
 
   const total = deriveTotal(payload);
