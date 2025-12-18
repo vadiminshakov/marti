@@ -108,16 +108,16 @@ func TestDCAStrategy_ReconcilePendingIntentPartialFillThenComplete(t *testing.T)
 		ID:     "intent-partial-done",
 		Status: tradeIntentStatusPending,
 		Action: intentActionSell,
-		Amount: testBuyAmount,
+		Amount: ts.dcaSeries.TotalAmount,
 		Price:  decimal.NewFromInt(55000),
 		Time:   time.Now(),
 	}
+	intent.BaseAmount = ts.dcaSeries.TotalBaseAmount()
 	ts.journal.intents = append(ts.journal.intents, intent)
 	ts.journal.index[intent.ID] = intent
 
-	partialFillQuote := testBuyAmount.Div(decimal.NewFromInt(2))
-	partialFillBase := partialFillQuote.Div(intent.Price)
-	fullFillBase := testBuyAmount.Div(intent.Price)
+	partialFillBase := intent.BaseAmount.Div(decimal.NewFromInt(2))
+	fullFillBase := intent.BaseAmount
 
 	// return partial fill a few times, then complete.
 	mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(false, partialFillBase, nil).Times(3)
@@ -128,7 +128,7 @@ func TestDCAStrategy_ReconcilePendingIntentPartialFillThenComplete(t *testing.T)
 
 	require.Equal(t, tradeIntentStatusDone, ts.journal.index[intent.ID].Status, "intent should be marked done after completion")
 	require.True(t, ts.isTradeProcessed(intent.ID), "intent should be marked processed after completion")
-	require.True(t, ts.journal.index[intent.ID].Amount.Equal(testBuyAmount), "intent amount should be updated to full quote amount")
+	require.True(t, ts.journal.index[intent.ID].Amount.Equal(testBuyAmount), "intent amount should remain the requested quote amount")
 	require.Len(t, ts.dcaSeries.Purchases, 0, "series should reset after full sell is executed")
 	require.True(t, ts.dcaSeries.WaitingForDip, "strategy should wait for dip after completing sell")
 }
@@ -172,7 +172,9 @@ func TestDCAStrategy_ReconcilePartialSell(t *testing.T) {
 
 	require.Equal(t, tradeIntentStatusDone, ts.journal.index[intent.ID].Status, "intent status should be done")
 	require.False(t, ts.dcaSeries.WaitingForDip, "strategy should not wait for dip after partial sell")
-	require.True(t, ts.dcaSeries.TotalAmount.Equal(initialTotal.Sub(sellAmount)), "total amount should be reduced by sell amount")
+	expectedReduction := filledBaseAmount.Mul(ts.dcaSeries.AvgEntryPrice).Round(8)
+	expectedTotal := initialTotal.Sub(expectedReduction).Round(8)
+	require.True(t, ts.dcaSeries.TotalAmount.Round(8).Equal(expectedTotal), "total amount should be reduced by executed cost basis")
 	require.Greater(t, len(ts.dcaSeries.Purchases), 0, "purchases should remain after partial sell")
 }
 
@@ -350,7 +352,8 @@ func TestDCAStrategy_ReconcilePartialSellLeadingToZeroBalance(t *testing.T) {
 		ID:         "intent-partial-to-zero",
 		Status:     tradeIntentStatusPending,
 		Action:     intentActionSell,
-		Amount:     testBuyAmount,
+		Amount:     ts.dcaSeries.TotalAmount,
+		BaseAmount: ts.dcaSeries.TotalBaseAmount(),
 		Price:      decimal.NewFromInt(55000),
 		Time:       time.Now(),
 		IsFullSell: false, // intentionally not marked as full sell
@@ -358,7 +361,7 @@ func TestDCAStrategy_ReconcilePartialSellLeadingToZeroBalance(t *testing.T) {
 	ts.journal.intents = append(ts.journal.intents, intent)
 	ts.journal.index[intent.ID] = intent
 
-	mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(true, intent.Amount.Div(intent.Price), nil)
+	mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(true, ts.dcaSeries.TotalBaseAmount(), nil)
 
 	err = ts.reconcileTradeIntents(context.Background())
 	require.NoError(t, err)

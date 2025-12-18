@@ -67,25 +67,27 @@ func (d *Strategy) processPendingIntent(ctx context.Context, intent *tradeIntent
 			return errors.Wrapf(err, "failed to check order execution for intent %s", intent.ID)
 		}
 
-		// track partial fill progress by updating the intent amount in journal.
-		// filledBaseAmount from OrderExecuted is in BASE currency (e.g., BTC),
-		// intent.Amount is stored in QUOTE currency (e.g., USDT).
-		// For buys, QUOTE reflects actual spent quote at execution price.
-		// For sells, QUOTE reflects removed cost basis and is scaled by filledBaseAmount/BaseAmount.
 		var filledQuoteAmount decimal.Decimal
+
+		requestBaseAmount := intent.BaseAmount
+		if requestBaseAmount.LessThanOrEqual(decimal.Zero) {
+			requestBaseAmount = filledBaseAmount
+		}
 
 		switch intent.Action {
 		case intentActionSell:
-			if intent.BaseAmount.GreaterThan(decimal.Zero) {
-				filledQuoteAmount = intent.Amount.Mul(filledBaseAmount).Div(intent.BaseAmount).Round(8)
+			if requestBaseAmount.GreaterThan(decimal.Zero) {
+				filledQuoteAmount = intent.Amount.Mul(filledBaseAmount).Div(requestBaseAmount).Round(8)
 			}
 		default:
 			filledQuoteAmount = filledBaseAmount.Mul(intent.Price).Round(8)
 		}
 
-		if filledQuoteAmount.GreaterThan(decimal.Zero) && !filledQuoteAmount.Equal(intent.Amount.Round(8)) {
-			_ = d.journal.UpdateAmount(intent, filledQuoteAmount)
-			intent.Amount = filledQuoteAmount
+		if intent.Action == intentActionBuy {
+			if filledQuoteAmount.GreaterThan(decimal.Zero) && !filledQuoteAmount.Equal(intent.Amount.Round(8)) {
+				_ = d.journal.UpdateAmount(intent, filledQuoteAmount)
+				intent.Amount = filledQuoteAmount
+			}
 		}
 
 		if !executed {
@@ -106,6 +108,10 @@ func (d *Strategy) processPendingIntent(ctx context.Context, intent *tradeIntent
 			zap.String("action", string(intent.Action)),
 			zap.String("filled_amount_base", filledBaseAmount.String()),
 			zap.String("filled_amount_quote", filledQuoteAmount.String()))
+
+		if filledBaseAmount.GreaterThan(decimal.Zero) {
+			intent.BaseAmount = filledBaseAmount
+		}
 
 		switch intent.Action {
 		case intentActionBuy:
@@ -166,26 +172,28 @@ func (d *Strategy) applyExecutedSell(intent *tradeIntentRecord) error {
 		return nil
 	}
 
-	// intent.Amount is in quote currency (e.g., USDT)
-	amountQuoteCurrency := intent.Amount
-	if amountQuoteCurrency.GreaterThan(d.dcaSeries.TotalAmount) {
-		amountQuoteCurrency = d.dcaSeries.TotalAmount
+	amountBaseCurrency := intent.BaseAmount
+	totalBaseAmount := d.dcaSeries.TotalBaseAmount()
+	if amountBaseCurrency.GreaterThan(totalBaseAmount) {
+		amountBaseCurrency = totalBaseAmount
 	}
 
-	if amountQuoteCurrency.LessThanOrEqual(decimal.Zero) {
+	if amountBaseCurrency.LessThanOrEqual(decimal.Zero) {
 		d.markTradeProcessed(intent.ID)
 
 		return d.saveDCASeries()
 	}
 
-	isFullSell := intent.IsFullSell || amountQuoteCurrency.Equal(d.dcaSeries.TotalAmount)
+	isFullSell := intent.IsFullSell || amountBaseCurrency.Equal(totalBaseAmount)
 
 	if isFullSell {
-		d.l.Info("Full sell executed", zap.String("amountSoldQuote", amountQuoteCurrency.String()))
+		d.l.Info("Full sell executed",
+			zap.String("amountSoldBase", amountBaseCurrency.String()))
 		d.resetDCASeries(intent.Price)
 	} else {
-		d.l.Info("Partial sell executed", zap.String("amountSoldQuote", amountQuoteCurrency.String()))
-		d.dcaSeries.RemoveAmount(amountQuoteCurrency)
+		d.l.Info("Partial sell executed",
+			zap.String("amountSoldBase", amountBaseCurrency.String()))
+		d.dcaSeries.RemoveBaseAmount(amountBaseCurrency)
 		d.tradePart = decimal.NewFromInt(int64(len(d.dcaSeries.Purchases)))
 
 		// update LastSellPrice for step-by-step sell strategy

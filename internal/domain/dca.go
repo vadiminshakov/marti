@@ -121,6 +121,34 @@ func (s *DCASeries) RemoveAmount(amount decimal.Decimal) {
 	s.recalculateStats()
 }
 
+// RemoveBaseAmount removes a base currency amount by adjusting purchase amounts proportionally.
+func (s *DCASeries) RemoveBaseAmount(amountBase decimal.Decimal) {
+	if amountBase.LessThanOrEqual(decimal.Zero) || len(s.Purchases) == 0 {
+		return
+	}
+
+	remainingBase := amountBase
+
+	for i := len(s.Purchases) - 1; i >= 0 && remainingBase.GreaterThan(decimal.Zero); i-- {
+		purchase := s.Purchases[i]
+		purchaseBase := purchase.Amount.Div(purchase.Price)
+
+		if purchaseBase.LessThanOrEqual(remainingBase) {
+			remainingBase = remainingBase.Sub(purchaseBase)
+			s.Purchases = s.Purchases[:i]
+			continue
+		}
+
+		// remove partial base from this purchase, convert to quote using its own price.
+		quoteToRemove := remainingBase.Mul(purchase.Price)
+		purchase.Amount = purchase.Amount.Sub(quoteToRemove)
+		s.Purchases[i] = purchase
+		remainingBase = decimal.Zero
+	}
+
+	s.recalculateStats()
+}
+
 // recalculateStats recalculates series statistics.
 func (s *DCASeries) recalculateStats() {
 	if len(s.Purchases) == 0 {
