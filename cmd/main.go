@@ -43,7 +43,7 @@ func main() {
 	flag.StringVar(&webAddr, "web", ":8000", "address for web UI (disable with empty string)")
 	flag.StringVar(&tlsDomainsArg, "tls-domain", "", "comma-separated list of domains for automatic TLS via ACME (e.g. Let's Encrypt); requires ports 80 and 443")
 	flag.StringVar(&tlsCacheDir, "tls-cache-dir", "cert-cache", "directory to cache automatic TLS certificates")
-	flag.BoolVar(&uiFlag, "ui", false, "open terminal UI configuration wizard if config is missing")
+	flag.BoolVar(&uiFlag, "setup", false, "open interactive configuration wizard if config is missing")
 	flag.Parse()
 
 	// check if we need to run setup ui

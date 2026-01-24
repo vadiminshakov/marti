@@ -28,13 +28,20 @@ export BINANCE_API_SECRET=your_api_secret
 # export BYBIT_API_KEY=your_api_key  
 # export BYBIT_API_SECRET=your_api_secret
 
-# Run
+# Run with config file
 marti --config config.yaml
+
+# Or use interactive setup wizard to generate config
+marti --setup
 ```
 
 ### Configuration
 
 See [config.yaml](config.yaml) for a complete example.
+
+#### Interactive Setup Mode
+
+Use `marti --setup` to start an interactive terminal wizard that will guide you through the configuration setup. This generates a `config.gen.yaml` file based on your inputs.
 
 
 #### Supported LLM Providers
