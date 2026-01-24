@@ -189,12 +189,12 @@ func main() {
 					zap.String("domains", strings.Join(tlsDomains, ",")),
 				)
 				if err := srv.StartWithAutoTLS(ctx, tlsDomains, tlsCacheDir); err != nil && ctx.Err() == nil {
-					webLogger.Error("Web server (automatic TLS) exited", zap.Error(err))
+					webLogger.Fatal("Failed to start web server with automatic TLS", zap.Error(err))
 				}
 			} else {
 				webLogger.Info("Starting web UI", zap.String("addr", webAddr))
 				if err := srv.Start(ctx); err != nil && ctx.Err() == nil {
-					webLogger.Error("Web server exited", zap.Error(err))
+					webLogger.Fatal("Failed to start web server", zap.Error(err))
 				}
 			}
 		}()
