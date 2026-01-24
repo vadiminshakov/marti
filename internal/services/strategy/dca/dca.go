@@ -296,6 +296,15 @@ func (d *Strategy) GetDCASeries() *entity.DCASeries {
 	return d.dcaSeries
 }
 
+// GetDcaCostBasis returns average entry price and total amount for PnL calculation.
+func (d *Strategy) GetDcaCostBasis() (entryPrice, amount decimal.Decimal) {
+	if d.dcaSeries == nil {
+		return decimal.Zero, decimal.Zero
+	}
+
+	return d.dcaSeries.AvgEntryPrice, d.dcaSeries.TotalBaseAmount()
+}
+
 // AddDCAPurchase records a DCA purchase.
 func (d *Strategy) AddDCAPurchase(intentID string, price, amountQuote decimal.Decimal, purchaseTime time.Time, tradePartValue int) error {
 	if intentID != "" && d.isTradeProcessed(intentID) {

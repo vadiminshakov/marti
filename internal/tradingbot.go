@@ -24,6 +24,14 @@ type TradingStrategy interface {
 	Close() error
 }
 
+// DcaCostBasisProvider is an optional interface that DCA strategies implement
+// to provide cost basis for PnL calculation.
+type DcaCostBasisProvider interface {
+	// GetDcaCostBasis returns average entry price and amount for PnL calculation.
+	// Returns zeros if no position is open.
+	GetDcaCostBasis() (entryPrice, amount decimal.Decimal)
+}
+
 // TradingBot represents a single trading instance that manages the execution
 // of a specific trading strategy on a configured trading pair.
 type TradingBot struct {
@@ -199,7 +207,10 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 
 	total := quote.Add(base.Mul(price))
 
-	var activePosition string
+	var (
+		activePosition                            string
+		entryPrice, positionAmount, unrealizedPnL string
+	)
 
 	if b.Config.MarketType == entity.MarketTypeMargin {
 		position, posErr := b.trader.GetPosition(ctx, b.Config.Pair)
@@ -216,6 +227,25 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 			}
 
 			total = position.CalculateTotalEquity(price, base, quote, b.leverage)
+			entryPrice = position.EntryPrice.String()
+			positionAmount = position.Amount.String()
+			unrealizedPnL = position.PnL(price).StringFixed(2)
+		}
+	}
+
+	// For DCA strategies, get cost basis for PnL calculation.
+	// Only apply for spot market, as margin positions are handled above via trader.GetPosition().
+	if b.Config.MarketType == entity.MarketTypeSpot {
+		if provider, ok := b.tradingStrategy.(DcaCostBasisProvider); ok {
+			avgPrice, amt := provider.GetDcaCostBasis()
+			if amt.GreaterThan(decimal.Zero) && avgPrice.GreaterThan(decimal.Zero) {
+				entryPrice = avgPrice.String()
+				positionAmount = amt.String()
+				// PnL for long spot position: (currentPrice - entryPrice) * amount.
+				pnl := price.Sub(avgPrice).Mul(amt)
+				unrealizedPnL = pnl.StringFixed(2)
+				activePosition = "long"
+			}
 		}
 	}
 
@@ -234,6 +264,9 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 		total.StringFixed(2),
 		price.String(),
 		activePosition,
+		entryPrice,
+		positionAmount,
+		unrealizedPnL,
 	))
 
 	return errors.Wrap(err, "failed to save balance snapshot")
