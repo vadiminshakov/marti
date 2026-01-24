@@ -628,7 +628,6 @@ function renderModelNumbers(view, aggregate) {
     const pnlPercent = (pnl / aggregate.initialBalance) * 100;
     const sign = pnl >= 0 ? '+' : '';
     view.pnlEl.textContent = `${sign}${pnl.toFixed(2)} (${sign}${pnlPercent.toFixed(2)}%)`;
-
     view.pnlEl.className = 'stat-value ' + (pnl >= 0 ? 'pnl-positive' : 'pnl-negative');
   }
 
@@ -675,20 +674,27 @@ function handlePayload(payload) {
     totalQuote: total.numeric,
     timestamp: payload.ts,
     base: parseNum(payload.base),
-    quote: parseNum(payload.quote)
+    quote: parseNum(payload.quote),
+    unrealizedPnL: parseNum(payload.unrealized_pnl),
+    entryPrice: parseNum(payload.entry_price),
+    positionAmount: parseNum(payload.position_amount),
+    position: payload.position
   });
 
   let totalBalance = 0;
   let totalBase = 0;
   let totalQuote = 0;
+  let totalUnrealizedPnL = 0;
   for (const [, pairData] of aggregate.pairs) {
     totalBalance += pairData.totalQuote;
     totalBase += (pairData.base || 0);
     totalQuote += (pairData.quote || 0);
+    totalUnrealizedPnL += (pairData.unrealizedPnL || 0);
   }
   aggregate.totalBalance = totalBalance;
   aggregate.totalBase = totalBase;
   aggregate.totalQuote = totalQuote;
+  aggregate.totalUnrealizedPnL = totalUnrealizedPnL;
 
   if (!aggregate.initialBalance && totalBalance > 0) {
     aggregate.initialBalance = totalBalance;
