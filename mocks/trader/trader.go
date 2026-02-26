@@ -129,6 +129,49 @@ func (_m *Trader) GetBalance(ctx context.Context, currency string) (decimal.Deci
 	return r0, r1
 }
 
+// GetPosition provides a mock function with given fields: ctx, pair
+func (_m *Trader) GetPosition(ctx context.Context, pair domain.Pair) (*domain.Position, error) {
+	ret := _m.Called(ctx, pair)
+
+	var r0 *domain.Position
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, domain.Pair) (*domain.Position, error)); ok {
+		return rf(ctx, pair)
+	}
+	if len(ret) > 0 {
+		if rf, ok := ret.Get(0).(func(context.Context, domain.Pair) *domain.Position); ok {
+			r0 = rf(ctx, pair)
+		} else {
+			if ret.Get(0) != nil {
+				r0 = ret.Get(0).(*domain.Position)
+			}
+		}
+	}
+	if len(ret) > 1 {
+		if rf, ok := ret.Get(1).(func(context.Context, domain.Pair) error); ok {
+			r1 = rf(ctx, pair)
+		} else {
+			r1 = ret.Error(1)
+		}
+	}
+
+	return r0, r1
+}
+
+// SetPositionStops provides a mock function with given fields: ctx, pair, takeProfit, stopLoss
+func (_m *Trader) SetPositionStops(ctx context.Context, pair domain.Pair, takeProfit, stopLoss decimal.Decimal) error {
+	ret := _m.Called(ctx, pair, takeProfit, stopLoss)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, domain.Pair, decimal.Decimal, decimal.Decimal) error); ok {
+		r0 = rf(ctx, pair, takeProfit, stopLoss)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 type mockConstructorTestingTNewTrader interface {
 	mock.TestingT
 	Cleanup(func())
