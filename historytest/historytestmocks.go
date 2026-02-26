@@ -167,6 +167,11 @@ func (t *traderCsv) GetBalance(ctx context.Context, currency string) (decimal.De
 	}
 }
 
+// GetPosition returns nil position for testing (no open positions in CSV backtesting).
+func (t *traderCsv) GetPosition(ctx context.Context, pair domain.Pair) (*domain.Position, error) {
+	return nil, nil
+}
+
 // ExecuteAction routes the action to Buy/Sell methods for testing.
 func (t *traderCsv) ExecuteAction(ctx context.Context, action domain.Action, amount decimal.Decimal, clientOrderID string) error {
 	switch action {
