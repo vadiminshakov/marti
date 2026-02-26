@@ -8,8 +8,6 @@
 
 Marti is a cryptocurrency trading bot with *DCA* and *AI* strategies for multiple exchanges.
 
-## live: https://llmtrade.tech
-
 ![Screenshot](https://github.com/vadiminshakov/marti/blob/main/screenshot.png)
 
 ### Installation
