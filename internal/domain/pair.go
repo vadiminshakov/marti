@@ -12,11 +12,11 @@ type Pair struct {
 }
 
 // String returns the string representation.
-func (p *Pair) String() string {
+func (p Pair) String() string {
 	return fmt.Sprintf("%s_%s", p.From, p.To)
 }
 
 // Symbol returns the concatenated symbol representation.
-func (p *Pair) Symbol() string {
+func (p Pair) Symbol() string {
 	return fmt.Sprintf("%s%s", p.From, p.To)
 }
