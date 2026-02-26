@@ -461,3 +461,24 @@ func (s *AIStrategy) Close() error {
 	s.logger.Info("Closing AI strategy")
 	return nil
 }
+
+// SellAll closes all positions and resets strategy state.
+func (s *AIStrategy) SellAll(ctx context.Context) error {
+	_, position, err := s.fetchAccountState(ctx)
+	if err != nil {
+		return err
+	}
+
+	if position == nil || position.Amount.IsZero() {
+		return errors.New("no position to close")
+	}
+
+	currentPrice, err := s.pricer.GetPrice(ctx, s.pair)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.executeExit(ctx, position.Side, position, currentPrice)
+
+	return err
+}

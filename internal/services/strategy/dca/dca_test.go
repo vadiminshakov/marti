@@ -504,3 +504,84 @@ func TestIsPercentDifferenceSignificant(t *testing.T) {
 		})
 	}
 }
+
+func TestDCAStrategy_Initialize_WaitingForDip(t *testing.T) {
+	mockPricer := pricerMock.NewPricer(t)
+	mockTrader := traderMock.NewTrader(t)
+	pair := domain.Pair{From: "BTC", To: "USDT"}
+
+	currentPrice := decimal.NewFromInt(50000)
+	mockPricer.On("GetPrice", mock.Anything, pair).Return(currentPrice, nil)
+	mockTrader.On("GetBalance", mock.Anything, "BTC").Return(decimal.Zero, nil)
+	mockTrader.On("GetBalance", mock.Anything, "USDT").Return(decimal.NewFromInt(1000), nil)
+
+	tmpDir, err := os.MkdirTemp("", "dca_wal_test_*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	strategy, err := createDCAStrategyWithWALDir(zap.NewNop(), pair, decimal.NewFromInt(10), mockPricer, mockTrader, recorderMock.NewDecisionRecorder(t), 10, decimal.NewFromInt(1), decimal.NewFromInt(5), tmpDir)
+	require.NoError(t, err)
+
+	// Set waiting for dip
+	strategy.dcaSeries.WaitingForDip = true
+	strategy.dcaSeries.LastSellPrice = currentPrice
+
+	err = strategy.Initialize(context.Background())
+	require.NoError(t, err)
+
+	// Should NOT have any purchases
+	require.Equal(t, 0, len(strategy.dcaSeries.Purchases))
+}
+
+func TestDCAStrategy_SellAll_NoPosition_ReturnsError(t *testing.T) {
+	mockPricer := pricerMock.NewPricer(t)
+	mockTrader := traderMock.NewTrader(t)
+	pair := domain.Pair{From: "BTC", To: "USDT"}
+
+	currentPrice := decimal.NewFromInt(50000)
+	mockPricer.On("GetPrice", mock.Anything, pair).Return(currentPrice, nil)
+	mockTrader.On("GetPosition", mock.Anything, pair).Return(&domain.Position{Amount: decimal.Zero}, nil)
+
+	tmpDir, err := os.MkdirTemp("", "dca_wal_test_*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	strategy, err := createDCAStrategyWithWALDir(zap.NewNop(), pair, decimal.NewFromInt(10), mockPricer, mockTrader, recorderMock.NewDecisionRecorder(t), 10, decimal.NewFromInt(1), decimal.NewFromInt(5), tmpDir)
+	require.NoError(t, err)
+
+	err = strategy.SellAll(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no position to sell")
+
+	require.False(t, strategy.dcaSeries.WaitingForDip)
+}
+
+func TestDCAStrategy_SellAll_OutOfSync_FixesWAL(t *testing.T) {
+	mockPricer := pricerMock.NewPricer(t)
+	mockTrader := traderMock.NewTrader(t)
+	pair := domain.Pair{From: "BTC", To: "USDT"}
+
+	currentPrice := decimal.NewFromInt(50000)
+	mockPricer.On("GetPrice", mock.Anything, pair).Return(currentPrice, nil)
+	// Exchange says 0 coins
+	mockTrader.On("GetPosition", mock.Anything, pair).Return(&domain.Position{Amount: decimal.Zero}, nil)
+
+	tmpDir, err := os.MkdirTemp("", "dca_wal_test_*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	strategy, err := createDCAStrategyWithWALDir(zap.NewNop(), pair, decimal.NewFromInt(10), mockPricer, mockTrader, recorderMock.NewDecisionRecorder(t), 10, decimal.NewFromInt(1), decimal.NewFromInt(5), tmpDir)
+	require.NoError(t, err)
+
+	// WAL thinks we have coins
+	err = strategy.AddDCAPurchase("intent-1", currentPrice, decimal.NewFromInt(100), time.Now(), 1)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(strategy.dcaSeries.Purchases))
+
+	err = strategy.SellAll(context.Background())
+	require.NoError(t, err)
+
+	// WAL should be fixed now
+	require.Equal(t, 0, len(strategy.dcaSeries.Purchases))
+	require.True(t, strategy.dcaSeries.WaitingForDip)
+}

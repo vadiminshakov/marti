@@ -36,6 +36,7 @@ type tradersvc interface {
 	// Returns filledAmount in BASE currency (e.g., how many BTC were bought/sold).
 	OrderExecuted(ctx context.Context, clientOrderID string) (executed bool, filledAmount decimal.Decimal, err error)
 	GetBalance(ctx context.Context, currency string) (decimal.Decimal, error)
+	GetPosition(ctx context.Context, pair entity.Pair) (*entity.Position, error)
 }
 
 type pricer interface {
@@ -183,9 +184,14 @@ func (d *Strategy) Initialize(ctx context.Context) error {
 	}
 
 	// check if we need to execute initial buy.
-	if len(d.dcaSeries.Purchases) > 0 {
-		d.l.Info("DCA series already exists (loaded from WAL). Continuing with existing trades.",
-			zap.Int("existingPurchases", len(d.dcaSeries.Purchases)))
+	if len(d.dcaSeries.Purchases) > 0 || d.dcaSeries.WaitingForDip {
+		if d.dcaSeries.WaitingForDip {
+			d.l.Info("Waiting for dip before starting new series.",
+				zap.String("lastSellPrice", d.dcaSeries.LastSellPrice.String()))
+		} else {
+			d.l.Info("DCA series already exists (loaded from WAL). Continuing with existing trades.",
+				zap.Int("existingPurchases", len(d.dcaSeries.Purchases)))
+		}
 
 		return nil
 	}
@@ -289,6 +295,45 @@ func (d *Strategy) Close() error {
 	}
 
 	return nil
+}
+
+// SellAll closes all positions and resets strategy state.
+func (d *Strategy) SellAll(ctx context.Context) error {
+	price, err := d.getValidatedPrice(ctx)
+	if err != nil {
+		return err
+	}
+
+	amountBase := d.dcaSeries.TotalBaseAmount()
+	// check what the exchange thinks
+	pos, err := d.trader.GetPosition(ctx, d.pair)
+	if err != nil {
+		return err
+	}
+
+	realAmount := decimal.Zero
+	if pos != nil {
+		realAmount = pos.Amount.Abs()
+	}
+
+	if amountBase.IsZero() && realAmount.IsZero() {
+		return errors.New("no position to sell")
+	}
+
+	if realAmount.IsZero() {
+		d.l.Warn("DCA SellAll found no position on exchange, but WAL had coins or was out of sync. Fixing state.")
+		d.resetDCASeries(price)
+
+		return d.saveDCASeries()
+	}
+
+	_, err = d.executeSell(ctx, price, entity.SellDecision{
+		Reason:     "SellAll requested",
+		Amount:     realAmount,
+		IsFullSell: true,
+	})
+
+	return err
 }
 
 // GetDCASeries exposes current DCA series.

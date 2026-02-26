@@ -585,7 +585,14 @@ function ensureModelView(model) {
 
   statsRow.append(pnl.container, base.container, quote.container);
 
-  card.append(header, equity, statsRow);
+  const pairsList = document.createElement('div');
+  pairsList.className = 'pairs-list';
+  pairsList.style.marginTop = '1rem';
+  pairsList.style.display = 'flex';
+  pairsList.style.flexDirection = 'column';
+  pairsList.style.gap = '0.5rem';
+
+  card.append(header, equity, statsRow, pairsList);
   pairContainer.appendChild(card);
 
   const view = {
@@ -595,7 +602,8 @@ function ensureModelView(model) {
     baseEl: base.val,
     baseLabelEl: base.lbl,
     quoteEl: quote.val,
-    quoteLabelEl: quote.lbl
+    quoteLabelEl: quote.lbl,
+    pairsListEl: pairsList
   };
   pairViews.set(safeModel, view);
   return view;
@@ -638,6 +646,37 @@ function renderModelNumbers(view, aggregate) {
     }
   }
   view.updatedEl.textContent = formatTs(latestTimestamp);
+
+  // Update pairs list with Sell All buttons
+  if (view.pairsListEl) {
+    const existingPairs = new Set(Array.from(view.pairsListEl.children).map(c => c.dataset.pair));
+    for (const [pairLabel] of aggregate.pairs) {
+      if (!existingPairs.has(pairLabel)) {
+        const btn = document.createElement('button');
+        btn.className = 'sell-all-btn';
+        btn.dataset.pair = pairLabel;
+        btn.textContent = `Sell All ${pairLabel}`;
+        btn.onclick = () => {
+          if (confirm(`Are you sure you want to Sell All for ${pairLabel}?`)) {
+            btn.disabled = true;
+            fetch(`/sellall/${pairLabel}`, { method: 'POST' })
+              .then(async r => {
+                if (!r.ok) {
+                  const t = await r.text();
+                  throw new Error(t);
+                }
+                // success
+              })
+              .catch(err => {
+                alert(`Error: ${err.message}`);
+                btn.disabled = false;
+              });
+          }
+        };
+        view.pairsListEl.appendChild(btn);
+      }
+    }
+  }
 }
 
 function handlePayload(payload) {

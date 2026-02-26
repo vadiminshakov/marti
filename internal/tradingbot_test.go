@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	bybit "github.com/hirokisan/bybit/v2"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
@@ -77,5 +79,57 @@ func TestNewTradingBot(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+type mockTradingStrategy struct {
+	mock.Mock
+}
+
+func (m *mockTradingStrategy) Initialize(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}
+
+func (m *mockTradingStrategy) Trade(ctx context.Context) (*domain.TradeEvent, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.TradeEvent), args.Error(1)
+}
+
+func (m *mockTradingStrategy) Close() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func (m *mockTradingStrategy) SellAll(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}
+
+func TestTradingBot_SellAll(t *testing.T) {
+	logger := zap.NewNop()
+	mockStrategy := new(mockTradingStrategy)
+	mockStrategy.On("SellAll", mock.Anything).Return(nil)
+
+	bot := &TradingBot{
+		tradingStrategy: mockStrategy,
+		logger:          logger,
+		restartChan:     make(chan struct{}, 1),
+	}
+
+	err := bot.SellAll(context.Background())
+	assert.NoError(t, err)
+
+	mockStrategy.AssertExpectations(t)
+
+	// Check if signal is in channel
+	select {
+	case <-bot.restartChan:
+		// success
+	default:
+		t.Fatal("expected signal in restartChan")
 	}
 }

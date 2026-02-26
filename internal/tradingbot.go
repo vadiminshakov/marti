@@ -22,6 +22,8 @@ type TradingStrategy interface {
 	Trade(ctx context.Context) (*entity.TradeEvent, error)
 	// Close performs cleanup operations when the strategy is shut down
 	Close() error
+	// SellAll closes all positions and resets strategy state
+	SellAll(ctx context.Context) error
 }
 
 // DcaCostBasisProvider is an optional interface that DCA strategies implement
@@ -41,6 +43,13 @@ type TradingBot struct {
 	balanceStore    balanceSnapshotWriter
 	Config          config.Config
 	leverage        int
+
+	logger        *zap.Logger
+	klineProvider klineService
+	decisions     decisionStore
+	factory       *strategyFactory
+
+	restartChan chan struct{}
 }
 
 type balanceSnapshotWriter interface {
@@ -110,6 +119,11 @@ func NewTradingBot(logger *zap.Logger, conf config.Config, client any, balanceSt
 		pricer:          currentPricer,
 		leverage:        leverage,
 		balanceStore:    balanceStore,
+		logger:          logger,
+		klineProvider:   currentKlineProvider,
+		decisions:       decisions,
+		factory:         factory,
+		restartChan:     make(chan struct{}, 1),
 	}, nil
 }
 
@@ -124,44 +138,96 @@ func (b *TradingBot) Close() {
 // Trade method at regular intervals defined by PollPriceInterval.
 // The method blocks until the context is cancelled or an unrecoverable error occurs.
 func (b *TradingBot) Run(ctx context.Context, logger *zap.Logger) error {
-	if err := b.tradingStrategy.Initialize(ctx); err != nil {
-		return errors.Wrap(err, "failed to initialize trading strategy")
-	}
-
 	go b.streamBalances(ctx, logger.With(zap.String("component", "balance-reporter")))
 
-	ticker := time.NewTicker(b.Config.PollPriceInterval)
-	defer ticker.Stop()
-
-	logger.Info("Starting trading loop", zap.Duration("poll_interval", b.Config.PollPriceInterval))
-
 	for {
-		select {
-		case <-ctx.Done():
-			logger.Info("Context done, stopping trading bot run loop")
-
-			return errors.Wrap(ctx.Err(), "context done")
-		case <-ticker.C:
-			tradeEvent, err := b.tradingStrategy.Trade(ctx)
-			if err != nil {
-				logger.Error("Trading strategy failed", zap.Error(err))
-
-				continue
-			}
-
-			if tradeEvent == nil {
-				continue
-			}
-
-			logger.Info("Trade event occurred", zap.Any("event", tradeEvent))
-
-			go func() {
-				if err := b.publishBalanceSnapshot(ctx); err != nil {
-					logger.Debug("balance snapshot skipped", zap.Error(err))
-				}
-			}()
+		if err := b.tradingStrategy.Initialize(ctx); err != nil {
+			return errors.Wrap(err, "failed to initialize trading strategy")
 		}
+
+		ticker := time.NewTicker(b.Config.PollPriceInterval)
+		logger.Info("Starting trading loop", zap.Duration("poll_interval", b.Config.PollPriceInterval))
+
+		shouldRestart := false
+		err := func() error {
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					logger.Info("Context done, stopping trading bot run loop")
+
+					return errors.Wrap(ctx.Err(), "context done")
+				case <-b.restartChan:
+					logger.Info("Restart signal received, re-initializing strategy")
+					shouldRestart = true
+
+					return nil
+				case <-ticker.C:
+					tradeEvent, err := b.tradingStrategy.Trade(ctx)
+					if err != nil {
+						logger.Error("Trading strategy failed", zap.Error(err))
+
+						continue
+					}
+
+					if tradeEvent == nil {
+						continue
+					}
+
+					logger.Info("Trade event occurred", zap.Any("event", tradeEvent))
+
+					go func() {
+						if err := b.publishBalanceSnapshot(ctx); err != nil {
+							logger.Debug("balance snapshot skipped", zap.Error(err))
+						}
+					}()
+				}
+			}
+		}()
+
+		if err != nil {
+			return err
+		}
+
+		if shouldRestart {
+			b.tradingStrategy.Close()
+			newStrategy, err := b.factory.createTradingStrategy(
+				b.Config,
+				b.pricer,
+				b.trader,
+				b.klineProvider,
+				b.decisions,
+			)
+			if err != nil {
+				return errors.Wrap(err, "failed to recreate trading strategy on restart")
+			}
+			b.tradingStrategy = newStrategy
+
+			continue
+		}
+
+		return nil
 	}
 }
 
+// SellAll stops the trading bot, closes all positions and restarts the bot.
+func (b *TradingBot) SellAll(ctx context.Context) error {
+	b.logger.Info("SellAll requested, stopping and selling all positions")
 
+	if err := b.tradingStrategy.SellAll(ctx); err != nil {
+		return errors.Wrap(err, "failed to sell all positions")
+	}
+
+	select {
+	case b.restartChan <- struct{}{}:
+	default:
+		// restart signal already sent
+	}
+
+	return nil
+}
+
+// GetPair returns the trading pair of the bot.
+func (b *TradingBot) GetPair() entity.Pair {
+	return b.Config.Pair
+}

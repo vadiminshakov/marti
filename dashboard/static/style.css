@@ -603,6 +603,33 @@ header {
   border-color: var(--ink);
 }
 
+.sell-all-btn {
+  background: #fdf2f2;
+  color: #d7263d;
+  border: 1px solid #fbd5d5;
+  padding: 0.6rem 1rem;
+  font-size: 0.6rem;
+  font-family: 'Space Mono', 'JetBrains Mono', monospace;
+  cursor: pointer;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  transition: all 0.2s ease;
+  font-weight: 700;
+  width: 100%;
+}
+
+.sell-all-btn:hover {
+  background: #d7263d;
+  color: #fff;
+  border-color: #d7263d;
+}
+
+.sell-all-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 @media (max-width:640px) {
   body {
     padding: 0;

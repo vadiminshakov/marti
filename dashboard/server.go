@@ -28,16 +28,22 @@ type decisionReader interface {
 	EventsAfter(index uint64) ([]entity.DecisionEventRecord, error)
 }
 
+type TradingBotInterface interface {
+	SellAll(ctx context.Context) error
+	GetPair() entity.Pair
+}
+
 // Server exposes HTTP endpoints serving the HTML UI and an SSE stream.
 type Server struct {
 	Addr          string
 	Store         balanceSnapshotReader
 	DecisionStore decisionReader
+	Bots          []TradingBotInterface
 }
 
 // NewServer creates a new web server instance.
-func NewServer(addr string, store balanceSnapshotReader, decisions decisionReader) *Server {
-	return &Server{Addr: addr, Store: store, DecisionStore: decisions}
+func NewServer(addr string, store balanceSnapshotReader, decisions decisionReader, bots []TradingBotInterface) *Server {
+	return &Server{Addr: addr, Store: store, DecisionStore: decisions, Bots: bots}
 }
 
 // Start runs the HTTP server (blocking) and shuts it down when ctx is cancelled.
@@ -49,6 +55,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.Handle("/", s.staticHandler())
 	mux.HandleFunc("/balance/stream", s.handleBalanceStream)
 	mux.HandleFunc("/decisions/stream", s.handleDecisionStream)
+	mux.HandleFunc("POST /sellall/{pair}", s.handleSellAll)
 
 	server := &http.Server{
 		Addr:              s.Addr,
@@ -87,6 +94,7 @@ func (s *Server) StartWithAutoTLS(ctx context.Context, domains []string, cacheDi
 	mux.Handle("/", s.staticHandler())
 	mux.HandleFunc("/balance/stream", s.handleBalanceStream)
 	mux.HandleFunc("/decisions/stream", s.handleDecisionStream)
+	mux.HandleFunc("POST /sellall/{pair}", s.handleSellAll)
 
 	manager := &autocert.Manager{
 		Prompt:     autocert.AcceptTOS,
@@ -403,4 +411,32 @@ func thinRecords(records []entity.BalanceSnapshotRecord) []entity.BalanceSnapsho
 
 	// append last 100 records as is
 	return append(thinned, records[len(records)-keepLast:]...)
+}
+
+func (s *Server) handleSellAll(w http.ResponseWriter, r *http.Request) {
+	pairStr := r.PathValue("pair")
+	if pairStr == "" {
+		http.Error(w, "missing pair", http.StatusBadRequest)
+		return
+	}
+
+	var targetBot TradingBotInterface
+	for _, bot := range s.Bots {
+		if bot.GetPair().String() == pairStr {
+			targetBot = bot
+			break
+		}
+	}
+
+	if targetBot == nil {
+		http.Error(w, "bot not found for pair: "+pairStr, http.StatusNotFound)
+		return
+	}
+
+	if err := targetBot.SellAll(r.Context()); err != nil {
+		http.Error(w, fmt.Errorf("sell all failed: %w", err).Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }

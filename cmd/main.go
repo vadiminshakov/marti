@@ -118,6 +118,7 @@ func main() {
 	}()
 
 	var wg sync.WaitGroup
+	var bots []*internal.TradingBot
 
 	for _, cfg := range configs {
 		cfg := cfg
@@ -165,6 +166,7 @@ func main() {
 		if err != nil {
 			botLogger.Fatal("Failed to create trading bot", zap.Error(err))
 		}
+		bots = append(bots, bot)
 
 		wg.Add(1)
 		go func(bot *internal.TradingBot, l *zap.Logger) {
@@ -182,7 +184,12 @@ func main() {
 		go func() {
 			defer wg.Done()
 			webLogger := logger.With(zap.String("component", "web"))
-			srv := dashboard.NewServer(webAddr, snapshotStore, decisionStore)
+			// convert []*internal.TradingBot to []dashboard.TradingBotInterface
+			webBots := make([]dashboard.TradingBotInterface, len(bots))
+			for i, b := range bots {
+				webBots[i] = b
+			}
+			srv := dashboard.NewServer(webAddr, snapshotStore, decisionStore, webBots)
 			if len(tlsDomains) > 0 {
 				webLogger.Info("Starting web UI with automatic TLS",
 					zap.String("addr", webAddr),
