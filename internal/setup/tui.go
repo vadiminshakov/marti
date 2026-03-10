@@ -40,7 +40,8 @@ var (
 // RunTUI launches the terminal configuration wizard.
 func RunTUI() error {
 	fmt.Print("\033[H\033[2J")
-	fmt.Println(headerStyle.Render("  MARTI  ·  Config Wizard  "))
+	fmt.Println(headerStyle.Render("  MARTI  ·  Add Trading Pair  "))
+	fmt.Println(mutedStyle.Render("  Add a new trading pair to config.gen.yaml.\n"))
 	fmt.Println(mutedStyle.Render("  Use ↑/↓ to navigate, Enter to confirm, ESC to go back.\n"))
 
 	var (
@@ -255,12 +256,21 @@ func RunTUI() error {
 		}
 	}
 
-	data, err := yaml.Marshal([]config.ConfigTmp{cfgTmp})
+	const filename = "config.gen.yaml"
+
+	// Read existing configs to append to them.
+	var existing []config.ConfigTmp
+	if existingData, err := os.ReadFile(filename); err == nil {
+		_ = yaml.Unmarshal(existingData, &existing)
+	}
+
+	existing = append(existing, cfgTmp)
+
+	data, err := yaml.Marshal(existing)
 	if err != nil {
 		return fmt.Errorf("failed to generate yaml: %w", err)
 	}
 
-	const filename = "config.gen.yaml"
 	if err := os.WriteFile(filename, data, 0644); err != nil {
 		return fmt.Errorf("failed to save config file: %w", err)
 	}
