@@ -24,6 +24,22 @@ const normalizeModel = (value) => {
   return value.trim();
 };
 
+const dcaGroupPrefix = 'DCA:';
+
+const buildAggregateKey = (model, pair) => {
+  if (model === 'DCA') {
+    return `${dcaGroupPrefix}${pair || '—'}`;
+  }
+  return model || '—';
+};
+
+const formatAggregateLabel = (aggregateKey) => {
+  if (typeof aggregateKey === 'string' && aggregateKey.startsWith(dcaGroupPrefix)) {
+    return aggregateKey.slice(dcaGroupPrefix.length);
+  }
+  return shortenModelName(aggregateKey);
+};
+
 const extractQuoteCurrency = (pair) => {
   if (!pair || typeof pair !== 'string') { return 'UNKNOWN'; }
   const parts = pair.split('_');
@@ -468,7 +484,7 @@ function ensureDataset(model) {
 
   const dataset = {
     modelKey: key,
-    label: shortenModelName(key),
+    label: formatAggregateLabel(key),
     data: new Array(globalChart.data.labels.length).fill(null),
     borderColor: palette.line,
     backgroundColor: createGradient(globalChart.ctx, palette.fill),
@@ -545,7 +561,7 @@ function ensureModelView(model) {
   labelsWrap.className = 'pair-card-labels';
   const title = document.createElement('h2');
   title.className = 'pair-name';
-  title.textContent = shortenModelName(safeModel);
+  title.textContent = formatAggregateLabel(safeModel);
   const updated = document.createElement('span');
   updated.className = 'pill muted';
   updated.textContent = 'Waiting…';
@@ -682,28 +698,29 @@ function renderModelNumbers(view, aggregate) {
 function handlePayload(payload) {
   const pairLabel = payload.pair || '—';
   const model = normalizeModel(payload.model);
+  const aggregateKey = buildAggregateKey(model, pairLabel);
   const quoteCurrency = extractQuoteCurrency(pairLabel);
 
-  if (!modelPrimaryQuote.has(model)) {
-    modelPrimaryQuote.set(model, quoteCurrency);
+  if (!modelPrimaryQuote.has(aggregateKey)) {
+    modelPrimaryQuote.set(aggregateKey, quoteCurrency);
   }
 
-  const primaryQuote = modelPrimaryQuote.get(model);
+  const primaryQuote = modelPrimaryQuote.get(aggregateKey);
   if (quoteCurrency !== primaryQuote) {
     return;
   }
 
   const baseCurrency = extractBaseCurrency(pairLabel);
-  let aggregate = modelAggregates.get(model);
+  let aggregate = modelAggregates.get(aggregateKey);
   if (!aggregate) {
     aggregate = {
-      model: model,
+      model: aggregateKey,
       quoteCurrency: quoteCurrency,
       baseCurrency: baseCurrency,
       pairs: new Map(),
       totalBalance: 0
     };
-    modelAggregates.set(model, aggregate);
+    modelAggregates.set(aggregateKey, aggregate);
   } else if (aggregate.baseCurrency !== 'Base' && aggregate.baseCurrency !== baseCurrency) {
     aggregate.baseCurrency = 'Base';
   }
@@ -739,9 +756,9 @@ function handlePayload(payload) {
     aggregate.initialBalance = totalBalance;
   }
 
-  const view = ensureModelView(model);
+  const view = ensureModelView(aggregateKey);
   renderModelNumbers(view, aggregate);
-  updateGlobalChart(model, quoteCurrency, aggregate.totalBalance, payload.ts);
+  updateGlobalChart(aggregateKey, quoteCurrency, aggregate.totalBalance, payload.ts);
 }
 
 let balanceSource = null;
@@ -1054,10 +1071,10 @@ function openSetupWizard() {
   const titleWrap = document.createElement('div');
   const title = document.createElement('h2');
   title.className = 'setup-panel-title';
-  title.textContent = 'Config wizard';
+  title.textContent = 'Add trading pair';
   const subtitle = document.createElement('p');
   subtitle.className = 'setup-panel-subtitle';
-  subtitle.textContent = 'Generate config.gen.yaml with either DCA or AI strategy.';
+  subtitle.textContent = 'Add a new trading pair to config.gen.yaml.';
   titleWrap.append(title, subtitle);
 
   const closeBtn = document.createElement('button');
@@ -1220,7 +1237,7 @@ function openSetupWizard() {
   const leftFooter = document.createElement('div');
   const statusEl = document.createElement('div');
   statusEl.className = 'setup-status';
-  statusEl.textContent = 'Config will be saved to config.gen.yaml near the binary.';
+  statusEl.textContent = 'Config will be saved to config.gen.yaml';
   leftFooter.appendChild(statusEl);
 
   const rightFooter = document.createElement('div');
@@ -1247,6 +1264,20 @@ function openSetupWizard() {
   toggleSections();
 
   form.append(row1, group2Title, row2, row2b, dcaSection, aiSection, errorEl);
+
+  submitBtn.addEventListener('click', (e) => {
+    if (submitBtn.form === form) {
+      return;
+    }
+
+    e.preventDefault();
+    if (typeof form.requestSubmit === 'function') {
+      form.requestSubmit();
+      return;
+    }
+
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  });
 
   form.onsubmit = (e) => {
     e.preventDefault();
@@ -1286,14 +1317,18 @@ function openSetupWizard() {
         return res.json().catch(() => ({}));
       })
       .then(() => {
-        statusEl.textContent = 'Config saved to config.gen.yaml. Restart marti with -config=config.gen.yaml to apply.';
+        statusEl.textContent = 'config saved to config.gen.yaml, restart marti with -config=config.gen.yaml to apply';
         submitBtn.disabled = false;
         cancelBtn.disabled = false;
+        submitBtn.classList.add('saved');
+        setTimeout(() => {
+          overlay.remove();
+        }, 500);
       })
       .catch((err) => {
         errorEl.textContent = (err && err.message) || 'failed to save config';
         errorEl.style.display = 'block';
-        statusEl.textContent = 'Something went wrong.';
+        statusEl.textContent = 'something went wrong';
         submitBtn.disabled = false;
         cancelBtn.disabled = false;
       });
@@ -1315,3 +1350,18 @@ function openSetupWizard() {
 if (setupButton) {
   setupButton.addEventListener('click', openSetupWizard);
 }
+
+fetch('/api/setup/status')
+  .then((res) => {
+    if (!res.ok) {
+      return null;
+    }
+    return res.json();
+  })
+  .then((data) => {
+    if (data && data.needsSetup) {
+      openSetupWizard();
+    }
+  })
+  .catch(() => {
+  });
