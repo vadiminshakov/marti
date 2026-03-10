@@ -2,10 +2,13 @@
 // It supports multiple exchanges (Binance, Bybit, Hyperliquid) and can be configured
 // via YAML configuration files or command-line arguments.
 //
+// By default marti starts with web UI. Use --cli to run without it.
+//
 // Usage:
 //
-//	marti --config config.yaml
-//	marti (uses CLI arguments)
+//	marti                       (web UI, opens browser)
+//	marti --config config.yaml  (web UI with explicit config)
+//	marti --cli                 (CLI-only, TUI wizard if no config)
 //
 // Required environment variables:
 //
@@ -17,17 +20,19 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
 
 	"github.com/bytedance/gopkg/util/logger"
+	"github.com/pkg/errors"
 	"github.com/vadiminshakov/marti/config"
 	"github.com/vadiminshakov/marti/dashboard"
-	"github.com/vadiminshakov/marti/internal"
-	"github.com/vadiminshakov/marti/internal/clients"
 	"github.com/vadiminshakov/marti/internal/setup"
 	"github.com/vadiminshakov/marti/internal/storage/balancesnapshots"
 	"github.com/vadiminshakov/marti/internal/storage/decisions"
@@ -38,18 +43,31 @@ func main() {
 	var webAddr string
 	var tlsDomainsArg string
 	var tlsCacheDir string
-	var uiFlag bool
+	var cliMode bool
+	var configMissing bool
 
-	flag.StringVar(&webAddr, "web", ":8000", "address for web UI (disable with empty string)")
+	flag.StringVar(&webAddr, "web", ":8000", "address for web UI")
 	flag.StringVar(&tlsDomainsArg, "tls-domain", "", "comma-separated list of domains for automatic TLS via ACME (e.g. Let's Encrypt); requires ports 80 and 443")
 	flag.StringVar(&tlsCacheDir, "tls-cache-dir", "cert-cache", "directory to cache automatic TLS certificates")
-	flag.BoolVar(&uiFlag, "setup", false, "open interactive configuration wizard if config is missing")
+	flag.BoolVar(&cliMode, "cli", false, "run without web UI (CLI-only mode)")
 	flag.Parse()
 
-	// check if we need to run setup ui
+	// resolve config: explicit --config flag -> config.gen.yaml fallback.
 	configFlag := flag.Lookup("config")
-	if uiFlag && (configFlag == nil || configFlag.Value.String() == "") {
-		logger.Info("Starting TUI configuration wizard...")
+	configMissing = configFlag == nil || configFlag.Value.String() == ""
+
+	if configMissing {
+		if _, err := os.Stat("config.gen.yaml"); err == nil {
+			if err := flag.Set("config", "config.gen.yaml"); err != nil {
+				logger.Fatal("Failed to set config flag", zap.Error(err))
+			}
+			configMissing = false
+		}
+	}
+
+	// in CLI mode without config, run the TUI wizard.
+	if cliMode && configMissing {
+		logger.Info("No config found, starting interactive setup...")
 		if err := setup.RunTUI(); err != nil {
 			logger.Fatal("Setup failed", zap.Error(err))
 		}
@@ -57,6 +75,7 @@ func main() {
 		if err := flag.Set("config", "config.gen.yaml"); err != nil {
 			logger.Fatal("Failed to set config flag after setup", zap.Error(err))
 		}
+		configMissing = false
 	}
 
 	var tlsDomains []string
@@ -75,9 +94,13 @@ func main() {
 		_ = logger.Sync()
 	}()
 
-	configs, err := config.Get()
-	if err != nil {
-		logger.Fatal("Failed to load configuration", zap.Error(err))
+	var configs []config.Config
+	if !configMissing {
+		var err error
+		configs, err = config.Get()
+		if err != nil {
+			logger.Fatal("Failed to load configuration", zap.Error(err))
+		}
 	}
 
 	snapshotStore, err := balancesnapshots.NewWALStore("")
@@ -118,78 +141,48 @@ func main() {
 	}()
 
 	var wg sync.WaitGroup
-	var bots []*internal.TradingBot
-
-	for _, cfg := range configs {
-		cfg := cfg
-		var client any
-		switch cfg.Platform {
-		case "binance":
-			apiKey := os.Getenv("BINANCE_API_KEY")
-			apiSecret := os.Getenv("BINANCE_API_SECRET")
-			if apiKey == "" || apiSecret == "" {
-				logger.Fatal("Missing Binance credentials", zap.String("platform", cfg.Platform))
-			}
-			client = clients.NewBinanceClient(apiKey, apiSecret)
-		case "bybit":
-			apiKey := os.Getenv("BYBIT_API_KEY")
-			apiSecret := os.Getenv("BYBIT_API_SECRET")
-			if apiKey == "" || apiSecret == "" {
-				logger.Fatal("Missing Bybit credentials", zap.String("platform", cfg.Platform))
-			}
-			client = clients.NewBybitClient(apiKey, apiSecret)
-		case "simulate":
-			logger.Info("Using simulation mode - no real trades will be executed",
-				zap.String("pair", cfg.Pair.String()))
-			client = clients.NewSimulateClient()
-		case "hyperliquid":
-			pk := os.Getenv("HYPERLIQ_PRIVATE_KEY")
-			if pk == "" {
-				logger.Fatal("Missing Hyperliquid private key", zap.String("platform", cfg.Platform))
-			}
-			baseURL := os.Getenv("HYPERLIQ_API_URL") // optional; defaults to mainnet
-			hl, err := clients.NewHyperliquidClient(pk, baseURL)
-			if err != nil {
-				logger.Fatal("Failed to init Hyperliquid client", zap.Error(err))
-			}
-			client = hl
-		default:
-			logger.Fatal("Unsupported platform", zap.String("platform", cfg.Platform))
-		}
-
-		botLogger := logger.With(
-			zap.String("platform", cfg.Platform),
-			zap.String("pair", cfg.Pair.String()),
-		)
-
-		bot, err := internal.NewTradingBot(botLogger, cfg, client, snapshotStore, decisionStore)
-		if err != nil {
-			botLogger.Fatal("Failed to create trading bot", zap.Error(err))
-		}
-		bots = append(bots, bot)
-
-		wg.Add(1)
-		go func(bot *internal.TradingBot, l *zap.Logger) {
-			defer wg.Done()
-			defer bot.Close()
-			if err := bot.Run(ctx, l); err != nil && ctx.Err() == nil {
-				l.Error("Trading bot failed", zap.Error(err))
-			}
-		}(bot, botLogger)
+	manager := newBotManager(ctx, logger, snapshotStore, decisionStore)
+	if err := manager.ApplyConfigs(configs); err != nil {
+		logger.Fatal("Failed to start trading bots", zap.Error(err))
 	}
 
-	// start web server if enabled
-	if webAddr != "" {
+	// start web UI unless --cli mode is enabled.
+	var srv *dashboard.Server
+	if !cliMode {
+		onSetupSaved := func(configPath string) error {
+			if err := flag.Set("config", configPath); err != nil {
+				return errors.Wrap(err, "failed to set config path")
+			}
+
+			reloadedConfigs, err := config.Get()
+			if err != nil {
+				return errors.Wrap(err, "failed to load saved config")
+			}
+
+			if err := manager.ApplyConfigs(reloadedConfigs); err != nil {
+				return errors.Wrap(err, "failed to apply saved config")
+			}
+
+			srv.SetBots(manager.DashboardBots())
+			srv.SetNeedsSetup(false)
+			logger.Info("Applied config from web wizard", zap.String("config", configPath))
+
+			return nil
+		}
+
+		srv = dashboard.NewServer(
+			webAddr,
+			snapshotStore,
+			decisionStore,
+			manager.DashboardBots(),
+			configMissing,
+			onSetupSaved,
+		)
+
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			webLogger := logger.With(zap.String("component", "web"))
-			// convert []*internal.TradingBot to []dashboard.TradingBotInterface
-			webBots := make([]dashboard.TradingBotInterface, len(bots))
-			for i, b := range bots {
-				webBots[i] = b
-			}
-			srv := dashboard.NewServer(webAddr, snapshotStore, decisionStore, webBots)
 			if len(tlsDomains) > 0 {
 				webLogger.Info("Starting web UI with automatic TLS",
 					zap.String("addr", webAddr),
@@ -200,6 +193,7 @@ func main() {
 				}
 			} else {
 				webLogger.Info("Starting web UI", zap.String("addr", webAddr))
+				go openBrowser(webLogger, webAddr)
 				if err := srv.Start(ctx); err != nil && ctx.Err() == nil {
 					webLogger.Fatal("Failed to start web server", zap.Error(err))
 				}
@@ -207,7 +201,34 @@ func main() {
 		}()
 	}
 
+	<-ctx.Done()
+	manager.StopAll()
 	wg.Wait()
+	manager.Wait()
 
 	logger.Info("All trading bots have shut down gracefully")
+}
+
+func openBrowser(logger *zap.Logger, addr string) {
+	url := addr
+	if strings.HasPrefix(url, ":") {
+		url = "http://localhost" + url
+	} else if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		url = fmt.Sprintf("http://%s", strings.TrimPrefix(url, "://"))
+	}
+
+	var cmd *exec.Cmd
+
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+
+	if err := cmd.Start(); err != nil {
+		logger.Warn("failed to open browser for setup ui", zap.Error(err), zap.String("url", url))
+	}
 }
