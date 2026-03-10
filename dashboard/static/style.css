@@ -816,6 +816,11 @@ header {
   cursor: pointer;
 }
 
+.setup-primary-btn.saved {
+  background: #1b9aaa;
+  border-color: #1b9aaa;
+}
+
 .setup-primary-btn[disabled],
 .setup-secondary-btn[disabled] {
   opacity: 0.5;
