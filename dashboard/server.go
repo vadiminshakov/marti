@@ -13,6 +13,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vadiminshakov/marti/config"
@@ -41,12 +42,74 @@ type Server struct {
 	Addr          string
 	Store         balanceSnapshotReader
 	DecisionStore decisionReader
-	Bots          []TradingBotInterface
+	OnSetupSaved  func(configPath string) error
+
+	mu         sync.RWMutex
+	Bots       []TradingBotInterface
+	NeedsSetup bool
 }
 
 // NewServer creates a new web server instance.
-func NewServer(addr string, store balanceSnapshotReader, decisions decisionReader, bots []TradingBotInterface) *Server {
-	return &Server{Addr: addr, Store: store, DecisionStore: decisions, Bots: bots}
+func NewServer(
+	addr string,
+	store balanceSnapshotReader,
+	decisions decisionReader,
+	bots []TradingBotInterface,
+	needsSetup bool,
+	onSetupSaved func(configPath string) error,
+) *Server {
+	return &Server{
+		Addr:          addr,
+		Store:         store,
+		DecisionStore: decisions,
+		Bots:          bots,
+		NeedsSetup:    needsSetup,
+		OnSetupSaved:  onSetupSaved,
+	}
+}
+
+// SetBots updates bots used by dashboard actions (e.g. Sell All).
+func (s *Server) SetBots(bots []TradingBotInterface) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Bots = bots
+}
+
+// SetNeedsSetup toggles setup state returned by setup status endpoint.
+func (s *Server) SetNeedsSetup(needsSetup bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.NeedsSetup = needsSetup
+}
+
+func (s *Server) getBots() []TradingBotInterface {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	bots := make([]TradingBotInterface, len(s.Bots))
+	copy(bots, s.Bots)
+
+	return bots
+}
+
+func (s *Server) needsSetup() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.NeedsSetup
+}
+
+func (s *Server) activePairs() map[string]struct{} {
+	bots := s.getBots()
+	if len(bots) == 0 {
+		return nil
+	}
+
+	pairs := make(map[string]struct{}, len(bots))
+	for _, bot := range bots {
+		pairs[bot.GetPair().String()] = struct{}{}
+	}
+
+	return pairs
 }
 
 // Start runs the HTTP server (blocking) and shuts it down when ctx is cancelled.
@@ -59,6 +122,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/balance/stream", s.handleBalanceStream)
 	mux.HandleFunc("/decisions/stream", s.handleDecisionStream)
 	mux.HandleFunc("POST /sellall/{pair}", s.handleSellAll)
+	mux.HandleFunc("GET /api/setup/status", s.handleSetupStatus)
 	mux.HandleFunc("POST /api/setup/config", s.handleSetupConfig)
 
 	server := &http.Server{
@@ -99,6 +163,7 @@ func (s *Server) StartWithAutoTLS(ctx context.Context, domains []string, cacheDi
 	mux.HandleFunc("/balance/stream", s.handleBalanceStream)
 	mux.HandleFunc("/decisions/stream", s.handleDecisionStream)
 	mux.HandleFunc("POST /sellall/{pair}", s.handleSellAll)
+	mux.HandleFunc("GET /api/setup/status", s.handleSetupStatus)
 	mux.HandleFunc("POST /api/setup/config", s.handleSetupConfig)
 
 	manager := &autocert.Manager{
@@ -198,7 +263,16 @@ func (s *Server) handleBalanceStream(w http.ResponseWriter, r *http.Request) {
 			recordsToSend = thinRecords(records)
 		}
 
+		activePairs := s.activePairs()
+
 		for _, record := range recordsToSend {
+			if len(activePairs) > 0 {
+				if _, ok := activePairs[record.Snapshot.Pair]; !ok {
+					lastIndex = record.Index
+					continue
+				}
+			}
+
 			payload, err := json.Marshal(record.Snapshot)
 			if err != nil {
 				return err
@@ -426,7 +500,7 @@ func (s *Server) handleSellAll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var targetBot TradingBotInterface
-	for _, bot := range s.Bots {
+	for _, bot := range s.getBots() {
 		if bot.GetPair().String() == pairStr {
 			targetBot = bot
 			break
@@ -444,6 +518,19 @@ func (s *Server) handleSellAll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleSetupStatus(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	payload := struct {
+		NeedsSetup bool `json:"needsSetup"`
+	}{
+		NeedsSetup: s.needsSetup(),
+	}
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		log.Printf("setup status encode error: %v", err)
+		http.Error(w, "failed to encode status", http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleSetupConfig(w http.ResponseWriter, r *http.Request) {
@@ -542,18 +629,35 @@ func (s *Server) handleSetupConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := yaml.Marshal([]config.ConfigTmp{cfgTmp})
+	const filename = "config.gen.yaml"
+
+	// Read existing configs to append to them.
+	var existing []config.ConfigTmp
+	if existingData, readErr := os.ReadFile(filename); readErr == nil {
+		_ = yaml.Unmarshal(existingData, &existing)
+	}
+
+	existing = append(existing, cfgTmp)
+
+	data, err := yaml.Marshal(existing)
 	if err != nil {
 		log.Printf("setup config marshal error: %v", err)
 		http.Error(w, "failed to generate yaml", http.StatusInternalServerError)
 		return
 	}
 
-	const filename = "config.gen.yaml"
 	if err := os.WriteFile(filename, data, 0o644); err != nil {
 		log.Printf("setup config write error: %v", err)
 		http.Error(w, "failed to save config file", http.StatusInternalServerError)
 		return
+	}
+
+	if s.OnSetupSaved != nil {
+		if err := s.OnSetupSaved(filename); err != nil {
+			log.Printf("setup config apply error: %v", err)
+			http.Error(w, "failed to apply config", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
