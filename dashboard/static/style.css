@@ -91,6 +91,37 @@ header {
   gap: 1rem;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.setup-btn {
+  background: #111111;
+  color: #ffffff;
+  border: 1px solid #111111;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.6rem;
+  font-family: 'Space Mono', 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease;
+}
+
+.setup-btn:hover {
+  background: #ffffff;
+  color: #111111;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+}
+
+.setup-btn:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+}
+
 @media (max-width: 768px) {
   header {
     flex-shrink: 0;
@@ -628,6 +659,172 @@ header {
 .sell-all-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.setup-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.setup-panel {
+  width: min(640px, 100%);
+  max-height: 90vh;
+  background: #ffffff;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.setup-panel-header {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid #eaeaea;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.setup-panel-title {
+  font-family: 'Press Start 2P', 'Space Mono', monospace;
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  margin: 0;
+}
+
+.setup-panel-subtitle {
+  margin: 0.25rem 0 0;
+  font-size: 0.7rem;
+  color: var(--ink-mid);
+}
+
+.setup-close-btn {
+  background: transparent;
+  border: none;
+  padding: 0.25rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--ink-mid);
+}
+
+.setup-body {
+  padding: 1rem 1.25rem 0.75rem;
+  overflow-y: auto;
+}
+
+.setup-group-title {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ink-mid);
+  margin: 0 0 0.5rem;
+}
+
+.setup-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+@media (max-width: 640px) {
+  .setup-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.setup-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+}
+
+.setup-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-mid);
+}
+
+.setup-hint {
+  font-size: 0.65rem;
+  color: var(--ink-mid);
+}
+
+.setup-input,
+.setup-select {
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+  padding: 0.45rem 0.5rem;
+  font-size: 0.75rem;
+  font-family: 'Space Mono', 'JetBrains Mono', monospace;
+}
+
+.setup-input:focus,
+.setup-select:focus {
+  outline: none;
+  border-color: #111111;
+  box-shadow: 0 0 0 1px #11111111;
+}
+
+.setup-error {
+  margin-top: 0.25rem;
+  font-size: 0.65rem;
+  color: #d7263d;
+}
+
+.setup-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 1.25rem 1rem;
+  border-top: 1px solid #eaeaea;
+}
+
+.setup-secondary-btn {
+  background: transparent;
+  border: 1px solid #e0e0e0;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.6rem;
+  font-family: 'Space Mono', 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.setup-primary-btn {
+  background: #111111;
+  color: #ffffff;
+  border: 1px solid #111111;
+  padding: 0.45rem 1.2rem;
+  font-size: 0.6rem;
+  font-family: 'Space Mono', 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.setup-primary-btn[disabled],
+.setup-secondary-btn[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.setup-status {
+  font-size: 0.65rem;
+  color: var(--ink-mid);
 }
 
 @media (max-width:640px) {

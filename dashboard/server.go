@@ -9,13 +9,16 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/vadiminshakov/marti/config"
 	entity "github.com/vadiminshakov/marti/internal/domain"
 	"golang.org/x/crypto/acme/autocert"
+	"gopkg.in/yaml.v3"
 )
 
 const snapshotPollInterval = 3 * time.Second
@@ -56,6 +59,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/balance/stream", s.handleBalanceStream)
 	mux.HandleFunc("/decisions/stream", s.handleDecisionStream)
 	mux.HandleFunc("POST /sellall/{pair}", s.handleSellAll)
+	mux.HandleFunc("POST /api/setup/config", s.handleSetupConfig)
 
 	server := &http.Server{
 		Addr:              s.Addr,
@@ -95,6 +99,7 @@ func (s *Server) StartWithAutoTLS(ctx context.Context, domains []string, cacheDi
 	mux.HandleFunc("/balance/stream", s.handleBalanceStream)
 	mux.HandleFunc("/decisions/stream", s.handleDecisionStream)
 	mux.HandleFunc("POST /sellall/{pair}", s.handleSellAll)
+	mux.HandleFunc("POST /api/setup/config", s.handleSetupConfig)
 
 	manager := &autocert.Manager{
 		Prompt:     autocert.AcceptTOS,
@@ -439,4 +444,119 @@ func (s *Server) handleSellAll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleSetupConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	type setupPayload struct {
+		Strategy         string `json:"strategy"`
+		Platform         string `json:"platform"`
+		Pair             string `json:"pair"`
+		MarketType       string `json:"marketType"`
+		PollInterval     string `json:"pollInterval"`
+		Amount           string `json:"amount"`
+		MaxDcaTrades     string `json:"maxDcaTrades"`
+		BuyThreshold     string `json:"buyThreshold"`
+		SellThreshold    string `json:"sellThreshold"`
+		APIURL           string `json:"apiUrl"`
+		APIKey           string `json:"apiKey"`
+		Model            string `json:"model"`
+		PrimaryTimeframe string `json:"primaryTimeframe"`
+	}
+
+	var payload setupPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+	defer func() {
+		_ = r.Body.Close()
+	}()
+
+	if payload.Pair == "" {
+		http.Error(w, "pair cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	if payload.PollInterval == "" {
+		http.Error(w, "poll interval is required", http.StatusBadRequest)
+		return
+	}
+
+	pollInterval, err := time.ParseDuration(payload.PollInterval)
+	if err != nil {
+		http.Error(w, "invalid poll interval (use values like 30s, 1m, 5m)", http.StatusBadRequest)
+		return
+	}
+
+	strategy := payload.Strategy
+	if strategy == "" {
+		strategy = "dca"
+	}
+
+	marketType := payload.MarketType
+	if marketType == "" {
+		marketType = "spot"
+	}
+
+	cfgTmp := config.ConfigTmp{
+		Platform:          payload.Platform,
+		Pair:              payload.Pair,
+		Strategy:          strategy,
+		MarketTypeStr:     marketType,
+		PollPriceInterval: pollInterval,
+	}
+
+	switch strategy {
+	case "dca":
+		cfgTmp.Amount = payload.Amount
+		cfgTmp.MaxDcaTradesStr = payload.MaxDcaTrades
+		cfgTmp.DcaPercentThresholdBuyStr = payload.BuyThreshold
+		cfgTmp.DcaPercentThresholdSellStr = payload.SellThreshold
+	case "ai":
+		cfgTmp.LLMAPIURL = payload.APIURL
+		cfgTmp.LLMAPIKey = payload.APIKey
+		cfgTmp.Model = payload.Model
+		cfgTmp.PrimaryTimeframe = payload.PrimaryTimeframe
+		if cfgTmp.PrimaryTimeframe == "" {
+			cfgTmp.PrimaryTimeframe = "3m"
+		}
+		if cfgTmp.HigherTimeframe == "" {
+			cfgTmp.HigherTimeframe = "15m"
+		}
+		if cfgTmp.PrimaryLookbackPeriodsStr == "" {
+			cfgTmp.PrimaryLookbackPeriodsStr = "50"
+		}
+		if cfgTmp.HigherLookbackPeriodsStr == "" {
+			cfgTmp.HigherLookbackPeriodsStr = "60"
+		}
+		if marketType == "margin" && cfgTmp.MaxLeverageStr == "" {
+			cfgTmp.MaxLeverageStr = "10"
+		}
+	default:
+		http.Error(w, "unsupported strategy (must be 'dca' or 'ai')", http.StatusBadRequest)
+		return
+	}
+
+	data, err := yaml.Marshal([]config.ConfigTmp{cfgTmp})
+	if err != nil {
+		log.Printf("setup config marshal error: %v", err)
+		http.Error(w, "failed to generate yaml", http.StatusInternalServerError)
+		return
+	}
+
+	const filename = "config.gen.yaml"
+	if err := os.WriteFile(filename, data, 0o644); err != nil {
+		log.Printf("setup config write error: %v", err)
+		http.Error(w, "failed to save config file", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"ok","file":"config.gen.yaml"}`))
 }

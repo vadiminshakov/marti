@@ -1013,3 +1013,305 @@ function connectAIDecisionSSE() {
 }
 
 connectAIDecisionSSE();
+
+const setupButton = document.getElementById('openSetupWizard');
+
+function createSetupField(id, label, hint, inputElement) {
+  const field = document.createElement('div');
+  field.className = 'setup-field';
+
+  const labelEl = document.createElement('label');
+  labelEl.className = 'setup-label';
+  labelEl.htmlFor = id;
+  labelEl.textContent = label;
+
+  const hintEl = document.createElement('div');
+  hintEl.className = 'setup-hint';
+  hintEl.textContent = hint;
+
+  inputElement.id = id;
+  inputElement.classList.add(inputElement.tagName === 'SELECT' ? 'setup-select' : 'setup-input');
+
+  field.append(labelEl, inputElement, hintEl);
+  return field;
+}
+
+function openSetupWizard() {
+  if (document.getElementById('setupOverlay')) {
+    return;
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'setupOverlay';
+  overlay.className = 'setup-overlay';
+
+  const panel = document.createElement('div');
+  panel.className = 'setup-panel';
+
+  const header = document.createElement('div');
+  header.className = 'setup-panel-header';
+
+  const titleWrap = document.createElement('div');
+  const title = document.createElement('h2');
+  title.className = 'setup-panel-title';
+  title.textContent = 'Config wizard';
+  const subtitle = document.createElement('p');
+  subtitle.className = 'setup-panel-subtitle';
+  subtitle.textContent = 'Generate config.gen.yaml with either DCA or AI strategy.';
+  titleWrap.append(title, subtitle);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'setup-close-btn';
+  closeBtn.textContent = '✕';
+  closeBtn.onclick = () => overlay.remove();
+
+  header.append(titleWrap, closeBtn);
+
+  const body = document.createElement('div');
+  body.className = 'setup-body';
+
+  const form = document.createElement('form');
+
+  const group1Title = document.createElement('h3');
+  group1Title.className = 'setup-group-title';
+  group1Title.textContent = 'Strategy & exchange';
+  body.appendChild(group1Title);
+
+  const row1 = document.createElement('div');
+  row1.className = 'setup-row';
+
+  const strategySelect = document.createElement('select');
+  const optDca = document.createElement('option');
+  optDca.value = 'dca';
+  optDca.textContent = 'DCA — rule-based averaging';
+  const optAi = document.createElement('option');
+  optAi.value = 'ai';
+  optAi.textContent = 'AI — LLM-based trading';
+  strategySelect.append(optDca, optAi);
+  strategySelect.value = 'dca';
+
+  const platformSelect = document.createElement('select');
+  ['binance', 'bybit', 'hyperliquid', 'simulate'].forEach((value) => {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = value.charAt(0).toUpperCase() + value.slice(1);
+    platformSelect.appendChild(opt);
+  });
+  platformSelect.value = 'binance';
+
+  row1.append(
+    createSetupField('setupStrategy', 'Strategy', 'Choose between DCA or AI strategy.', strategySelect),
+    createSetupField('setupPlatform', 'Exchange', 'Binance, Bybit, Hyperliquid or simulation.', platformSelect)
+  );
+
+  const group2Title = document.createElement('h3');
+  group2Title.className = 'setup-group-title';
+  group2Title.textContent = 'Pair, market and interval';
+
+  const row2 = document.createElement('div');
+  row2.className = 'setup-row';
+
+  const pairInput = document.createElement('input');
+  pairInput.type = 'text';
+  pairInput.value = 'BTC_USDT';
+
+  const marketSelect = document.createElement('select');
+  const optSpot = document.createElement('option');
+  optSpot.value = 'spot';
+  optSpot.textContent = 'Spot';
+  const optMargin = document.createElement('option');
+  optMargin.value = 'margin';
+  optMargin.textContent = 'Margin';
+  marketSelect.append(optSpot, optMargin);
+  marketSelect.value = 'spot';
+
+  const pollInput = document.createElement('input');
+  pollInput.type = 'text';
+  pollInput.value = '5m';
+
+  row2.append(
+    createSetupField('setupPair', 'Trading pair', 'Format: BASE_QUOTE (e.g. BTC_USDT).', pairInput),
+    createSetupField('setupMarketType', 'Market type', 'Spot or margin.', marketSelect)
+  );
+
+  const row2b = document.createElement('div');
+  row2b.className = 'setup-row';
+  row2b.append(
+    createSetupField('setupPollInterval', 'Price check interval', 'How often to fetch price (e.g. 30s, 1m, 5m).', pollInput)
+  );
+
+  const group3Title = document.createElement('h3');
+  group3Title.className = 'setup-group-title';
+  group3Title.textContent = 'DCA settings';
+
+  const dcaSection = document.createElement('div');
+  const dcaRow1 = document.createElement('div');
+  dcaRow1.className = 'setup-row';
+  const amountInput = document.createElement('input');
+  amountInput.type = 'text';
+  amountInput.value = '10';
+  const maxTradesInput = document.createElement('input');
+  maxTradesInput.type = 'text';
+  maxTradesInput.value = '15';
+  dcaRow1.append(
+    createSetupField('setupAmount', 'Trade amount (%)', 'Percentage of quote balance to allocate (1–100).', amountInput),
+    createSetupField('setupMaxDcaTrades', 'Max DCA orders', 'Maximum additional safety orders per series.', maxTradesInput)
+  );
+
+  const dcaRow2 = document.createElement('div');
+  dcaRow2.className = 'setup-row';
+  const buyThrInput = document.createElement('input');
+  buyThrInput.type = 'text';
+  buyThrInput.value = '3.5';
+  const sellThrInput = document.createElement('input');
+  sellThrInput.type = 'text';
+  sellThrInput.value = '0.75';
+  dcaRow2.append(
+    createSetupField('setupBuyThreshold', 'Safety order trigger %', 'New buy when price drops by this percent.', buyThrInput),
+    createSetupField('setupSellThreshold', 'Take-profit %', 'Close position when price rises by this percent.', sellThrInput)
+  );
+  dcaSection.append(group3Title, dcaRow1, dcaRow2);
+
+  const group4Title = document.createElement('h3');
+  group4Title.className = 'setup-group-title';
+  group4Title.textContent = 'AI settings';
+
+  const aiSection = document.createElement('div');
+  const aiRow1 = document.createElement('div');
+  aiRow1.className = 'setup-row';
+  const apiUrlInput = document.createElement('input');
+  apiUrlInput.type = 'text';
+  apiUrlInput.value = 'https://openrouter.ai/api/v1/chat/completions';
+  const apiKeyInput = document.createElement('input');
+  apiKeyInput.type = 'password';
+  apiKeyInput.autocomplete = 'off';
+  const modelInput = document.createElement('input');
+  modelInput.type = 'text';
+  modelInput.value = 'deepseek/deepseek-v3-0324';
+  const primaryTfSelect = document.createElement('select');
+  ['1m', '3m', '5m', '15m', '1h'].forEach((value) => {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = value;
+    primaryTfSelect.appendChild(opt);
+  });
+  primaryTfSelect.value = '3m';
+
+  aiRow1.append(
+    createSetupField('setupApiUrl', 'LLM API URL', 'OpenAI-compatible endpoint.', apiUrlInput),
+    createSetupField('setupApiKey', 'LLM API key', 'Stored only in generated config file.', apiKeyInput)
+  );
+
+  const aiRow2 = document.createElement('div');
+  aiRow2.className = 'setup-row';
+  aiRow2.append(
+    createSetupField('setupModel', 'Model', 'LLM model identifier (e.g. deepseek/deepseek-v3-0324).', modelInput),
+    createSetupField('setupPrimaryTimeframe', 'Primary timeframe', 'Main timeframe to analyse.', primaryTfSelect)
+  );
+  aiSection.append(group4Title, aiRow1, aiRow2);
+
+  const errorEl = document.createElement('div');
+  errorEl.className = 'setup-error';
+  errorEl.style.display = 'none';
+
+  const footer = document.createElement('div');
+  footer.className = 'setup-footer';
+  const leftFooter = document.createElement('div');
+  const statusEl = document.createElement('div');
+  statusEl.className = 'setup-status';
+  statusEl.textContent = 'Config will be saved to config.gen.yaml near the binary.';
+  leftFooter.appendChild(statusEl);
+
+  const rightFooter = document.createElement('div');
+  rightFooter.style.display = 'flex';
+  rightFooter.style.gap = '0.5rem';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'setup-secondary-btn';
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.onclick = () => overlay.remove();
+  const submitBtn = document.createElement('button');
+  submitBtn.type = 'submit';
+  submitBtn.className = 'setup-primary-btn';
+  submitBtn.textContent = 'Save config';
+  rightFooter.append(cancelBtn, submitBtn);
+  footer.append(leftFooter, rightFooter);
+
+  const toggleSections = () => {
+    const useAi = strategySelect.value === 'ai';
+    dcaSection.style.display = useAi ? 'none' : 'block';
+    aiSection.style.display = useAi ? 'block' : 'none';
+  };
+  strategySelect.addEventListener('change', toggleSections);
+  toggleSections();
+
+  form.append(row1, group2Title, row2, row2b, dcaSection, aiSection, errorEl);
+
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    errorEl.style.display = 'none';
+    errorEl.textContent = '';
+
+    const payload = {
+      strategy: strategySelect.value,
+      platform: platformSelect.value,
+      pair: pairInput.value.trim(),
+      marketType: marketSelect.value,
+      pollInterval: pollInput.value.trim(),
+      amount: amountInput.value.trim(),
+      maxDcaTrades: maxTradesInput.value.trim(),
+      buyThreshold: buyThrInput.value.trim(),
+      sellThreshold: sellThrInput.value.trim(),
+      apiUrl: apiUrlInput.value.trim(),
+      apiKey: apiKeyInput.value,
+      model: modelInput.value.trim(),
+      primaryTimeframe: primaryTfSelect.value
+    };
+
+    submitBtn.disabled = true;
+    cancelBtn.disabled = true;
+    statusEl.textContent = 'Saving config...';
+
+    fetch('/api/setup/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || 'failed to save config');
+        }
+        return res.json().catch(() => ({}));
+      })
+      .then(() => {
+        statusEl.textContent = 'Config saved to config.gen.yaml. Restart marti with -config=config.gen.yaml to apply.';
+        submitBtn.disabled = false;
+        cancelBtn.disabled = false;
+      })
+      .catch((err) => {
+        errorEl.textContent = (err && err.message) || 'failed to save config';
+        errorEl.style.display = 'block';
+        statusEl.textContent = 'Something went wrong.';
+        submitBtn.disabled = false;
+        cancelBtn.disabled = false;
+      });
+  };
+
+  body.appendChild(form);
+
+  panel.append(header, body, footer);
+  overlay.appendChild(panel);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      overlay.remove();
+    }
+  });
+
+  document.body.appendChild(overlay);
+}
+
+if (setupButton) {
+  setupButton.addEventListener('click', openSetupWizard);
+}
