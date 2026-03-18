@@ -20,6 +20,9 @@
   dca_percent_threshold_buy: 2
   # The percentage of the price rise required to trigger a sell.
   dca_percent_threshold_sell: 20
+  # Telegram notifications (optional). Only needs to be set on one entry — applies to all bots.
+  telegram_bot_token: "your-bot-token-here"
+  telegram_chat_id: "your-chat-id-here"
 
 # DCA strategy - simulation mode
 - pair: BTC_USDT

@@ -59,6 +59,11 @@ type Config struct {
 	HigherLookbackPeriods int
 	// MaxLeverage upper leverage bound for AI sizing.
 	MaxLeverage int
+
+	// TelegramBotToken is the bot token from @BotFather. Optional.
+	TelegramBotToken string
+	// TelegramChatID is the target chat or group ID. Optional.
+	TelegramChatID string
 }
 
 // SimulationStateKey returns a stable identifier used for namespacing simulator
@@ -110,6 +115,10 @@ type ConfigTmp struct {
 	LookbackPeriodsStr        string `yaml:"lookback_periods,omitempty"` // legacy alias
 	HigherLookbackPeriodsStr  string `yaml:"higher_lookback_periods,omitempty"`
 	MaxLeverageStr            string `yaml:"max_leverage,omitempty"`
+
+	// Telegram notification fields (optional, apply to all bots when set on any entry)
+	TelegramBotToken string `yaml:"telegram_bot_token,omitempty"`
+	TelegramChatID   string `yaml:"telegram_chat_id,omitempty"`
 }
 
 var (
@@ -228,6 +237,8 @@ func parseConfig(c ConfigTmp) (*Config, error) {
 		PollPriceInterval: c.PollPriceInterval,
 		MarketType:        marketType,
 		Leverage:          leverage,
+		TelegramBotToken:  c.TelegramBotToken,
+		TelegramChatID:    c.TelegramChatID,
 	}
 
 	switch strategyType {

@@ -58,6 +58,9 @@ func RunTUI() error {
 		apiKey           string
 		model            = "deepseek/deepseek-v3-0324"
 		primaryTimeframe = "3m"
+		enableTelegram   bool
+		telegramToken    string
+		telegramChatID   string
 	)
 
 	mainForm := huh.NewForm(
@@ -195,6 +198,41 @@ func RunTUI() error {
 				).
 				Value(&primaryTimeframe),
 		).WithHideFunc(func() bool { return strategy == "dca" }),
+
+		// ── Group 4: Telegram notifications (optional) ────────────────────────
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Enable Telegram notifications? (optional)").
+				Description("Receive a message when a buy or sell decision is made.").
+				Affirmative("Yes").
+				Negative("No").
+				Value(&enableTelegram),
+		),
+
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Telegram bot token").
+				Description("Create a bot via @BotFather and paste the token here.").
+				EchoMode(huh.EchoModePassword).
+				Value(&telegramToken).
+				Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("bot token is required")
+					}
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("Telegram chat ID").
+				Description("Your chat or group ID. Find it via @userinfobot.").
+				Value(&telegramChatID).
+				Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("chat ID is required")
+					}
+					return nil
+				}),
+		).WithHideFunc(func() bool { return !enableTelegram }),
 	).WithTheme(huh.ThemeDracula())
 
 	if err := mainForm.Run(); err != nil {
@@ -254,6 +292,11 @@ func RunTUI() error {
 		if marketType == "margin" {
 			cfgTmp.MaxLeverageStr = "10"
 		}
+	}
+
+	if enableTelegram {
+		cfgTmp.TelegramBotToken = telegramToken
+		cfgTmp.TelegramChatID = telegramChatID
 	}
 
 	const filename = "config.gen.yaml"

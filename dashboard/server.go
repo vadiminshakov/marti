@@ -553,6 +553,8 @@ func (s *Server) handleSetupConfig(w http.ResponseWriter, r *http.Request) {
 		APIKey           string `json:"apiKey"`
 		Model            string `json:"model"`
 		PrimaryTimeframe string `json:"primaryTimeframe"`
+		TelegramBotToken string `json:"telegramBotToken,omitempty"`
+		TelegramChatID   string `json:"telegramChatID,omitempty"`
 	}
 
 	var payload setupPayload
@@ -627,6 +629,11 @@ func (s *Server) handleSetupConfig(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "unsupported strategy (must be 'dca' or 'ai')", http.StatusBadRequest)
 		return
+	}
+
+	if payload.TelegramBotToken != "" && payload.TelegramChatID != "" {
+		cfgTmp.TelegramBotToken = payload.TelegramBotToken
+		cfgTmp.TelegramChatID = payload.TelegramChatID
 	}
 
 	const filename = "config.gen.yaml"

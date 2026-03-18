@@ -10,10 +10,15 @@ import (
 	"github.com/vadiminshakov/marti/dashboard"
 	"github.com/vadiminshakov/marti/internal"
 	"github.com/vadiminshakov/marti/internal/clients"
+	domain "github.com/vadiminshakov/marti/internal/domain"
 	"github.com/vadiminshakov/marti/internal/storage/balancesnapshots"
-	"github.com/vadiminshakov/marti/internal/storage/decisions"
 	"go.uber.org/zap"
 )
+
+type decisionStoreWriter interface {
+	SaveAI(event domain.AIDecisionEvent) error
+	SaveDCA(event domain.DCADecisionEvent) error
+}
 
 type managedBot struct {
 	ctx    context.Context
@@ -25,7 +30,7 @@ type botManager struct {
 	ctx           context.Context
 	logger        *zap.Logger
 	snapshotStore *balancesnapshots.WALStore
-	decisionStore *decisions.WALStore
+	decisionStore decisionStoreWriter
 
 	mu   sync.RWMutex
 	bots []managedBot
@@ -36,7 +41,7 @@ func newBotManager(
 	ctx context.Context,
 	logger *zap.Logger,
 	snapshotStore *balancesnapshots.WALStore,
-	decisionStore *decisions.WALStore,
+	decisionStore decisionStoreWriter,
 ) *botManager {
 	return &botManager{
 		ctx:           ctx,

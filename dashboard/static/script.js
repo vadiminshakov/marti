@@ -1228,6 +1228,46 @@ function openSetupWizard() {
   );
   aiSection.append(group4Title, aiRow1, aiRow2);
 
+  // ── Telegram notifications (optional) ──────────────────────────────────
+  const tgSection = document.createElement('div');
+  const tgTitle = document.createElement('div');
+  tgTitle.className = 'setup-group-title';
+  tgTitle.textContent = 'Telegram Notifications (optional)';
+
+  const tgToggleRow = document.createElement('div');
+  tgToggleRow.className = 'setup-row';
+  const tgToggle = document.createElement('input');
+  tgToggle.type = 'checkbox';
+  tgToggle.id = 'setupTelegramEnable';
+  const tgToggleLabel = document.createElement('label');
+  tgToggleLabel.htmlFor = 'setupTelegramEnable';
+  tgToggleLabel.textContent = 'Send a message when a buy or sell decision is made';
+  tgToggleLabel.style.cursor = 'pointer';
+  tgToggle.style.marginRight = '0.4rem';
+  tgToggleRow.append(tgToggle, tgToggleLabel);
+
+  const tgFields = document.createElement('div');
+  tgFields.style.display = 'none';
+  const tgRow = document.createElement('div');
+  tgRow.className = 'setup-row';
+  const tgTokenInput = document.createElement('input');
+  tgTokenInput.type = 'password';
+  tgTokenInput.placeholder = '123456789:AABBcc...';
+  const tgChatInput = document.createElement('input');
+  tgChatInput.type = 'text';
+  tgChatInput.placeholder = '-100123456789';
+  tgRow.append(
+    createSetupField('setupTgToken', 'Bot token', 'From @BotFather.', tgTokenInput),
+    createSetupField('setupTgChat', 'Chat ID', 'Find via @userinfobot.', tgChatInput)
+  );
+  tgFields.appendChild(tgRow);
+
+  tgToggle.addEventListener('change', () => {
+    tgFields.style.display = tgToggle.checked ? 'block' : 'none';
+  });
+
+  tgSection.append(tgTitle, tgToggleRow, tgFields);
+
   const errorEl = document.createElement('div');
   errorEl.className = 'setup-error';
   errorEl.style.display = 'none';
@@ -1263,7 +1303,7 @@ function openSetupWizard() {
   strategySelect.addEventListener('change', toggleSections);
   toggleSections();
 
-  form.append(row1, group2Title, row2, row2b, dcaSection, aiSection, errorEl);
+  form.append(row1, group2Title, row2, row2b, dcaSection, aiSection, tgSection, errorEl);
 
   submitBtn.addEventListener('click', (e) => {
     if (submitBtn.form === form) {
@@ -1297,7 +1337,11 @@ function openSetupWizard() {
       apiUrl: apiUrlInput.value.trim(),
       apiKey: apiKeyInput.value,
       model: modelInput.value.trim(),
-      primaryTimeframe: primaryTfSelect.value
+      primaryTimeframe: primaryTfSelect.value,
+      ...(tgToggle.checked && tgTokenInput.value && tgChatInput.value ? {
+        telegramBotToken: tgTokenInput.value,
+        telegramChatID: tgChatInput.value.trim()
+      } : {})
     };
 
     submitBtn.disabled = true;

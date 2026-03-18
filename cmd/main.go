@@ -36,6 +36,7 @@ import (
 	"github.com/vadiminshakov/marti/internal/setup"
 	"github.com/vadiminshakov/marti/internal/storage/balancesnapshots"
 	"github.com/vadiminshakov/marti/internal/storage/decisions"
+	"github.com/vadiminshakov/marti/pkg/telegram"
 	"go.uber.org/zap"
 )
 
@@ -113,15 +114,25 @@ func main() {
 		}
 	}()
 
-	decisionStore, err := decisions.NewWALStore("")
+	rawDecisionStore, err := decisions.NewWALStore("")
 	if err != nil {
 		logger.Fatal("Failed to initialize decision store", zap.Error(err))
 	}
 	defer func() {
-		if err := decisionStore.Close(); err != nil {
+		if err := rawDecisionStore.Close(); err != nil {
 			logger.Warn("Failed to close decision store", zap.Error(err))
 		}
 	}()
+
+	var tgToken, tgChatID string
+	for _, c := range configs {
+		if c.TelegramBotToken != "" && c.TelegramChatID != "" {
+			tgToken = c.TelegramBotToken
+			tgChatID = c.TelegramChatID
+			break
+		}
+	}
+	decisionStore := decisions.NewNotifyingStore(rawDecisionStore, telegram.New(tgToken, tgChatID), logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
