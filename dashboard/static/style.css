@@ -940,3 +940,79 @@ header {
     font-size: 0.65rem;
   }
 }
+
+/* ── Config editor: multi-pair cards ───────────────────────────────── */
+.setup-panel.setup-panel--multi {
+  width: min(780px, 100%);
+}
+
+.setup-cards-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.setup-pair-card {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 0.75rem;
+  position: relative;
+}
+
+.setup-pair-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.setup-pair-card-title {
+  font-family: 'Press Start 2P', 'Space Mono', monospace;
+  font-size: 0.55rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.setup-pair-remove-btn {
+  background: transparent;
+  border: 1px solid #e0e0e0;
+  color: #d7263d;
+  cursor: pointer;
+  font-family: 'Space Mono', monospace;
+  font-size: 0.6rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 3px;
+}
+
+.setup-pair-remove-btn:hover:not([disabled]) {
+  background: #d7263d;
+  color: #fff;
+  border-color: #d7263d;
+}
+
+.setup-pair-remove-btn[disabled] {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.setup-add-pair-btn {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px dashed #ccc;
+  background: transparent;
+  cursor: pointer;
+  font-family: 'Space Mono', monospace;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #888;
+  border-radius: 4px;
+  margin-top: 0.5rem;
+}
+
+.setup-add-pair-btn:hover {
+  border-color: #111;
+  color: #111;
+}

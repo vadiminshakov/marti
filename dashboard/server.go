@@ -123,6 +123,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/decisions/stream", s.handleDecisionStream)
 	mux.HandleFunc("POST /sellall/{pair}", s.handleSellAll)
 	mux.HandleFunc("GET /api/setup/status", s.handleSetupStatus)
+	mux.HandleFunc("GET /api/setup/config", s.handleGetConfig)
 	mux.HandleFunc("POST /api/setup/config", s.handleSetupConfig)
 
 	server := &http.Server{
@@ -164,6 +165,7 @@ func (s *Server) StartWithAutoTLS(ctx context.Context, domains []string, cacheDi
 	mux.HandleFunc("/decisions/stream", s.handleDecisionStream)
 	mux.HandleFunc("POST /sellall/{pair}", s.handleSellAll)
 	mux.HandleFunc("GET /api/setup/status", s.handleSetupStatus)
+	mux.HandleFunc("GET /api/setup/config", s.handleGetConfig)
 	mux.HandleFunc("POST /api/setup/config", s.handleSetupConfig)
 
 	manager := &autocert.Manager{
@@ -533,32 +535,98 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
+const secretMask = "••••••••"
+
+type configEntry struct {
+	Strategy             string `json:"strategy"`
+	Platform             string `json:"platform"`
+	Pair                 string `json:"pair"`
+	MarketType           string `json:"marketType"`
+	PollInterval         string `json:"pollInterval"`
+	Amount               string `json:"amount"`
+	MaxDcaTrades         string `json:"maxDcaTrades"`
+	BuyThreshold         string `json:"buyThreshold"`
+	SellThreshold        string `json:"sellThreshold"`
+	APIURL               string `json:"apiUrl"`
+	APIKey               string `json:"apiKey"`
+	Model                string `json:"model"`
+	PrimaryTimeframe     string `json:"primaryTimeframe"`
+	HigherTimeframe      string `json:"higherTimeframe"`
+	LookbackPeriods      string `json:"lookbackPeriods"`
+	HigherLookbackPeriods string `json:"higherLookbackPeriods"`
+	MaxLeverage          string `json:"maxLeverage"`
+	Leverage             string `json:"leverage"`
+	LLMProxyURL          string `json:"llmProxyUrl"`
+	TelegramBotToken     string `json:"telegramBotToken"`
+	TelegramChatID       string `json:"telegramChatID"`
+}
+
+func configTmpToEntry(c config.ConfigTmp, maskSecrets bool) configEntry {
+	e := configEntry{
+		Strategy:              c.Strategy,
+		Platform:              c.Platform,
+		Pair:                  c.Pair,
+		MarketType:            c.MarketTypeStr,
+		PollInterval:          c.PollPriceInterval.String(),
+		Amount:                c.Amount,
+		MaxDcaTrades:          c.MaxDcaTradesStr,
+		BuyThreshold:          c.DcaPercentThresholdBuyStr,
+		SellThreshold:         c.DcaPercentThresholdSellStr,
+		APIURL:                c.LLMAPIURL,
+		APIKey:                c.LLMAPIKey,
+		Model:                 c.Model,
+		PrimaryTimeframe:      c.PrimaryTimeframe,
+		HigherTimeframe:       c.HigherTimeframe,
+		LookbackPeriods:       c.PrimaryLookbackPeriodsStr,
+		HigherLookbackPeriods: c.HigherLookbackPeriodsStr,
+		MaxLeverage:           c.MaxLeverageStr,
+		Leverage:              c.LeverageStr,
+		LLMProxyURL:           c.LLMProxyURL,
+		TelegramBotToken:      c.TelegramBotToken,
+		TelegramChatID:        c.TelegramChatID,
+	}
+	if maskSecrets {
+		if e.APIKey != "" {
+			e.APIKey = secretMask
+		}
+		if e.TelegramBotToken != "" {
+			e.TelegramBotToken = secretMask
+		}
+	}
+	return e
+}
+
+func readExistingConfigs() []config.ConfigTmp {
+	var existing []config.ConfigTmp
+	if data, err := os.ReadFile("config.gen.yaml"); err == nil {
+		_ = yaml.Unmarshal(data, &existing)
+	}
+	return existing
+}
+
+func (s *Server) handleGetConfig(w http.ResponseWriter, _ *http.Request) {
+	existing := readExistingConfigs()
+
+	entries := make([]configEntry, 0, len(existing))
+	for _, c := range existing {
+		entries = append(entries, configTmpToEntry(c, true))
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(entries); err != nil {
+		log.Printf("get config encode error: %v", err)
+		http.Error(w, "failed to encode config", http.StatusInternalServerError)
+	}
+}
+
 func (s *Server) handleSetupConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	type setupPayload struct {
-		Strategy         string `json:"strategy"`
-		Platform         string `json:"platform"`
-		Pair             string `json:"pair"`
-		MarketType       string `json:"marketType"`
-		PollInterval     string `json:"pollInterval"`
-		Amount           string `json:"amount"`
-		MaxDcaTrades     string `json:"maxDcaTrades"`
-		BuyThreshold     string `json:"buyThreshold"`
-		SellThreshold    string `json:"sellThreshold"`
-		APIURL           string `json:"apiUrl"`
-		APIKey           string `json:"apiKey"`
-		Model            string `json:"model"`
-		PrimaryTimeframe string `json:"primaryTimeframe"`
-		TelegramBotToken string `json:"telegramBotToken,omitempty"`
-		TelegramChatID   string `json:"telegramChatID,omitempty"`
-	}
-
-	var payload setupPayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+	var payloads []configEntry
+	if err := json.NewDecoder(r.Body).Decode(&payloads); err != nil {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
@@ -566,87 +634,115 @@ func (s *Server) handleSetupConfig(w http.ResponseWriter, r *http.Request) {
 		_ = r.Body.Close()
 	}()
 
-	if payload.Pair == "" {
-		http.Error(w, "pair cannot be empty", http.StatusBadRequest)
+	if len(payloads) == 0 {
+		http.Error(w, "at least one trading pair is required", http.StatusBadRequest)
 		return
 	}
 
-	if payload.PollInterval == "" {
-		http.Error(w, "poll interval is required", http.StatusBadRequest)
-		return
+	// Read old config to recover masked secrets.
+	oldConfigs := readExistingConfigs()
+	oldByKey := make(map[string]config.ConfigTmp, len(oldConfigs))
+	for _, c := range oldConfigs {
+		key := c.Pair + "|" + c.Platform + "|" + c.Strategy
+		oldByKey[key] = c
 	}
 
-	pollInterval, err := time.ParseDuration(payload.PollInterval)
-	if err != nil {
-		http.Error(w, "invalid poll interval (use values like 30s, 1m, 5m)", http.StatusBadRequest)
-		return
-	}
-
-	strategy := payload.Strategy
-	if strategy == "" {
-		strategy = "dca"
-	}
-
-	marketType := payload.MarketType
-	if marketType == "" {
-		marketType = "spot"
-	}
-
-	cfgTmp := config.ConfigTmp{
-		Platform:          payload.Platform,
-		Pair:              payload.Pair,
-		Strategy:          strategy,
-		MarketTypeStr:     marketType,
-		PollPriceInterval: pollInterval,
-	}
-
-	switch strategy {
-	case "dca":
-		cfgTmp.Amount = payload.Amount
-		cfgTmp.MaxDcaTradesStr = payload.MaxDcaTrades
-		cfgTmp.DcaPercentThresholdBuyStr = payload.BuyThreshold
-		cfgTmp.DcaPercentThresholdSellStr = payload.SellThreshold
-	case "ai":
-		cfgTmp.LLMAPIURL = payload.APIURL
-		cfgTmp.LLMAPIKey = payload.APIKey
-		cfgTmp.Model = payload.Model
-		cfgTmp.PrimaryTimeframe = payload.PrimaryTimeframe
-		if cfgTmp.PrimaryTimeframe == "" {
-			cfgTmp.PrimaryTimeframe = "3m"
+	var configs []config.ConfigTmp
+	for i, p := range payloads {
+		if p.Pair == "" {
+			http.Error(w, fmt.Sprintf("pair #%d: pair cannot be empty", i+1), http.StatusBadRequest)
+			return
 		}
-		if cfgTmp.HigherTimeframe == "" {
-			cfgTmp.HigherTimeframe = "15m"
+		if p.PollInterval == "" {
+			http.Error(w, fmt.Sprintf("pair #%d: poll interval is required", i+1), http.StatusBadRequest)
+			return
 		}
-		if cfgTmp.PrimaryLookbackPeriodsStr == "" {
-			cfgTmp.PrimaryLookbackPeriodsStr = "50"
-		}
-		if cfgTmp.HigherLookbackPeriodsStr == "" {
-			cfgTmp.HigherLookbackPeriodsStr = "60"
-		}
-		if marketType == "margin" && cfgTmp.MaxLeverageStr == "" {
-			cfgTmp.MaxLeverageStr = "10"
-		}
-	default:
-		http.Error(w, "unsupported strategy (must be 'dca' or 'ai')", http.StatusBadRequest)
-		return
-	}
 
-	if payload.TelegramBotToken != "" && payload.TelegramChatID != "" {
-		cfgTmp.TelegramBotToken = payload.TelegramBotToken
-		cfgTmp.TelegramChatID = payload.TelegramChatID
+		pollInterval, err := time.ParseDuration(p.PollInterval)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("pair #%d: invalid poll interval (use values like 30s, 1m, 5m)", i+1), http.StatusBadRequest)
+			return
+		}
+
+		strategy := p.Strategy
+		if strategy == "" {
+			strategy = "dca"
+		}
+		marketType := p.MarketType
+		if marketType == "" {
+			marketType = "spot"
+		}
+
+		cfgTmp := config.ConfigTmp{
+			Platform:          p.Platform,
+			Pair:              p.Pair,
+			Strategy:          strategy,
+			MarketTypeStr:     marketType,
+			PollPriceInterval: pollInterval,
+			LeverageStr:       p.Leverage,
+			TelegramChatID:    p.TelegramChatID,
+		}
+
+		// Recover masked secrets from old config.
+		oldKey := p.Pair + "|" + p.Platform + "|" + strategy
+		if old, ok := oldByKey[oldKey]; ok {
+			if p.APIKey == secretMask {
+				p.APIKey = old.LLMAPIKey
+			}
+			if p.TelegramBotToken == secretMask {
+				p.TelegramBotToken = old.TelegramBotToken
+			}
+		}
+
+		switch strategy {
+		case "dca":
+			cfgTmp.Amount = p.Amount
+			cfgTmp.MaxDcaTradesStr = p.MaxDcaTrades
+			cfgTmp.DcaPercentThresholdBuyStr = p.BuyThreshold
+			cfgTmp.DcaPercentThresholdSellStr = p.SellThreshold
+		case "ai":
+			cfgTmp.LLMAPIURL = p.APIURL
+			cfgTmp.LLMAPIKey = p.APIKey
+			cfgTmp.Model = p.Model
+			cfgTmp.PrimaryTimeframe = p.PrimaryTimeframe
+			cfgTmp.HigherTimeframe = p.HigherTimeframe
+			cfgTmp.PrimaryLookbackPeriodsStr = p.LookbackPeriods
+			cfgTmp.HigherLookbackPeriodsStr = p.HigherLookbackPeriods
+			cfgTmp.MaxLeverageStr = p.MaxLeverage
+			cfgTmp.LLMProxyURL = p.LLMProxyURL
+			if cfgTmp.PrimaryTimeframe == "" {
+				cfgTmp.PrimaryTimeframe = "3m"
+			}
+			if cfgTmp.HigherTimeframe == "" {
+				cfgTmp.HigherTimeframe = "15m"
+			}
+			if cfgTmp.PrimaryLookbackPeriodsStr == "" {
+				cfgTmp.PrimaryLookbackPeriodsStr = "50"
+			}
+			if cfgTmp.HigherLookbackPeriodsStr == "" {
+				cfgTmp.HigherLookbackPeriodsStr = "60"
+			}
+			if marketType == "margin" && cfgTmp.MaxLeverageStr == "" {
+				cfgTmp.MaxLeverageStr = "10"
+			}
+		default:
+			http.Error(w, fmt.Sprintf("pair #%d: unsupported strategy (must be 'dca' or 'ai')", i+1), http.StatusBadRequest)
+			return
+		}
+
+		if p.TelegramBotToken != "" && p.TelegramBotToken != secretMask {
+			cfgTmp.TelegramBotToken = p.TelegramBotToken
+		}
+		if p.TelegramChatID != "" {
+			cfgTmp.TelegramChatID = p.TelegramChatID
+		}
+
+		configs = append(configs, cfgTmp)
 	}
 
 	const filename = "config.gen.yaml"
 
-	// Read existing configs to append to them.
-	var existing []config.ConfigTmp
-	if existingData, readErr := os.ReadFile(filename); readErr == nil {
-		_ = yaml.Unmarshal(existingData, &existing)
-	}
-
-	existing = append(existing, cfgTmp)
-
-	data, err := yaml.Marshal(existing)
+	data, err := yaml.Marshal(configs)
 	if err != nil {
 		log.Printf("setup config marshal error: %v", err)
 		http.Error(w, "failed to generate yaml", http.StatusInternalServerError)

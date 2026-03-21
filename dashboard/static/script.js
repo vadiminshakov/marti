@@ -1055,6 +1055,251 @@ function createSetupField(id, label, hint, inputElement) {
   return field;
 }
 
+const DEFAULT_PAIR_DATA = {
+  strategy: 'dca', platform: 'binance', pair: 'BTC_USDT', marketType: 'spot',
+  pollInterval: '5m', amount: '10', maxDcaTrades: '15', buyThreshold: '3.5',
+  sellThreshold: '0.75', apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
+  apiKey: '', model: 'deepseek/deepseek-v3-0324', primaryTimeframe: '3m',
+  higherTimeframe: '', lookbackPeriods: '', higherLookbackPeriods: '',
+  maxLeverage: '', leverage: '', llmProxyUrl: '',
+  telegramBotToken: '', telegramChatID: ''
+};
+
+function createPairCard(index, data, onRemove, onChange) {
+  const card = document.createElement('div');
+  card.className = 'setup-pair-card';
+  card.dataset.index = index;
+
+  const cardHeader = document.createElement('div');
+  cardHeader.className = 'setup-pair-card-header';
+  const cardTitle = document.createElement('span');
+  cardTitle.className = 'setup-pair-card-title';
+  cardTitle.textContent = data.pair || 'New pair';
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'setup-pair-remove-btn';
+  removeBtn.textContent = 'Remove';
+  removeBtn.onclick = () => onRemove(card);
+  cardHeader.append(cardTitle, removeBtn);
+  card.appendChild(cardHeader);
+
+  const listen = (el) => {
+    el.addEventListener('input', onChange);
+    el.addEventListener('change', onChange);
+    return el;
+  };
+
+  // Strategy & exchange
+  const group1Title = document.createElement('h3');
+  group1Title.className = 'setup-group-title';
+  group1Title.textContent = 'Strategy & exchange';
+
+  const row1 = document.createElement('div');
+  row1.className = 'setup-row';
+
+  const strategySelect = listen(document.createElement('select'));
+  [['dca', 'DCA \u2014 rule-based averaging'], ['ai', 'AI \u2014 LLM-based trading']].forEach(([v, t]) => {
+    const opt = document.createElement('option');
+    opt.value = v; opt.textContent = t;
+    strategySelect.appendChild(opt);
+  });
+  strategySelect.value = data.strategy || 'dca';
+
+  const platformSelect = listen(document.createElement('select'));
+  ['binance', 'bybit', 'hyperliquid', 'simulate'].forEach((v) => {
+    const opt = document.createElement('option');
+    opt.value = v; opt.textContent = v.charAt(0).toUpperCase() + v.slice(1);
+    platformSelect.appendChild(opt);
+  });
+  platformSelect.value = data.platform || 'binance';
+
+  row1.append(
+    createSetupField('setupStrategy_' + index, 'Strategy', 'Choose between DCA or AI strategy.', strategySelect),
+    createSetupField('setupPlatform_' + index, 'Exchange', 'Binance, Bybit, Hyperliquid or simulation.', platformSelect)
+  );
+
+  // Pair, market, interval
+  const group2Title = document.createElement('h3');
+  group2Title.className = 'setup-group-title';
+  group2Title.textContent = 'Pair, market and interval';
+
+  const row2 = document.createElement('div');
+  row2.className = 'setup-row';
+  const pairInput = listen(document.createElement('input'));
+  pairInput.type = 'text';
+  pairInput.value = data.pair || 'BTC_USDT';
+  pairInput.addEventListener('input', () => {
+    cardTitle.textContent = pairInput.value.trim() || 'New pair';
+  });
+
+  const marketSelect = listen(document.createElement('select'));
+  [['spot', 'Spot'], ['margin', 'Margin']].forEach(([v, t]) => {
+    const opt = document.createElement('option');
+    opt.value = v; opt.textContent = t;
+    marketSelect.appendChild(opt);
+  });
+  marketSelect.value = data.marketType || 'spot';
+
+  row2.append(
+    createSetupField('setupPair_' + index, 'Trading pair', 'Format: BASE_QUOTE (e.g. BTC_USDT).', pairInput),
+    createSetupField('setupMarketType_' + index, 'Market type', 'Spot or margin.', marketSelect)
+  );
+
+  const row2b = document.createElement('div');
+  row2b.className = 'setup-row';
+  const pollInput = listen(document.createElement('input'));
+  pollInput.type = 'text';
+  pollInput.value = data.pollInterval || '5m';
+  row2b.append(
+    createSetupField('setupPollInterval_' + index, 'Price check interval', 'How often to fetch price (e.g. 30s, 1m, 5m).', pollInput)
+  );
+
+  // DCA settings
+  const dcaSection = document.createElement('div');
+  const group3Title = document.createElement('h3');
+  group3Title.className = 'setup-group-title';
+  group3Title.textContent = 'DCA settings';
+  const dcaRow1 = document.createElement('div');
+  dcaRow1.className = 'setup-row';
+  const amountInput = listen(document.createElement('input'));
+  amountInput.type = 'text';
+  amountInput.value = data.amount || '10';
+  const maxTradesInput = listen(document.createElement('input'));
+  maxTradesInput.type = 'text';
+  maxTradesInput.value = data.maxDcaTrades || '15';
+  dcaRow1.append(
+    createSetupField('setupAmount_' + index, 'Trade amount (%)', 'Percentage of quote balance to allocate (1\u2013100).', amountInput),
+    createSetupField('setupMaxDcaTrades_' + index, 'Max DCA orders', 'Maximum additional safety orders per series.', maxTradesInput)
+  );
+  const dcaRow2 = document.createElement('div');
+  dcaRow2.className = 'setup-row';
+  const buyThrInput = listen(document.createElement('input'));
+  buyThrInput.type = 'text';
+  buyThrInput.value = data.buyThreshold || '3.5';
+  const sellThrInput = listen(document.createElement('input'));
+  sellThrInput.type = 'text';
+  sellThrInput.value = data.sellThreshold || '0.75';
+  dcaRow2.append(
+    createSetupField('setupBuyThreshold_' + index, 'Safety order trigger %', 'New buy when price drops by this percent.', buyThrInput),
+    createSetupField('setupSellThreshold_' + index, 'Take-profit %', 'Close position when price rises by this percent.', sellThrInput)
+  );
+  dcaSection.append(group3Title, dcaRow1, dcaRow2);
+
+  // AI settings
+  const aiSection = document.createElement('div');
+  const group4Title = document.createElement('h3');
+  group4Title.className = 'setup-group-title';
+  group4Title.textContent = 'AI settings';
+  const aiRow1 = document.createElement('div');
+  aiRow1.className = 'setup-row';
+  const apiUrlInput = listen(document.createElement('input'));
+  apiUrlInput.type = 'text';
+  apiUrlInput.value = data.apiUrl || 'https://openrouter.ai/api/v1/chat/completions';
+  const apiKeyInput = listen(document.createElement('input'));
+  apiKeyInput.type = 'password';
+  apiKeyInput.autocomplete = 'off';
+  apiKeyInput.value = data.apiKey || '';
+  const modelInput = listen(document.createElement('input'));
+  modelInput.type = 'text';
+  modelInput.value = data.model || 'deepseek/deepseek-v3-0324';
+  const primaryTfSelect = listen(document.createElement('select'));
+  ['1m', '3m', '5m', '15m', '1h'].forEach((v) => {
+    const opt = document.createElement('option');
+    opt.value = v; opt.textContent = v;
+    primaryTfSelect.appendChild(opt);
+  });
+  primaryTfSelect.value = data.primaryTimeframe || '3m';
+  aiRow1.append(
+    createSetupField('setupApiUrl_' + index, 'LLM API URL', 'OpenAI-compatible endpoint.', apiUrlInput),
+    createSetupField('setupApiKey_' + index, 'LLM API key', 'Stored only in generated config file.', apiKeyInput)
+  );
+  const aiRow2 = document.createElement('div');
+  aiRow2.className = 'setup-row';
+  aiRow2.append(
+    createSetupField('setupModel_' + index, 'Model', 'LLM model identifier (e.g. deepseek/deepseek-v3-0324).', modelInput),
+    createSetupField('setupPrimaryTimeframe_' + index, 'Primary timeframe', 'Main timeframe to analyse.', primaryTfSelect)
+  );
+  aiSection.append(group4Title, aiRow1, aiRow2);
+
+  // Telegram notifications
+  const tgSection = document.createElement('div');
+  const tgTitle = document.createElement('div');
+  tgTitle.className = 'setup-group-title';
+  tgTitle.textContent = 'Telegram Notifications (optional)';
+  const tgToggleRow = document.createElement('div');
+  tgToggleRow.className = 'setup-row';
+  const tgToggle = listen(document.createElement('input'));
+  tgToggle.type = 'checkbox';
+  tgToggle.id = 'setupTelegramEnable_' + index;
+  const hasTg = !!(data.telegramBotToken && data.telegramChatID);
+  tgToggle.checked = hasTg;
+  const tgToggleLabel = document.createElement('label');
+  tgToggleLabel.htmlFor = 'setupTelegramEnable_' + index;
+  tgToggleLabel.textContent = 'Send a message when a buy or sell decision is made';
+  tgToggleLabel.style.cursor = 'pointer';
+  tgToggle.style.marginRight = '0.4rem';
+  tgToggleRow.append(tgToggle, tgToggleLabel);
+
+  const tgFields = document.createElement('div');
+  tgFields.style.display = hasTg ? 'block' : 'none';
+  const tgRow = document.createElement('div');
+  tgRow.className = 'setup-row';
+  const tgTokenInput = listen(document.createElement('input'));
+  tgTokenInput.type = 'password';
+  tgTokenInput.placeholder = '123456789:AABBcc...';
+  tgTokenInput.value = data.telegramBotToken || '';
+  const tgChatInput = listen(document.createElement('input'));
+  tgChatInput.type = 'text';
+  tgChatInput.placeholder = '-100123456789';
+  tgChatInput.value = data.telegramChatID || '';
+  tgRow.append(
+    createSetupField('setupTgToken_' + index, 'Bot token', 'From @BotFather.', tgTokenInput),
+    createSetupField('setupTgChat_' + index, 'Chat ID', 'Find via @userinfobot.', tgChatInput)
+  );
+  tgFields.appendChild(tgRow);
+  tgToggle.addEventListener('change', () => {
+    tgFields.style.display = tgToggle.checked ? 'block' : 'none';
+  });
+  tgSection.append(tgTitle, tgToggleRow, tgFields);
+
+  // Strategy toggle
+  const toggleSections = () => {
+    const useAi = strategySelect.value === 'ai';
+    dcaSection.style.display = useAi ? 'none' : 'block';
+    aiSection.style.display = useAi ? 'block' : 'none';
+  };
+  strategySelect.addEventListener('change', toggleSections);
+  toggleSections();
+
+  card.append(group1Title, row1, group2Title, row2, row2b, dcaSection, aiSection, tgSection);
+
+  card.collectPayload = () => ({
+    strategy: strategySelect.value,
+    platform: platformSelect.value,
+    pair: pairInput.value.trim(),
+    marketType: marketSelect.value,
+    pollInterval: pollInput.value.trim(),
+    amount: amountInput.value.trim(),
+    maxDcaTrades: maxTradesInput.value.trim(),
+    buyThreshold: buyThrInput.value.trim(),
+    sellThreshold: sellThrInput.value.trim(),
+    apiUrl: apiUrlInput.value.trim(),
+    apiKey: apiKeyInput.value,
+    model: modelInput.value.trim(),
+    primaryTimeframe: primaryTfSelect.value,
+    higherTimeframe: '',
+    lookbackPeriods: '',
+    higherLookbackPeriods: '',
+    maxLeverage: '',
+    leverage: '',
+    llmProxyUrl: '',
+    telegramBotToken: tgToggle.checked ? tgTokenInput.value : '',
+    telegramChatID: tgToggle.checked ? tgChatInput.value.trim() : ''
+  });
+
+  return card;
+}
+
 function openSetupWizard() {
   if (document.getElementById('setupOverlay')) {
     return;
@@ -1065,210 +1310,30 @@ function openSetupWizard() {
   overlay.className = 'setup-overlay';
 
   const panel = document.createElement('div');
-  panel.className = 'setup-panel';
+  panel.className = 'setup-panel setup-panel--multi';
 
   const header = document.createElement('div');
   header.className = 'setup-panel-header';
-
   const titleWrap = document.createElement('div');
   const title = document.createElement('h2');
   title.className = 'setup-panel-title';
-  title.textContent = 'Add trading pair';
+  title.textContent = 'Configuration';
   const subtitle = document.createElement('p');
   subtitle.className = 'setup-panel-subtitle';
-  subtitle.textContent = 'Add a new trading pair to config.gen.yaml.';
+  subtitle.textContent = 'Manage trading pairs and settings.';
   titleWrap.append(title, subtitle);
-
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
   closeBtn.className = 'setup-close-btn';
-  closeBtn.textContent = '✕';
+  closeBtn.textContent = '\u2715';
   closeBtn.onclick = () => overlay.remove();
-
   header.append(titleWrap, closeBtn);
 
   const body = document.createElement('div');
   body.className = 'setup-body';
 
-  const form = document.createElement('form');
-
-  const group1Title = document.createElement('h3');
-  group1Title.className = 'setup-group-title';
-  group1Title.textContent = 'Strategy & exchange';
-  body.appendChild(group1Title);
-
-  const row1 = document.createElement('div');
-  row1.className = 'setup-row';
-
-  const strategySelect = document.createElement('select');
-  const optDca = document.createElement('option');
-  optDca.value = 'dca';
-  optDca.textContent = 'DCA — rule-based averaging';
-  const optAi = document.createElement('option');
-  optAi.value = 'ai';
-  optAi.textContent = 'AI — LLM-based trading';
-  strategySelect.append(optDca, optAi);
-  strategySelect.value = 'dca';
-
-  const platformSelect = document.createElement('select');
-  ['binance', 'bybit', 'hyperliquid', 'simulate'].forEach((value) => {
-    const opt = document.createElement('option');
-    opt.value = value;
-    opt.textContent = value.charAt(0).toUpperCase() + value.slice(1);
-    platformSelect.appendChild(opt);
-  });
-  platformSelect.value = 'binance';
-
-  row1.append(
-    createSetupField('setupStrategy', 'Strategy', 'Choose between DCA or AI strategy.', strategySelect),
-    createSetupField('setupPlatform', 'Exchange', 'Binance, Bybit, Hyperliquid or simulation.', platformSelect)
-  );
-
-  const group2Title = document.createElement('h3');
-  group2Title.className = 'setup-group-title';
-  group2Title.textContent = 'Pair, market and interval';
-
-  const row2 = document.createElement('div');
-  row2.className = 'setup-row';
-
-  const pairInput = document.createElement('input');
-  pairInput.type = 'text';
-  pairInput.value = 'BTC_USDT';
-
-  const marketSelect = document.createElement('select');
-  const optSpot = document.createElement('option');
-  optSpot.value = 'spot';
-  optSpot.textContent = 'Spot';
-  const optMargin = document.createElement('option');
-  optMargin.value = 'margin';
-  optMargin.textContent = 'Margin';
-  marketSelect.append(optSpot, optMargin);
-  marketSelect.value = 'spot';
-
-  const pollInput = document.createElement('input');
-  pollInput.type = 'text';
-  pollInput.value = '5m';
-
-  row2.append(
-    createSetupField('setupPair', 'Trading pair', 'Format: BASE_QUOTE (e.g. BTC_USDT).', pairInput),
-    createSetupField('setupMarketType', 'Market type', 'Spot or margin.', marketSelect)
-  );
-
-  const row2b = document.createElement('div');
-  row2b.className = 'setup-row';
-  row2b.append(
-    createSetupField('setupPollInterval', 'Price check interval', 'How often to fetch price (e.g. 30s, 1m, 5m).', pollInput)
-  );
-
-  const group3Title = document.createElement('h3');
-  group3Title.className = 'setup-group-title';
-  group3Title.textContent = 'DCA settings';
-
-  const dcaSection = document.createElement('div');
-  const dcaRow1 = document.createElement('div');
-  dcaRow1.className = 'setup-row';
-  const amountInput = document.createElement('input');
-  amountInput.type = 'text';
-  amountInput.value = '10';
-  const maxTradesInput = document.createElement('input');
-  maxTradesInput.type = 'text';
-  maxTradesInput.value = '15';
-  dcaRow1.append(
-    createSetupField('setupAmount', 'Trade amount (%)', 'Percentage of quote balance to allocate (1–100).', amountInput),
-    createSetupField('setupMaxDcaTrades', 'Max DCA orders', 'Maximum additional safety orders per series.', maxTradesInput)
-  );
-
-  const dcaRow2 = document.createElement('div');
-  dcaRow2.className = 'setup-row';
-  const buyThrInput = document.createElement('input');
-  buyThrInput.type = 'text';
-  buyThrInput.value = '3.5';
-  const sellThrInput = document.createElement('input');
-  sellThrInput.type = 'text';
-  sellThrInput.value = '0.75';
-  dcaRow2.append(
-    createSetupField('setupBuyThreshold', 'Safety order trigger %', 'New buy when price drops by this percent.', buyThrInput),
-    createSetupField('setupSellThreshold', 'Take-profit %', 'Close position when price rises by this percent.', sellThrInput)
-  );
-  dcaSection.append(group3Title, dcaRow1, dcaRow2);
-
-  const group4Title = document.createElement('h3');
-  group4Title.className = 'setup-group-title';
-  group4Title.textContent = 'AI settings';
-
-  const aiSection = document.createElement('div');
-  const aiRow1 = document.createElement('div');
-  aiRow1.className = 'setup-row';
-  const apiUrlInput = document.createElement('input');
-  apiUrlInput.type = 'text';
-  apiUrlInput.value = 'https://openrouter.ai/api/v1/chat/completions';
-  const apiKeyInput = document.createElement('input');
-  apiKeyInput.type = 'password';
-  apiKeyInput.autocomplete = 'off';
-  const modelInput = document.createElement('input');
-  modelInput.type = 'text';
-  modelInput.value = 'deepseek/deepseek-v3-0324';
-  const primaryTfSelect = document.createElement('select');
-  ['1m', '3m', '5m', '15m', '1h'].forEach((value) => {
-    const opt = document.createElement('option');
-    opt.value = value;
-    opt.textContent = value;
-    primaryTfSelect.appendChild(opt);
-  });
-  primaryTfSelect.value = '3m';
-
-  aiRow1.append(
-    createSetupField('setupApiUrl', 'LLM API URL', 'OpenAI-compatible endpoint.', apiUrlInput),
-    createSetupField('setupApiKey', 'LLM API key', 'Stored only in generated config file.', apiKeyInput)
-  );
-
-  const aiRow2 = document.createElement('div');
-  aiRow2.className = 'setup-row';
-  aiRow2.append(
-    createSetupField('setupModel', 'Model', 'LLM model identifier (e.g. deepseek/deepseek-v3-0324).', modelInput),
-    createSetupField('setupPrimaryTimeframe', 'Primary timeframe', 'Main timeframe to analyse.', primaryTfSelect)
-  );
-  aiSection.append(group4Title, aiRow1, aiRow2);
-
-  // ── Telegram notifications (optional) ──────────────────────────────────
-  const tgSection = document.createElement('div');
-  const tgTitle = document.createElement('div');
-  tgTitle.className = 'setup-group-title';
-  tgTitle.textContent = 'Telegram Notifications (optional)';
-
-  const tgToggleRow = document.createElement('div');
-  tgToggleRow.className = 'setup-row';
-  const tgToggle = document.createElement('input');
-  tgToggle.type = 'checkbox';
-  tgToggle.id = 'setupTelegramEnable';
-  const tgToggleLabel = document.createElement('label');
-  tgToggleLabel.htmlFor = 'setupTelegramEnable';
-  tgToggleLabel.textContent = 'Send a message when a buy or sell decision is made';
-  tgToggleLabel.style.cursor = 'pointer';
-  tgToggle.style.marginRight = '0.4rem';
-  tgToggleRow.append(tgToggle, tgToggleLabel);
-
-  const tgFields = document.createElement('div');
-  tgFields.style.display = 'none';
-  const tgRow = document.createElement('div');
-  tgRow.className = 'setup-row';
-  const tgTokenInput = document.createElement('input');
-  tgTokenInput.type = 'password';
-  tgTokenInput.placeholder = '123456789:AABBcc...';
-  const tgChatInput = document.createElement('input');
-  tgChatInput.type = 'text';
-  tgChatInput.placeholder = '-100123456789';
-  tgRow.append(
-    createSetupField('setupTgToken', 'Bot token', 'From @BotFather.', tgTokenInput),
-    createSetupField('setupTgChat', 'Chat ID', 'Find via @userinfobot.', tgChatInput)
-  );
-  tgFields.appendChild(tgRow);
-
-  tgToggle.addEventListener('change', () => {
-    tgFields.style.display = tgToggle.checked ? 'block' : 'none';
-  });
-
-  tgSection.append(tgTitle, tgToggleRow, tgFields);
+  const cardsContainer = document.createElement('div');
+  cardsContainer.className = 'setup-cards-container';
 
   const errorEl = document.createElement('div');
   errorEl.className = 'setup-error';
@@ -1279,9 +1344,8 @@ function openSetupWizard() {
   const leftFooter = document.createElement('div');
   const statusEl = document.createElement('div');
   statusEl.className = 'setup-status';
-  statusEl.textContent = 'Config will be saved to config.gen.yaml';
+  statusEl.textContent = 'Loading configuration...';
   leftFooter.appendChild(statusEl);
-
   const rightFooter = document.createElement('div');
   rightFooter.style.display = 'flex';
   rightFooter.style.gap = '0.5rem';
@@ -1291,60 +1355,88 @@ function openSetupWizard() {
   cancelBtn.textContent = 'Cancel';
   cancelBtn.onclick = () => overlay.remove();
   const submitBtn = document.createElement('button');
-  submitBtn.type = 'submit';
+  submitBtn.type = 'button';
   submitBtn.className = 'setup-primary-btn';
   submitBtn.textContent = 'Save config';
+  submitBtn.disabled = true;
   rightFooter.append(cancelBtn, submitBtn);
   footer.append(leftFooter, rightFooter);
 
-  const toggleSections = () => {
-    const useAi = strategySelect.value === 'ai';
-    dcaSection.style.display = useAi ? 'none' : 'block';
-    aiSection.style.display = useAi ? 'block' : 'none';
-  };
-  strategySelect.addEventListener('change', toggleSections);
-  toggleSections();
+  let initialState = '';
+  let cardIndex = 0;
 
-  form.append(row1, group2Title, row2, row2b, dcaSection, aiSection, tgSection, errorEl);
+  function collectAllPayloads() {
+    const cards = cardsContainer.querySelectorAll('.setup-pair-card');
+    const payloads = [];
+    cards.forEach((c) => {
+      if (c.collectPayload) payloads.push(c.collectPayload());
+    });
+    return payloads;
+  }
 
-  submitBtn.addEventListener('click', (e) => {
-    if (submitBtn.form === form) {
-      return;
-    }
+  function checkChanges() {
+    const current = JSON.stringify(collectAllPayloads());
+    submitBtn.disabled = current === initialState;
+  }
 
-    e.preventDefault();
-    if (typeof form.requestSubmit === 'function') {
-      form.requestSubmit();
-      return;
-    }
+  function updateRemoveButtons() {
+    const cards = cardsContainer.querySelectorAll('.setup-pair-card');
+    const removeBtns = cardsContainer.querySelectorAll('.setup-pair-remove-btn');
+    removeBtns.forEach((btn) => {
+      btn.disabled = cards.length <= 1;
+    });
+  }
 
-    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  function addCard(data) {
+    const idx = cardIndex++;
+    const card = createPairCard(idx, data, (cardEl) => {
+      cardEl.remove();
+      updateRemoveButtons();
+      checkChanges();
+    }, checkChanges);
+    cardsContainer.appendChild(card);
+    updateRemoveButtons();
+    checkChanges();
+  }
+
+  const addPairBtn = document.createElement('button');
+  addPairBtn.type = 'button';
+  addPairBtn.className = 'setup-add-pair-btn';
+  addPairBtn.textContent = '+ Add pair';
+  addPairBtn.onclick = () => addCard({ ...DEFAULT_PAIR_DATA });
+
+  body.append(cardsContainer, addPairBtn, errorEl);
+  panel.append(header, body, footer);
+  overlay.appendChild(panel);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.remove();
   });
+  document.body.appendChild(overlay);
 
-  form.onsubmit = (e) => {
-    e.preventDefault();
+  // Load existing config
+  fetch('/api/setup/config')
+    .then((res) => res.ok ? res.json() : [])
+    .then((entries) => {
+      if (!Array.isArray(entries) || entries.length === 0) {
+        entries = [{ ...DEFAULT_PAIR_DATA }];
+      }
+      entries.forEach((entry) => addCard(entry));
+      initialState = JSON.stringify(collectAllPayloads());
+      submitBtn.disabled = true;
+      statusEl.textContent = 'Config will be saved to config.gen.yaml';
+    })
+    .catch(() => {
+      addCard({ ...DEFAULT_PAIR_DATA });
+      initialState = JSON.stringify(collectAllPayloads());
+      submitBtn.disabled = true;
+      statusEl.textContent = 'Config will be saved to config.gen.yaml';
+    });
+
+  // Save handler
+  submitBtn.addEventListener('click', () => {
     errorEl.style.display = 'none';
     errorEl.textContent = '';
-
-    const payload = {
-      strategy: strategySelect.value,
-      platform: platformSelect.value,
-      pair: pairInput.value.trim(),
-      marketType: marketSelect.value,
-      pollInterval: pollInput.value.trim(),
-      amount: amountInput.value.trim(),
-      maxDcaTrades: maxTradesInput.value.trim(),
-      buyThreshold: buyThrInput.value.trim(),
-      sellThreshold: sellThrInput.value.trim(),
-      apiUrl: apiUrlInput.value.trim(),
-      apiKey: apiKeyInput.value,
-      model: modelInput.value.trim(),
-      primaryTimeframe: primaryTfSelect.value,
-      ...(tgToggle.checked && tgTokenInput.value && tgChatInput.value ? {
-        telegramBotToken: tgTokenInput.value,
-        telegramChatID: tgChatInput.value.trim()
-      } : {})
-    };
+    const payloads = collectAllPayloads();
 
     submitBtn.disabled = true;
     cancelBtn.disabled = true;
@@ -1353,7 +1445,7 @@ function openSetupWizard() {
     fetch('/api/setup/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payloads)
     })
       .then(async (res) => {
         if (!res.ok) {
@@ -1363,34 +1455,21 @@ function openSetupWizard() {
         return res.json().catch(() => ({}));
       })
       .then(() => {
-        statusEl.textContent = 'config saved to config.gen.yaml, restart marti with -config=config.gen.yaml to apply';
-        submitBtn.disabled = false;
+        initialState = JSON.stringify(payloads);
+        statusEl.textContent = 'Config saved. Bots restarting...';
+        submitBtn.disabled = true;
         cancelBtn.disabled = false;
         submitBtn.classList.add('saved');
-        setTimeout(() => {
-          overlay.remove();
-        }, 500);
+        setTimeout(() => overlay.remove(), 800);
       })
       .catch((err) => {
         errorEl.textContent = (err && err.message) || 'failed to save config';
         errorEl.style.display = 'block';
-        statusEl.textContent = 'something went wrong';
+        statusEl.textContent = 'Something went wrong';
         submitBtn.disabled = false;
         cancelBtn.disabled = false;
       });
-  };
-
-  body.appendChild(form);
-
-  panel.append(header, body, footer);
-  overlay.appendChild(panel);
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) {
-      overlay.remove();
-    }
   });
-
-  document.body.appendChild(overlay);
 }
 
 if (setupButton) {
