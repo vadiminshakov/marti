@@ -181,12 +181,20 @@ func main() {
 			return nil
 		}
 
+		cfgPath := ""
+		if !configMissing {
+			if f := flag.Lookup("config"); f != nil {
+				cfgPath = f.Value.String()
+			}
+		}
+
 		srv = dashboard.NewServer(
 			webAddr,
 			snapshotStore,
 			decisionStore,
 			manager.DashboardBots(),
 			configMissing,
+			cfgPath,
 			onSetupSaved,
 		)
 

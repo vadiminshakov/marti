@@ -47,6 +47,7 @@ type Server struct {
 	mu         sync.RWMutex
 	Bots       []TradingBotInterface
 	NeedsSetup bool
+	configPath string
 }
 
 // NewServer creates a new web server instance.
@@ -56,6 +57,7 @@ func NewServer(
 	decisions decisionReader,
 	bots []TradingBotInterface,
 	needsSetup bool,
+	configPath string,
 	onSetupSaved func(configPath string) error,
 ) *Server {
 	return &Server{
@@ -64,6 +66,7 @@ func NewServer(
 		DecisionStore: decisions,
 		Bots:          bots,
 		NeedsSetup:    needsSetup,
+		configPath:    configPath,
 		OnSetupSaved:  onSetupSaved,
 	}
 }
@@ -596,16 +599,19 @@ func configTmpToEntry(c config.ConfigTmp, maskSecrets bool) configEntry {
 	return e
 }
 
-func readExistingConfigs() []config.ConfigTmp {
+func readExistingConfigs(path string) []config.ConfigTmp {
+	if path == "" {
+		return nil
+	}
 	var existing []config.ConfigTmp
-	if data, err := os.ReadFile("config.gen.yaml"); err == nil {
+	if data, err := os.ReadFile(path); err == nil {
 		_ = yaml.Unmarshal(data, &existing)
 	}
 	return existing
 }
 
 func (s *Server) handleGetConfig(w http.ResponseWriter, _ *http.Request) {
-	existing := readExistingConfigs()
+	existing := readExistingConfigs(s.configPath)
 
 	entries := make([]configEntry, 0, len(existing))
 	for _, c := range existing {
@@ -640,7 +646,7 @@ func (s *Server) handleSetupConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Read old config to recover masked secrets.
-	oldConfigs := readExistingConfigs()
+	oldConfigs := readExistingConfigs(s.configPath)
 	oldByKey := make(map[string]config.ConfigTmp, len(oldConfigs))
 	for _, c := range oldConfigs {
 		key := c.Pair + "|" + c.Platform + "|" + c.Strategy
@@ -762,6 +768,10 @@ func (s *Server) handleSetupConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
+	s.mu.Lock()
+	s.configPath = filename
+	s.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
