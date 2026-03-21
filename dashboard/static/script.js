@@ -1180,7 +1180,7 @@ function createPairCard(index, data, onRemove, onChange) {
   sellThrInput.type = 'text';
   sellThrInput.value = data.sellThreshold || '0.75';
   dcaRow2.append(
-    createSetupField('setupBuyThreshold_' + index, 'Safety order trigger %', 'New buy when price drops by this percent.', buyThrInput),
+    createSetupField('setupBuyThreshold_' + index, 'Price drop to buy, %', 'New buy when price drops by this percent.', buyThrInput),
     createSetupField('setupSellThreshold_' + index, 'Take-profit %', 'Close position when price rises by this percent.', sellThrInput)
   );
   dcaSection.append(group3Title, dcaRow1, dcaRow2);

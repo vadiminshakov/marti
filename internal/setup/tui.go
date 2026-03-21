@@ -138,7 +138,7 @@ func RunTUI() error {
 				Validate(validatePositiveInt),
 
 			huh.NewInput().
-				Title("Safety order trigger — price drop %").
+				Title("Price drop to buy, %").
 				Description("Place a new buy order when price drops by this % from last buy (e.g. 3.5).").
 				Value(&buyThresholdStr).
 				Validate(validatePositiveDecimal),
