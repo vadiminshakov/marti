@@ -862,7 +862,9 @@ function formatTime(ts) {
   if (!ts) return '';
   const date = new Date(ts);
   if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleTimeString([], { hour12: false });
+  const datePart = date.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const timePart = date.toLocaleTimeString([], { hour12: false });
+  return `${datePart} ${timePart}`;
 }
 
 function createDecisionCard(decision) {
