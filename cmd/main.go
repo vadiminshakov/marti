@@ -175,6 +175,7 @@ func main() {
 			}
 
 			srv.SetBots(manager.DashboardBots())
+			srv.SetConfigPath(configPath)
 			srv.SetNeedsSetup(false)
 			logger.Info("Applied config from web wizard", zap.String("config", configPath))
 
