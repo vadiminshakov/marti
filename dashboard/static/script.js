@@ -2,12 +2,7 @@
 const pairContainer = document.getElementById('pairs');
 const emptyState = document.getElementById('emptyState');
 const chartCanvas = document.getElementById('globalChart');
-const balanceStreamStatusEl = document.getElementById('balanceStreamStatus');
-const decisionStreamStatusEl = document.getElementById('decisionStreamStatus');
-const snapshotAgeStatusEl = document.getElementById('snapshotAgeStatus');
-const decisionAgeStatusEl = document.getElementById('decisionAgeStatus');
-const activeBotsStatusEl = document.getElementById('activeBotsStatus');
-const configPathStatusEl = document.getElementById('configPathStatus');
+const availabilityStatusEl = document.getElementById('availabilityStatus');
 const pairViews = new Map();
 const datasetByPair = new Map();
 const modelAggregates = new Map();
@@ -22,7 +17,11 @@ const colorPalette = [
   { line: '#2e282a', fill: 'rgba(46,40,42,0.18)' }
 ];
 let colorIndex = 0;
-let lastStatusPayload = null;
+const streamState = {
+  balance: 'connecting',
+  decisions: 'connecting',
+};
+let lastBalanceEventAt = 0;
 
 function setStatusPill(el, label, tone) {
   if (!el) {
@@ -32,88 +31,23 @@ function setStatusPill(el, label, tone) {
   el.className = `status-pill${tone ? ` status-pill--${tone}` : ''}`;
 }
 
-function formatAgeLabel(ts, emptyLabel) {
-  if (!ts) {
-    return emptyLabel;
+function renderAvailability() {
+  if (streamState.balance === 'reconnecting' || streamState.decisions === 'reconnecting') {
+    setStatusPill(availabilityStatusEl, 'Status: reconnecting', 'warn');
+    return;
   }
 
-  const date = new Date(ts);
-  if (Number.isNaN(date.getTime())) {
-    return emptyLabel;
+  if (lastBalanceEventAt > 0 && Date.now() - lastBalanceEventAt > 15000) {
+    setStatusPill(availabilityStatusEl, 'Status: no recent data', 'danger');
+    return;
   }
 
-  const ageMs = Date.now() - date.getTime();
-  if (ageMs < 0) {
-    return 'just now';
+  if (streamState.balance === 'connected' && streamState.decisions === 'connected') {
+    setStatusPill(availabilityStatusEl, 'Status: connected', 'ok');
+    return;
   }
 
-  const ageSeconds = Math.floor(ageMs / 1000);
-  if (ageSeconds < 10) {
-    return 'just now';
-  }
-  if (ageSeconds < 60) {
-    return `${ageSeconds}s ago`;
-  }
-
-  const ageMinutes = Math.floor(ageSeconds / 60);
-  if (ageMinutes < 60) {
-    return `${ageMinutes}m ago`;
-  }
-
-  const ageHours = Math.floor(ageMinutes / 60);
-  return `${ageHours}h ago`;
-}
-
-function ageTone(ts) {
-  if (!ts) {
-    return 'muted';
-  }
-
-  const date = new Date(ts);
-  if (Number.isNaN(date.getTime())) {
-    return 'muted';
-  }
-
-  const ageSeconds = (Date.now() - date.getTime()) / 1000;
-  if (ageSeconds <= 15) {
-    return 'ok';
-  }
-  if (ageSeconds <= 60) {
-    return 'warn';
-  }
-  return 'danger';
-}
-
-function renderStatusSummary() {
-  const status = lastStatusPayload || {};
-  const configPath = status.configPath || 'none';
-  const bots = Number.isFinite(status.activeBots) ? status.activeBots : 0;
-
-  setStatusPill(snapshotAgeStatusEl, `Snapshots: ${formatAgeLabel(status.lastBalanceSnapshotTs, 'waiting')}`, ageTone(status.lastBalanceSnapshotTs));
-  setStatusPill(decisionAgeStatusEl, `Decisions: ${formatAgeLabel(status.lastDecisionTs, 'waiting')}`, ageTone(status.lastDecisionTs));
-  setStatusPill(activeBotsStatusEl, `Bots: ${bots}`, bots > 0 ? 'ok' : 'muted');
-  setStatusPill(configPathStatusEl, `Config: ${configPath}`, status.needsSetup ? 'warn' : 'muted');
-
-  if (emptyState && datasetByPair.size === 0) {
-    if (status.needsSetup) {
-      emptyState.innerHTML = '<p>Setup is required.</p><p class="muted">Open Configuration to create the first bot config.</p>';
-    } else if (bots === 0) {
-      emptyState.innerHTML = '<p>No active bots.</p><p class="muted">Save a config with at least one enabled trading pair.</p>';
-    }
-  }
-}
-
-async function refreshStatusSummary() {
-  try {
-    const res = await fetch('/api/status');
-    if (!res.ok) {
-      throw new Error('status unavailable');
-    }
-    lastStatusPayload = await res.json();
-    renderStatusSummary();
-  } catch (_err) {
-    setStatusPill(configPathStatusEl, 'Config: unavailable', 'danger');
-  }
+  setStatusPill(availabilityStatusEl, 'Status: connecting', 'warn');
 }
 
 const normalizeModel = (value) => {
@@ -555,10 +489,10 @@ const parseNum = (value) => {
 };
 
 const formatTs = (ts) => {
-  if (!ts) { return 'Waiting…'; }
+  if (!ts) { return 'Last update: waiting'; }
   const date = new Date(ts);
-  if (Number.isNaN(date.getTime())) { return 'Waiting…'; }
-  return date.toLocaleTimeString([], { hour12: false });
+  if (Number.isNaN(date.getTime())) { return 'Last update: waiting'; }
+  return `Last update: ${date.toLocaleTimeString([], { hour12: false })}`;
 };
 
 const nextColor = () => {
@@ -867,15 +801,18 @@ function connectSSE() {
     balanceSource.close();
   }
 
-  setStatusPill(balanceStreamStatusEl, 'Balance: connecting', 'warn');
+  streamState.balance = 'connecting';
+  renderAvailability();
   balanceSource = new EventSource('/balance/stream');
 
   balanceSource.onopen = () => {
-    setStatusPill(balanceStreamStatusEl, 'Balance: connected', 'ok');
+    streamState.balance = 'connected';
+    renderAvailability();
   };
 
   balanceSource.onerror = () => {
-    setStatusPill(balanceStreamStatusEl, 'Balance: reconnecting', 'warn');
+    streamState.balance = 'reconnecting';
+    renderAvailability();
     if (balanceSource.readyState === EventSource.CLOSED) {
       setTimeout(connectSSE, 3000);
     }
@@ -899,9 +836,10 @@ function connectSSE() {
   balanceSource.addEventListener('balance', (event) => {
     try {
       const payload = JSON.parse(event.data);
-      setStatusPill(balanceStreamStatusEl, 'Balance: connected', 'ok');
+      lastBalanceEventAt = Date.now();
+      streamState.balance = 'connected';
+      renderAvailability();
       handlePayload(payload);
-      refreshStatusSummary();
     } catch (err) {
       console.error('payload parse', err);
     }
@@ -1104,15 +1042,18 @@ function connectAIDecisionSSE() {
     aiDecisionSource.close();
   }
 
-  setStatusPill(decisionStreamStatusEl, 'Decisions: connecting', 'warn');
+  streamState.decisions = 'connecting';
+  renderAvailability();
   aiDecisionSource = new EventSource('/decisions/stream');
 
   aiDecisionSource.onopen = () => {
-    setStatusPill(decisionStreamStatusEl, 'Decisions: connected', 'ok');
+    streamState.decisions = 'connected';
+    renderAvailability();
   };
 
   aiDecisionSource.onerror = () => {
-    setStatusPill(decisionStreamStatusEl, 'Decisions: reconnecting', 'warn');
+    streamState.decisions = 'reconnecting';
+    renderAvailability();
     if (aiDecisionSource.readyState === EventSource.CLOSED) {
       setTimeout(connectAIDecisionSSE, 3000);
     }
@@ -1128,10 +1069,10 @@ function connectAIDecisionSSE() {
         decision.model = 'DCA';
       }
 
-      setStatusPill(decisionStreamStatusEl, 'Decisions: connected', 'ok');
+      streamState.decisions = 'connected';
+      renderAvailability();
       const card = createDecisionCard(decision);
       aiDecisionsContainer.insertBefore(card, aiDecisionsContainer.firstChild);
-      refreshStatusSummary();
 
       while (aiDecisionsContainer.children.length > MAX_DECISIONS) {
         aiDecisionsContainer.removeChild(aiDecisionsContainer.lastChild);
@@ -1147,8 +1088,8 @@ function connectAIDecisionSSE() {
 }
 
 connectAIDecisionSSE();
-refreshStatusSummary();
-setInterval(refreshStatusSummary, 5000);
+renderAvailability();
+setInterval(renderAvailability, 5000);
 
 const setupButton = document.getElementById('openSetupWizard');
 
@@ -1574,7 +1515,6 @@ function openSetupWizard() {
       .then(() => {
         initialState = JSON.stringify(payloads);
         statusEl.textContent = 'Config saved. Bots restarting...';
-        refreshStatusSummary();
         submitBtn.disabled = true;
         cancelBtn.disabled = false;
         submitBtn.classList.add('saved');

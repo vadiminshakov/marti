@@ -44,14 +44,10 @@ type Server struct {
 	DecisionStore decisionReader
 	OnSetupSaved  func(configPath string) error
 
-	mu                    sync.RWMutex
-	Bots                  []TradingBotInterface
-	NeedsSetup            bool
-	configPath            string
-	lastBalanceIndex      uint64
-	lastDecisionIndex     uint64
-	lastBalanceSnapshotTs time.Time
-	lastDecisionTs        time.Time
+	mu         sync.RWMutex
+	Bots       []TradingBotInterface
+	NeedsSetup bool
+	configPath string
 }
 
 // NewServer creates a new web server instance.
@@ -89,13 +85,6 @@ func (s *Server) SetNeedsSetup(needsSetup bool) {
 	s.NeedsSetup = needsSetup
 }
 
-// SetConfigPath updates config path returned by the status endpoint.
-func (s *Server) SetConfigPath(configPath string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.configPath = configPath
-}
-
 func (s *Server) getBots() []TradingBotInterface {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -110,72 +99,6 @@ func (s *Server) needsSetup() bool {
 	defer s.mu.RUnlock()
 
 	return s.NeedsSetup
-}
-
-func (s *Server) statusSnapshot() (string, time.Time, time.Time, bool, int, []string) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	pairs := make([]string, 0, len(s.Bots))
-	for _, bot := range s.Bots {
-		pairs = append(pairs, bot.GetPair().String())
-	}
-
-	return s.configPath, s.lastBalanceSnapshotTs, s.lastDecisionTs, s.NeedsSetup, len(s.Bots), pairs
-}
-
-func (s *Server) updateLastBalanceSnapshot(record entity.BalanceSnapshotRecord) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if record.Index > s.lastBalanceIndex {
-		s.lastBalanceIndex = record.Index
-	}
-	if record.Snapshot.Timestamp.After(s.lastBalanceSnapshotTs) {
-		s.lastBalanceSnapshotTs = record.Snapshot.Timestamp
-	}
-}
-
-func (s *Server) updateLastDecision(record entity.DecisionEventRecord) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if record.Index > s.lastDecisionIndex {
-		s.lastDecisionIndex = record.Index
-	}
-
-	var ts time.Time
-	switch event := record.Event.(type) {
-	case entity.AIDecisionEvent:
-		ts = event.Timestamp
-	case entity.DCADecisionEvent:
-		ts = event.Timestamp
-	}
-	if ts.After(s.lastDecisionTs) {
-		s.lastDecisionTs = ts
-	}
-}
-
-func (s *Server) syncLatestStatusFromStores() {
-	if s.Store != nil {
-		s.mu.RLock()
-		lastBalanceIndex := s.lastBalanceIndex
-		s.mu.RUnlock()
-		if records, err := s.Store.SnapshotsAfter(lastBalanceIndex); err == nil {
-			for _, record := range records {
-				s.updateLastBalanceSnapshot(record)
-			}
-		}
-	}
-
-	if s.DecisionStore != nil {
-		s.mu.RLock()
-		lastDecisionIndex := s.lastDecisionIndex
-		s.mu.RUnlock()
-		if records, err := s.DecisionStore.EventsAfter(lastDecisionIndex); err == nil {
-			for _, record := range records {
-				s.updateLastDecision(record)
-			}
-		}
-	}
 }
 
 func (s *Server) activePairs() map[string]struct{} {
@@ -203,7 +126,6 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/decisions/stream", s.handleDecisionStream)
 	mux.HandleFunc("POST /sellall/{pair}", s.handleSellAll)
 	mux.HandleFunc("GET /api/setup/status", s.handleSetupStatus)
-	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/setup/config", s.handleGetConfig)
 	mux.HandleFunc("POST /api/setup/config", s.handleSetupConfig)
 
@@ -246,7 +168,6 @@ func (s *Server) StartWithAutoTLS(ctx context.Context, domains []string, cacheDi
 	mux.HandleFunc("/decisions/stream", s.handleDecisionStream)
 	mux.HandleFunc("POST /sellall/{pair}", s.handleSellAll)
 	mux.HandleFunc("GET /api/setup/status", s.handleSetupStatus)
-	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/setup/config", s.handleGetConfig)
 	mux.HandleFunc("POST /api/setup/config", s.handleSetupConfig)
 
@@ -350,7 +271,6 @@ func (s *Server) handleBalanceStream(w http.ResponseWriter, r *http.Request) {
 		activePairs := s.activePairs()
 
 		for _, record := range recordsToSend {
-			s.updateLastBalanceSnapshot(record)
 			if len(activePairs) > 0 {
 				if _, ok := activePairs[record.Snapshot.Pair]; !ok {
 					lastIndex = record.Index
@@ -437,7 +357,6 @@ func (s *Server) handleDecisionStream(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 		for _, record := range records {
-			s.updateLastDecision(record)
 			// Wrap event to include type
 			wrapper := struct {
 				Type string      `json:"type"`
@@ -615,32 +534,6 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, _ *http.Request) {
 	}
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
 		log.Printf("setup status encode error: %v", err)
-		http.Error(w, "failed to encode status", http.StatusInternalServerError)
-	}
-}
-
-func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
-	s.syncLatestStatusFromStores()
-	configPath, lastBalanceTs, lastDecisionTs, needsSetup, activeBots, activePairs := s.statusSnapshot()
-
-	w.Header().Set("Content-Type", "application/json")
-	payload := struct {
-		NeedsSetup            bool      `json:"needsSetup"`
-		ConfigPath            string    `json:"configPath"`
-		ActiveBots            int       `json:"activeBots"`
-		ActivePairs           []string  `json:"activePairs"`
-		LastBalanceSnapshotTs time.Time `json:"lastBalanceSnapshotTs,omitempty"`
-		LastDecisionTs        time.Time `json:"lastDecisionTs,omitempty"`
-	}{
-		NeedsSetup:            needsSetup,
-		ConfigPath:            configPath,
-		ActiveBots:            activeBots,
-		ActivePairs:           activePairs,
-		LastBalanceSnapshotTs: lastBalanceTs,
-		LastDecisionTs:        lastDecisionTs,
-	}
-	if err := json.NewEncoder(w).Encode(payload); err != nil {
-		log.Printf("status encode error: %v", err)
 		http.Error(w, "failed to encode status", http.StatusInternalServerError)
 	}
 }
