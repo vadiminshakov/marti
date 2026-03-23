@@ -36,6 +36,7 @@ func (f *strategyFactory) createTradingStrategy(
 	switch conf.StrategyType {
 	case "dca":
 		return f.createDCAStrategy(
+			conf.StateKey(),
 			conf.Pair,
 			conf.AmountPercent,
 			pricer,
@@ -54,6 +55,7 @@ func (f *strategyFactory) createTradingStrategy(
 
 // createDCAStrategy creates a DCA trading strategy.
 func (f *strategyFactory) createDCAStrategy(
+	stateKey string,
 	pair entity.Pair,
 	amountPercent decimal.Decimal,
 	pricer priceService,
@@ -65,6 +67,7 @@ func (f *strategyFactory) createDCAStrategy(
 ) (TradingStrategy, error) {
 	dcaStrategy, err := dca.NewDCAStrategy(
 		f.logger,
+		stateKey,
 		pair,
 		amountPercent,
 		pricer,

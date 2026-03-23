@@ -78,7 +78,7 @@ func NewTradingBot(logger *zap.Logger, conf config.Config, client any, balanceSt
 
 	stateKey := ""
 	if conf.Platform == "simulate" {
-		stateKey = conf.SimulationStateKey()
+		stateKey = conf.StateKey()
 	}
 
 	currentTrader, err := provider.Trader(conf.Pair, conf.MarketType, leverage, stateKey)

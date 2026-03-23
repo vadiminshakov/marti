@@ -66,11 +66,10 @@ type Config struct {
 	TelegramChatID string
 }
 
-// SimulationStateKey returns a stable identifier used for namespacing simulator
-// persistence files. It combines the platform, pair, strategy, market type,
-// and (for AI strategies) the model so multiple bots on the same pair do not
-// overwrite each other's local state.
-func (c Config) SimulationStateKey() string {
+// StateKey returns a stable identifier used for namespacing per-bot local state.
+// It combines the platform, pair, strategy, market type, and (for AI strategies)
+// the model so multiple bots on the same pair do not overwrite each other's state.
+func (c Config) StateKey() string {
 	var parts []string
 	if c.Platform != "" {
 		parts = append(parts, strings.ToLower(c.Platform))

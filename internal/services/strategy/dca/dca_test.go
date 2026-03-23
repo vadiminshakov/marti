@@ -83,7 +83,8 @@ func createDCAStrategyWithWALDir(l *zap.Logger, pair domain.Pair, amountPercent 
 		return nil, fmt.Errorf("amountPercent must be between 1 and 100, got %s", amountPercent.String())
 	}
 
-	seriesKey := fmt.Sprintf("%s%s", dcaSeriesKeyPrefix, pair.String())
+	stateKey := sanitizeStateKey(pair.String())
+	seriesKey := fmt.Sprintf("%s%s", dcaSeriesKeyPrefix, stateKey)
 
 	walCfg := gowal.Config{
 		Dir:              walDir,
@@ -139,6 +140,13 @@ func TestDCAStrategy_Trade_NoPriceData(t *testing.T) {
 
 	require.Error(t, err, "expected error when pricer fails")
 	require.Nil(t, tradeEvent, "expected nil TradeEvent when pricer fails")
+}
+
+func TestSanitizeStateKey(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "binance_btc_usdt_dca_spot", sanitizeStateKey("binance__BTC_USDT__dca__spot"))
+	require.Equal(t, "default", sanitizeStateKey(" /// "))
 }
 
 func TestDCAStrategy_Trade_NoExistingPurchases(t *testing.T) {

@@ -244,6 +244,7 @@ func createStrategyFactory(logger *zap.Logger, pair *domain.Pair, feed *priceFee
 
 		dcaStrategy, err := dca.NewDCAStrategy(
 			logger,
+			"historytest__"+pair.String(),
 			*pair,
 			amountPercent,
 			pricer,

@@ -68,6 +68,7 @@ type Strategy struct {
 // NewDCAStrategy returns a configured DCA strategy.
 func NewDCAStrategy(
 	l *zap.Logger,
+	stateKey string,
 	pair entity.Pair,
 	amountPercent decimal.Decimal,
 	pricer pricer,
@@ -81,9 +82,13 @@ func NewDCAStrategy(
 		return nil, fmt.Errorf("amountPercent must be between 1 and 100, got %s", amountPercent.String())
 	}
 
-	seriesKey := fmt.Sprintf("%s%s", dcaSeriesKeyPrefix, pair.String())
+	if strings.TrimSpace(stateKey) == "" {
+		stateKey = strings.ToLower(pair.String())
+	}
 
-	wal, err := createWAL(pair)
+	seriesKey := fmt.Sprintf("%s%s", dcaSeriesKeyPrefix, stateKey)
+
+	wal, err := createWAL(stateKey)
 	if err != nil {
 		return nil, err
 	}
@@ -628,8 +633,8 @@ func (d *Strategy) saveDCASeries() error {
 	return nil
 }
 
-func createWAL(pair entity.Pair) (*gowal.Wal, error) {
-	walDir := filepath.Join("wal", pair.String())
+func createWAL(stateKey string) (*gowal.Wal, error) {
+	walDir := filepath.Join("wal", sanitizeStateKey(stateKey))
 	if err := os.MkdirAll(walDir, walDirPermissions); err != nil {
 		return nil, errors.Wrapf(err, "failed to ensure WAL directory %s", walDir)
 	}
@@ -648,6 +653,34 @@ func createWAL(pair entity.Pair) (*gowal.Wal, error) {
 	}
 
 	return w, nil
+}
+
+func sanitizeStateKey(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" {
+		return "default"
+	}
+
+	var b strings.Builder
+	prevSeparator := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prevSeparator = false
+			continue
+		}
+		if !prevSeparator {
+			b.WriteByte('_')
+			prevSeparator = true
+		}
+	}
+
+	result := strings.Trim(b.String(), "_")
+	if result == "" {
+		return "default"
+	}
+
+	return result
 }
 
 func (d *Strategy) isTradeProcessed(intentID string) bool {

@@ -24,6 +24,7 @@ type managedBot struct {
 	ctx    context.Context
 	bot    *internal.TradingBot
 	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 type botManager struct {
@@ -75,35 +76,55 @@ func (m *botManager) ApplyConfigs(configs []config.Config) error {
 			ctx:    runCtx,
 			bot:    bot,
 			cancel: runCancel,
+			done:   make(chan struct{}),
 		})
 	}
 
 	m.mu.Lock()
 	oldBots := m.bots
-	m.bots = newBots
+	m.bots = nil
 	m.mu.Unlock()
-
-	for _, managed := range newBots {
-		botLogger := m.logger.With(
-			zap.String("platform", managed.bot.Config.Platform),
-			zap.String("pair", managed.bot.Config.Pair.String()),
-		)
-
-		m.wg.Add(1)
-		go func() {
-			defer m.wg.Done()
-			defer managed.bot.Close()
-			if err := managed.bot.Run(managed.ctx, botLogger); err != nil && managed.ctx.Err() == nil {
-				botLogger.Error("Trading bot failed", zap.Error(err))
-			}
-		}()
-	}
 
 	for _, managed := range oldBots {
 		managed.cancel()
 	}
+	m.waitForManagedBots(oldBots)
+
+	m.mu.Lock()
+	m.bots = newBots
+	m.mu.Unlock()
+
+	for _, managed := range newBots {
+		m.startManagedBot(managed)
+	}
 
 	return nil
+}
+
+func (m *botManager) startManagedBot(managed managedBot) {
+	botLogger := m.logger.With(
+		zap.String("platform", managed.bot.Config.Platform),
+		zap.String("pair", managed.bot.Config.Pair.String()),
+	)
+
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		defer close(managed.done)
+		defer managed.bot.Close()
+		if err := managed.bot.Run(managed.ctx, botLogger); err != nil && managed.ctx.Err() == nil {
+			botLogger.Error("Trading bot failed", zap.Error(err))
+		}
+	}()
+}
+
+func (m *botManager) waitForManagedBots(bots []managedBot) {
+	for _, managed := range bots {
+		if managed.done == nil {
+			continue
+		}
+		<-managed.done
+	}
 }
 
 func (m *botManager) DashboardBots() []dashboard.TradingBotInterface {
