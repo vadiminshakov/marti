@@ -65,11 +65,12 @@ func (d *Decision) Validate() error {
 		return err
 	}
 
-	// exit plan is required for opening positions (open_long, open_short)
-	if d.Action == actionStringOpenLong || d.Action == actionStringOpenShort {
+	if d.requiresExitPlan() {
 		if err := d.validateExitPlan(); err != nil {
 			return errors.Wrap(err, "exit plan validation error")
 		}
+	} else if err := d.validateEmptyExitPlan(); err != nil {
+		return errors.Wrap(err, "exit plan validation error")
 	}
 
 	return nil
@@ -96,7 +97,23 @@ func (d *Decision) validateRiskPercent() error {
 	if d.RiskPercent < 0 || d.RiskPercent > 15 {
 		return fmt.Errorf("Invalid risk_percent: %f (must be 0.0-15.0)", d.RiskPercent)
 	}
+
+	switch d.Action {
+	case actionStringOpenLong, actionStringOpenShort:
+		if d.RiskPercent <= 0 {
+			return fmt.Errorf("invalid risk_percent: %f (must be > 0 for open actions)", d.RiskPercent)
+		}
+	default:
+		if d.RiskPercent != 0 {
+			return fmt.Errorf("invalid risk_percent: %f (must be 0 for %s)", d.RiskPercent, d.Action)
+		}
+	}
+
 	return nil
+}
+
+func (d *Decision) requiresExitPlan() bool {
+	return d.Action == actionStringOpenLong || d.Action == actionStringOpenShort
 }
 
 func (d *Decision) validateExitPlan() error {
@@ -128,6 +145,19 @@ func (d *Decision) validateExitPlan() error {
 	return nil
 }
 
+func (d *Decision) validateEmptyExitPlan() error {
+	if d.ExitPlan.StopLossPrice != 0 {
+		return errors.New("stop_loss_price must be 0 for non-entry actions")
+	}
+	if d.ExitPlan.TakeProfitPrice != 0 {
+		return errors.New("take_profit_price must be 0 for non-entry actions")
+	}
+	if d.ExitPlan.InvalidationCondition != "" {
+		return errors.New("invalidation_condition must be empty for non-entry actions")
+	}
+	return nil
+}
+
 // ToAction converts decision action string to typed Action.
 func (d *Decision) ToAction() Action {
 	switch d.Action {
@@ -139,7 +169,9 @@ func (d *Decision) ToAction() Action {
 		return ActionOpenShort
 	case actionStringCloseShort:
 		return ActionCloseShort
+	case actionStringHold:
+		return ActionHold
 	default:
-		return ActionOpenLong // default fallback
+		return ActionHold
 	}
 }

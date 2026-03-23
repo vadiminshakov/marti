@@ -8,6 +8,7 @@ const (
 	ActionCloseLong
 	ActionOpenShort
 	ActionCloseShort
+	ActionHold
 )
 
 // action string constants.
@@ -16,13 +17,14 @@ const (
 	actionStringCloseLong  = "close_long"
 	actionStringOpenShort  = "open_short"
 	actionStringCloseShort = "close_short"
+	actionStringHold       = "hold"
 )
 
 // isValidActionString checks if the string is a valid action.
 func isValidActionString(s string) bool {
 	switch s {
 	case actionStringOpenLong, actionStringCloseLong,
-		actionStringOpenShort, actionStringCloseShort:
+		actionStringOpenShort, actionStringCloseShort, actionStringHold:
 		return true
 	}
 	return false
@@ -39,6 +41,8 @@ func (a Action) String() string {
 		return actionStringOpenShort
 	case ActionCloseShort:
 		return actionStringCloseShort
+	case ActionHold:
+		return actionStringHold
 	default:
 		return "unknown"
 	}

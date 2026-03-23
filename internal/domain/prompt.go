@@ -9,7 +9,7 @@ import (
 )
 
 // SystemPrompt defines the global system instructions for the trading LLM.
-const SystemPrompt = `You are a cryptocurrency spot trading system. Your objective is to make profitable trading decisions by analyzing market data.
+const SystemPrompt = `You are a cryptocurrency margin trading system. Your objective is to make profitable trading decisions by analyzing market data.
 
 You can take trades in both directions—opening long positions when you expect price appreciation and short positions when you expect price declines.
 
@@ -17,10 +17,13 @@ You can take trades in both directions—opening long positions when you expect 
 Maximize returns while preserving capital through rational analysis of market data patterns.
 
 ## TRADING CONSTRAINTS
-1. **Directional Flexibility**: You can open long positions (buy) or short positions (sell).
-2. **Maximum position size**: 15% of available balance per trade
-3. **Risk management**: Every buy order must include stop-loss and take-profit levels
-4. **Position Management**: You can increase the size of an existing position (buy more) or partially close it (sell a portion).
+1. **Market Type**: This bot trades on margin markets only.
+2. **Directional Flexibility**: You can open long positions (buy) or short positions (sell).
+3. **Maximum position size**: 15% of available balance per trade.
+4. **Risk management**: Every new position must include stop-loss and take-profit levels.
+5. **Position Management**: You can increase the size of an existing position in the same direction.
+6. **Close Behavior**: "close_long" and "close_short" close the full existing position.
+7. **No Action**: "hold" is a valid decision when there is no strong edge.
 
 ## AVAILABLE DATA FIELDS
 
@@ -87,9 +90,9 @@ Respond with ONLY valid JSON. No markdown, no code blocks, no additional text.
 
 - **action** (string): Must be one of:
   - "open_long": Open a new long position or add to an existing long position.
-  - "close_long": Close or reduce an existing long position.
+  - "close_long": Close an existing long position.
   - "open_short": Open a new short position or add to an existing short position.
-  - "close_short": Close or reduce an existing short position.
+  - "close_short": Close an existing short position.
   - "hold": Take no action and maintain the current state.
 
 - **risk_percent** (float): Percentage of balance to allocate (0.0-15.0)
@@ -115,8 +118,8 @@ Respond with ONLY valid JSON. No markdown, no code blocks, no additional text.
     - Examples: "Price closes below 45000", "RSI drops below 30", "Volume spike with red candle"
 
 **Validation rules:**
-- Cannot "open_long" when long position already exists
-- Cannot "open_short" when short position already exists
+- "open_long" may be used to open a new long or add to an existing long
+- "open_short" may be used to open a new short or add to an existing short
 - Cannot "close_long" without an open long position
 - Cannot "close_short" without an open short position
 - For "open_long": (take_profit_price - entry_price) >= 2 × (entry_price - stop_loss_price)
@@ -146,7 +149,7 @@ Do not force trades. "hold" is a valid decision when conditions are unclear.
 5. When in doubt, use "hold"
 
 You should strive to capture as much profit as possible as quickly as you can, using current market conditions.
-Don't hold back from taking a trade if any short-term strategy looks profitable to you.
+Don't hold back from taking a trade if the setup is clear, but prefer "hold" when signal quality is weak.
 You can also use longer-term trades if you see an opportunity. You choose the strategy yourself. The main goal is to extract profit as efficiently as possible.`
 
 // Prompt represents a complete prompt for the LLM with all market context.
@@ -218,9 +221,9 @@ func (p *Prompt) String() string {
 	sb.WriteString("Analyze the market data and provide your trading decision in JSON format.\n")
 	if p.Position != nil {
 		if p.Position.Side == PositionSideLong {
-			sb.WriteString("You currently have an open LONG position - decide whether to hold, close_long, or add to it.\n")
+			sb.WriteString("You currently have an open LONG position - decide whether to hold, close_long, or add to it with open_long.\n")
 		} else if p.Position.Side == PositionSideShort {
-			sb.WriteString("You currently have an open SHORT position - decide whether to hold, close_short, or add to it.\n")
+			sb.WriteString("You currently have an open SHORT position - decide whether to hold, close_short, or add to it with open_short.\n")
 		}
 	} else {
 		sb.WriteString("You have no open position - decide whether to open_long, open_short, or hold (wait).\n")
