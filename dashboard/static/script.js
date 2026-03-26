@@ -22,6 +22,7 @@ const streamState = {
   decisions: 'connecting',
 };
 let lastBalanceEventAt = 0;
+let globalChart = null;
 
 function setStatusPill(el, label, tone) {
   if (!el) {
@@ -49,6 +50,38 @@ function renderAvailability() {
 
   setStatusPill(availabilityStatusEl, 'Status: connecting', 'warn');
 }
+
+const parseNum = (value) => {
+  const num = parseFloat(value);
+  return Number.isFinite(num) ? num : 0;
+};
+
+const formatBalanceNumber = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return '0';
+  }
+
+  const abs = Math.abs(numeric);
+  let maximumFractionDigits = 4;
+  if (abs >= 1000) {
+    maximumFractionDigits = 2;
+  } else if (abs >= 1) {
+    maximumFractionDigits = 3;
+  }
+
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits,
+  }).format(numeric);
+};
+
+const formatTs = (ts) => {
+  if (!ts) { return 'Last update: waiting'; }
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) { return 'Last update: waiting'; }
+  return `Last update: ${date.toLocaleTimeString([], { hour12: false })}`;
+};
 
 const normalizeModel = (value) => {
   if (typeof value !== 'string') {
@@ -341,13 +374,19 @@ const buildGlobalChart = (ctx) => {
             color: '#888888',
             font: { size: isMobile ? 8 : 10 },
             callback: function (value) {
-              return value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+              return formatBalanceNumber(value);
             }
           },
           grid: { color: 'rgba(0,0,0,0.03)', borderDash: [], drawBorder: false }
         }
       },
-      elements: { line: { borderCapStyle: 'round' } },
+      elements: {
+        line: {
+          borderCapStyle: 'round',
+          borderJoinStyle: 'round',
+          tension: 0
+        }
+      },
       plugins: {
 
         legend: { display: true, labels: { usePointStyle: true, boxWidth: isMobile ? 16 : 20, font: { size: isMobile ? 8 : 10 } } },
@@ -371,7 +410,7 @@ const buildGlobalChart = (ctx) => {
                 label += ': ';
               }
               if (context.parsed.y !== null) {
-                label += context.parsed.y.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+                label += formatBalanceNumber(context.parsed.y);
               }
               return label;
             }
@@ -464,7 +503,7 @@ const buildGlobalChart = (ctx) => {
 
 const chartCtx = chartCanvas.getContext('2d');
 chartCtx.imageSmoothingEnabled = false;
-const globalChart = buildGlobalChart(chartCtx);
+globalChart = buildGlobalChart(chartCtx);
 
 let chartUpdateScheduled = false;
 
@@ -482,18 +521,6 @@ chartCanvas.addEventListener('mouseleave', () => {
     globalChart.applyHoverStyles(null);
   }
 });
-
-const parseNum = (value) => {
-  const num = parseFloat(value);
-  return Number.isFinite(num) ? num : 0;
-};
-
-const formatTs = (ts) => {
-  if (!ts) { return 'Last update: waiting'; }
-  const date = new Date(ts);
-  if (Number.isNaN(date.getTime())) { return 'Last update: waiting'; }
-  return `Last update: ${date.toLocaleTimeString([], { hour12: false })}`;
-};
 
 const nextColor = () => {
   const color = colorPalette[colorIndex % colorPalette.length];
@@ -527,7 +554,7 @@ function ensureDataset(model) {
     pointBackgroundColor: '#ffffff',
     pointBorderColor: palette.line,
     pointBorderWidth: 2,
-    tension: 0.3,
+    tension: 0,
     fill: true,
     spanGaps: true
   };
@@ -563,8 +590,23 @@ function appendGlobalLabel(label) {
 function updateGlobalChart(model, _quoteCurrency, totalBalance, ts) {
   const tsDate = ts ? new Date(ts) : new Date();
   const labelDate = Number.isNaN(tsDate.getTime()) ? new Date() : tsDate;
-  appendGlobalLabel(labelDate);
+
+  const lastLabelIndex = globalChart.data.labels.length - 1;
+  const lastLabel = lastLabelIndex >= 0 ? globalChart.data.labels[lastLabelIndex] : null;
+  const lastLabelTime = lastLabel instanceof Date ? lastLabel.getTime() : new Date(lastLabel).getTime();
+  const nextLabelTime = labelDate.getTime();
+
+  if (lastLabelIndex === -1 || Number.isNaN(lastLabelTime) || nextLabelTime > lastLabelTime) {
+    appendGlobalLabel(labelDate);
+  }
+
   const dataset = ensureDataset(model);
+
+  while (dataset.data.length < globalChart.data.labels.length) {
+    const previousValue = dataset.data.length > 0 ? dataset.data[dataset.data.length - 1] : null;
+    dataset.data.push(previousValue);
+  }
+
   dataset.data[dataset.data.length - 1] = totalBalance;
   scheduleChartUpdate();
 }
