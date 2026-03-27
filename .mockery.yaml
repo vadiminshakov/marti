@@ -1,0 +1,4 @@
+issue-845-fix: true
+disabled-deprecation-warnings:
+  - packages
+  - issue-845-fix
