@@ -1,4 +1,4 @@
-package internal
+package bot
 
 import (
 	"context"
@@ -81,7 +81,7 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 	}
 
 	if b.Config.MarketType == entity.MarketTypeSpot {
-		if provider, ok := b.tradingStrategy.(DcaCostBasisProvider); ok {
+		if provider, ok := b.tradingStrategy.(dcaCostBasisProvider); ok {
 			avgPrice, amt := provider.GetDcaCostBasis()
 			if amt.GreaterThan(decimal.Zero) && avgPrice.GreaterThan(decimal.Zero) {
 				entryPrice = avgPrice.String()

@@ -1,4 +1,4 @@
-package internal
+package bot
 
 import (
 	"fmt"
@@ -32,7 +32,7 @@ func (f *strategyFactory) createTradingStrategy(
 	tradeSvc traderService,
 	klineProvider klineService,
 	decisions decisionStore,
-) (TradingStrategy, error) {
+) (tradingStrategy, error) {
 	switch conf.StrategyType {
 	case "dca":
 		return f.createDCAStrategy(
@@ -64,7 +64,7 @@ func (f *strategyFactory) createDCAStrategy(
 	dcaPercentThresholdBuy decimal.Decimal,
 	dcaPercentThresholdSell decimal.Decimal,
 	decisions decisionStore,
-) (TradingStrategy, error) {
+) (tradingStrategy, error) {
 	dcaStrategy, err := dca.NewDCAStrategy(
 		f.logger,
 		stateKey,
@@ -91,7 +91,7 @@ func (f *strategyFactory) createAIStrategy(
 	tradeSvc traderService,
 	klineProvider klineService,
 	decisions decisionStore,
-) (TradingStrategy, error) {
+) (tradingStrategy, error) {
 	// create LLM client
 	llmClient, err := clients.NewOpenAICompatibleClient(conf.LLMAPIURL, conf.LLMAPIKey, conf.Model, conf.LLMProxyURL)
 	if err != nil {

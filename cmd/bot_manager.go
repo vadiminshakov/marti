@@ -8,10 +8,10 @@ import (
 	"github.com/pkg/errors"
 	"github.com/vadiminshakov/marti/config"
 	"github.com/vadiminshakov/marti/dashboard"
-	"github.com/vadiminshakov/marti/internal"
 	"github.com/vadiminshakov/marti/internal/clients"
 	domain "github.com/vadiminshakov/marti/internal/domain"
-	"github.com/vadiminshakov/marti/internal/storage/balancesnapshots"
+	"github.com/vadiminshakov/marti/internal/repository/balancesnapshots"
+	botsvc "github.com/vadiminshakov/marti/internal/services/bot"
 	"go.uber.org/zap"
 )
 
@@ -22,7 +22,7 @@ type decisionStoreWriter interface {
 
 type managedBot struct {
 	ctx    context.Context
-	bot    *internal.TradingBot
+	bot    *botsvc.TradingBot
 	cancel context.CancelFunc
 	done   chan struct{}
 }
@@ -66,7 +66,7 @@ func (m *botManager) ApplyConfigs(configs []config.Config) error {
 			return errors.Wrap(err, "failed to initialize exchange client")
 		}
 
-		bot, err := internal.NewTradingBot(botLogger, cfg, client, m.snapshotStore, m.decisionStore)
+		tradingBot, err := botsvc.NewTradingBot(botLogger, cfg, client, m.snapshotStore, m.decisionStore)
 		if err != nil {
 			return errors.Wrap(err, "failed to create trading bot")
 		}
@@ -74,7 +74,7 @@ func (m *botManager) ApplyConfigs(configs []config.Config) error {
 		runCtx, runCancel := context.WithCancel(m.ctx)
 		newBots = append(newBots, managedBot{
 			ctx:    runCtx,
-			bot:    bot,
+			bot:    tradingBot,
 			cancel: runCancel,
 			done:   make(chan struct{}),
 		})

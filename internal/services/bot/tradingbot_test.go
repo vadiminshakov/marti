@@ -1,4 +1,4 @@
-package internal
+package bot
 
 import (
 	"context"
@@ -15,9 +15,12 @@ import (
 
 	"github.com/vadiminshakov/marti/config"
 	"github.com/vadiminshakov/marti/internal/domain"
+	botMock "github.com/vadiminshakov/marti/mocks/bot"
 )
 
 func TestNewTradingBot(t *testing.T) {
+	t.Setenv("MARTI_STATE_DIR", t.TempDir())
+
 	defaultConf := config.Config{
 		Pair:                    domain.Pair{From: "BTC", To: "USDT"},
 		AmountPercent:           decimal.NewFromInt(10),
@@ -82,36 +85,9 @@ func TestNewTradingBot(t *testing.T) {
 	}
 }
 
-type mockTradingStrategy struct {
-	mock.Mock
-}
-
-func (m *mockTradingStrategy) Initialize(ctx context.Context) error {
-	args := m.Called(ctx)
-	return args.Error(0)
-}
-
-func (m *mockTradingStrategy) Trade(ctx context.Context) (*domain.TradeEvent, error) {
-	args := m.Called(ctx)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*domain.TradeEvent), args.Error(1)
-}
-
-func (m *mockTradingStrategy) Close() error {
-	args := m.Called()
-	return args.Error(0)
-}
-
-func (m *mockTradingStrategy) SellAll(ctx context.Context) error {
-	args := m.Called(ctx)
-	return args.Error(0)
-}
-
 func TestTradingBot_SellAll(t *testing.T) {
 	logger := zap.NewNop()
-	mockStrategy := new(mockTradingStrategy)
+	mockStrategy := botMock.NewTradingStrategy(t)
 	mockStrategy.On("SellAll", mock.Anything).Return(nil)
 
 	bot := &TradingBot{
@@ -122,8 +98,6 @@ func TestTradingBot_SellAll(t *testing.T) {
 
 	err := bot.SellAll(context.Background())
 	assert.NoError(t, err)
-
-	mockStrategy.AssertExpectations(t)
 
 	// Check if signal is in channel
 	select {

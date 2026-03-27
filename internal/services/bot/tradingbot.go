@@ -1,5 +1,5 @@
-// Package internal contains the core trading bot implementation and supporting infrastructure.
-package internal
+// Package bot contains the trading bot orchestration and supporting abstractions.
+package bot
 
 import (
 	"context"
@@ -13,9 +13,9 @@ import (
 	entity "github.com/vadiminshakov/marti/internal/domain"
 )
 
-// TradingStrategy defines the interface that all trading strategies must implement.
+// tradingStrategy defines the interface that all trading strategies must implement.
 // It provides lifecycle methods for initializing, executing trades, and cleanup.
-type TradingStrategy interface {
+type tradingStrategy interface {
 	// Initialize prepares the trading strategy for operation
 	Initialize(ctx context.Context) error
 	// Trade executes the trading logic and returns a trade event if a trade should be made
@@ -26,9 +26,9 @@ type TradingStrategy interface {
 	SellAll(ctx context.Context) error
 }
 
-// DcaCostBasisProvider is an optional interface that DCA strategies implement
+// dcaCostBasisProvider is an optional interface that DCA strategies implement
 // to provide cost basis for PnL calculation.
-type DcaCostBasisProvider interface {
+type dcaCostBasisProvider interface {
 	// GetDcaCostBasis returns average entry price and amount for PnL calculation.
 	// Returns zeros if no position is open.
 	GetDcaCostBasis() (entryPrice, amount decimal.Decimal)
@@ -37,7 +37,7 @@ type DcaCostBasisProvider interface {
 // TradingBot represents a single trading instance that manages the execution
 // of a specific trading strategy on a configured trading pair.
 type TradingBot struct {
-	tradingStrategy TradingStrategy
+	tradingStrategy tradingStrategy
 	trader          traderService
 	pricer          priceService
 	balanceStore    balanceSnapshotWriter
