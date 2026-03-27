@@ -12,7 +12,6 @@ import (
 
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
-	"github.com/vadiminshakov/marti/internal"
 	"github.com/vadiminshakov/marti/internal/domain"
 	"github.com/vadiminshakov/marti/internal/services/strategy/dca"
 	"go.uber.org/zap"
@@ -103,6 +102,13 @@ type botSummary struct {
 	ProfitPercent      string
 }
 
+type tradingStrategy interface {
+	Initialize(ctx context.Context) error
+	Trade(ctx context.Context) (*domain.TradeEvent, error)
+	Close() error
+	SellAll(ctx context.Context) error
+}
+
 func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell float64) (botSummary, error) {
 	logger := zap.NewNop()
 	defer logger.Sync()
@@ -124,7 +130,7 @@ func runBot(maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell fl
 
 	var (
 		lastPriceBTC    decimal.Decimal
-		tradingStrategy internal.TradingStrategy
+		tradingStrategy tradingStrategy
 	)
 
 	ctx := context.Background()
@@ -232,11 +238,11 @@ func prepareData(filePath string, pair *domain.Pair) (chan decimal.Decimal, chan
 	return prices, klines, cleanup, nil
 }
 
-func createStrategyFactory(logger *zap.Logger, pair *domain.Pair, feed *priceFeed, balanceBTC, balanceUSDT decimal.Decimal, maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell float64) (*traderCsv, func() (internal.TradingStrategy, error)) {
+func createStrategyFactory(logger *zap.Logger, pair *domain.Pair, feed *priceFeed, balanceBTC, balanceUSDT decimal.Decimal, maxDcaTrades int, dcaPercentThresholdBuy, dcaPercentThresholdSell float64) (*traderCsv, func() (tradingStrategy, error)) {
 	pricer := &pricerCsv{feed: feed}
 	trader := &traderCsv{pair: pair, balance1: balanceBTC, balance2: balanceUSDT, executed: make(map[string]decimal.Decimal), feed: feed}
 
-	return trader, func() (internal.TradingStrategy, error) {
+	return trader, func() (tradingStrategy, error) {
 		dcaPercentThresholdBuyDecimal := decimal.NewFromFloat(dcaPercentThresholdBuy)
 		dcaPercentThresholdSellDecimal := decimal.NewFromFloat(dcaPercentThresholdSell)
 
