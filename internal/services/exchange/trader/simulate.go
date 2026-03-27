@@ -9,7 +9,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/internal/domain"
-	"github.com/vadiminshakov/marti/internal/storage/simstate"
+	"github.com/vadiminshakov/marti/internal/repository/simstate"
 	"go.uber.org/zap"
 )
 

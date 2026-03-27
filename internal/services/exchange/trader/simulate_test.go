@@ -6,8 +6,10 @@ import (
 
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	entity "github.com/vadiminshakov/marti/internal/domain"
+	pricerMock "github.com/vadiminshakov/marti/mocks/pricer"
 	"go.uber.org/zap"
 )
 
@@ -16,20 +18,25 @@ func setupSimStateDir(t *testing.T) {
 	t.Setenv("MARTI_SIMULATE_STATE_DIR", t.TempDir())
 }
 
-// mockPricer is a simple mock for the Pricer interface.
-type mockPricer struct {
-	price decimal.Decimal
-}
+func newSimulatePricer(t *testing.T, pair entity.Pair, initialPrice decimal.Decimal) (*pricerMock.Pricer, func(decimal.Decimal)) {
+	t.Helper()
 
-func (m *mockPricer) GetPrice(ctx context.Context, pair entity.Pair) (decimal.Decimal, error) {
-	return m.price, nil
+	currentPrice := initialPrice
+	pricer := pricerMock.NewPricer(t)
+	pricer.On("GetPrice", mock.Anything, pair).Return(func(context.Context, entity.Pair) decimal.Decimal {
+		return currentPrice
+	}, nil).Maybe()
+
+	return pricer, func(price decimal.Decimal) {
+		currentPrice = price
+	}
 }
 
 func TestSimulateTrader_NewSimulateTrader(t *testing.T) {
 	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
-	pricer := &mockPricer{price: decimal.NewFromInt(50000)}
+	pricer, _ := newSimulatePricer(t, pair, decimal.NewFromInt(50000))
 
 	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, t.Name())
 	require.NoError(t, err)
@@ -49,7 +56,7 @@ func TestSimulateTrader_Buy(t *testing.T) {
 	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
-	pricer := &mockPricer{price: decimal.NewFromInt(50000)}
+	pricer, _ := newSimulatePricer(t, pair, decimal.NewFromInt(50000))
 	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, t.Name())
 	require.NoError(t, err)
 
@@ -73,7 +80,7 @@ func TestSimulateTrader_Buy(t *testing.T) {
 	require.NoError(t, err)
 
 	expectedBTC := amount
-	expectedUSDT := decimal.NewFromInt(10000).Sub(amount.Mul(pricer.price)) // 10000 - 0.1*50000 = 5000
+	expectedUSDT := decimal.NewFromInt(10000).Sub(amount.Mul(decimal.NewFromInt(50000))) // 10000 - 0.1*50000 = 5000
 
 	assert.True(t, btcBalance.Equal(expectedBTC))
 	assert.True(t, usdtBalance.Equal(expectedUSDT))
@@ -83,7 +90,7 @@ func TestSimulateTrader_Sell_InsufficientBalance(t *testing.T) {
 	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
-	pricer := &mockPricer{price: decimal.NewFromInt(50000)}
+	pricer, _ := newSimulatePricer(t, pair, decimal.NewFromInt(50000))
 	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, t.Name())
 	require.NoError(t, err)
 
@@ -101,7 +108,7 @@ func TestSimulateTrader_Buy_InsufficientBalance(t *testing.T) {
 	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
-	pricer := &mockPricer{price: decimal.NewFromInt(50000)}
+	pricer, _ := newSimulatePricer(t, pair, decimal.NewFromInt(50000))
 	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, t.Name())
 	require.NoError(t, err)
 
@@ -116,7 +123,7 @@ func TestSimulateTrader_OrderExecuted_NotFound(t *testing.T) {
 	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
-	pricer := &mockPricer{}
+	pricer, _ := newSimulatePricer(t, pair, decimal.Zero)
 	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, t.Name())
 	require.NoError(t, err)
 
@@ -131,7 +138,7 @@ func TestSimulateTrader_FullTradeCycle(t *testing.T) {
 	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
-	pricer := &mockPricer{}
+	pricer, setPrice := newSimulatePricer(t, pair, decimal.Zero)
 	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, t.Name())
 	require.NoError(t, err)
 
@@ -143,7 +150,7 @@ func TestSimulateTrader_FullTradeCycle(t *testing.T) {
 	assert.True(t, initialUSDT.Equal(decimal.NewFromInt(10000)))
 
 	// buy 0.1 BTC at 50000
-	pricer.price = decimal.NewFromInt(50000)
+	setPrice(decimal.NewFromInt(50000))
 	buyAmountBTC := decimal.NewFromFloat(0.1)
 	buyOrderID := "buy-order-1"
 
@@ -159,7 +166,7 @@ func TestSimulateTrader_FullTradeCycle(t *testing.T) {
 	assert.True(t, usdtAfterBuy.Equal(decimal.NewFromInt(5000))) // 10000 - (0.1 * 50000)
 
 	// sell 0.05 BTC at 60000
-	pricer.price = decimal.NewFromInt(60000)
+	setPrice(decimal.NewFromInt(60000))
 	sellAmountBTC := decimal.NewFromFloat(0.05)
 	sellOrderID := "sell-order-1"
 
@@ -172,8 +179,8 @@ func TestSimulateTrader_FullTradeCycle(t *testing.T) {
 	finalUSDT, err := trader.GetBalance(ctx, "USDT")
 	require.NoError(t, err)
 
-	expectedFinalBTC := buyAmountBTC.Sub(sellAmountBTC)                    // 0.1 - 0.05 = 0.05
-	expectedFinalUSDT := usdtAfterBuy.Add(pricer.price.Mul(sellAmountBTC)) // 5000 + (60000 * 0.05) = 8000
+	expectedFinalBTC := buyAmountBTC.Sub(sellAmountBTC)                                 // 0.1 - 0.05 = 0.05
+	expectedFinalUSDT := usdtAfterBuy.Add(decimal.NewFromInt(60000).Mul(sellAmountBTC)) // 5000 + (60000 * 0.05) = 8000
 	assert.True(t, finalBTC.Equal(expectedFinalBTC))
 	assert.True(t, finalUSDT.Equal(expectedFinalUSDT))
 }
@@ -182,7 +189,7 @@ func TestSimulateTrader_MarginTrade_ReleasesMarginAndPnl_OnLoss(t *testing.T) {
 	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
-	pricer := &mockPricer{price: decimal.NewFromInt(100)}
+	pricer, setPrice := newSimulatePricer(t, pair, decimal.NewFromInt(100))
 	trader, err := NewSimulateTrader(pair, entity.MarketTypeMargin, 10, logger, pricer, t.Name())
 	require.NoError(t, err)
 
@@ -195,7 +202,7 @@ func TestSimulateTrader_MarginTrade_ReleasesMarginAndPnl_OnLoss(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, usdtAfterBuy.Equal(decimal.NewFromInt(9990)))
 
-	pricer.price = decimal.NewFromInt(95)
+	setPrice(decimal.NewFromInt(95))
 
 	err = trader.sell(ctx, decimal.NewFromInt(1), "margin-sell")
 	require.NoError(t, err)
@@ -209,7 +216,7 @@ func TestSimulateTrader_MarginTrade_ReleasesMarginAndPnl_OnProfit(t *testing.T) 
 	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
-	pricer := &mockPricer{price: decimal.NewFromInt(100)}
+	pricer, setPrice := newSimulatePricer(t, pair, decimal.NewFromInt(100))
 	trader, err := NewSimulateTrader(pair, entity.MarketTypeMargin, 5, logger, pricer, t.Name())
 	require.NoError(t, err)
 
@@ -222,7 +229,7 @@ func TestSimulateTrader_MarginTrade_ReleasesMarginAndPnl_OnProfit(t *testing.T) 
 	require.NoError(t, err)
 	assert.True(t, usdtAfterBuy.Equal(decimal.NewFromInt(9980)))
 
-	pricer.price = decimal.NewFromInt(110)
+	setPrice(decimal.NewFromInt(110))
 
 	err = trader.sell(ctx, decimal.NewFromInt(1), "margin-sell")
 	require.NoError(t, err)
@@ -236,7 +243,7 @@ func TestSimulateTrader_ShortTrade_ReleasesMarginAndPnl_OnProfit(t *testing.T) {
 	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
-	pricer := &mockPricer{price: decimal.NewFromInt(100)}
+	pricer, setPrice := newSimulatePricer(t, pair, decimal.NewFromInt(100))
 	trader, err := NewSimulateTrader(pair, entity.MarketTypeMargin, 5, logger, pricer, t.Name())
 	require.NoError(t, err)
 
@@ -255,7 +262,7 @@ func TestSimulateTrader_ShortTrade_ReleasesMarginAndPnl_OnProfit(t *testing.T) {
 	assert.Equal(t, entity.PositionSideShort, position.Side)
 	assert.True(t, position.Amount.Equal(decimal.NewFromInt(1)))
 
-	pricer.price = decimal.NewFromInt(80)
+	setPrice(decimal.NewFromInt(80))
 
 	err = trader.ExecuteAction(ctx, entity.ActionCloseShort, decimal.NewFromInt(1), "short-close")
 	require.NoError(t, err)
@@ -277,7 +284,7 @@ func TestSimulateTrader_ShortTrade_ReleasesMarginAndPnl_OnLoss(t *testing.T) {
 	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
-	pricer := &mockPricer{price: decimal.NewFromInt(100)}
+	pricer, setPrice := newSimulatePricer(t, pair, decimal.NewFromInt(100))
 	trader, err := NewSimulateTrader(pair, entity.MarketTypeMargin, 5, logger, pricer, t.Name())
 	require.NoError(t, err)
 
@@ -290,7 +297,7 @@ func TestSimulateTrader_ShortTrade_ReleasesMarginAndPnl_OnLoss(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, usdtAfterOpen.Equal(decimal.NewFromInt(9980)))
 
-	pricer.price = decimal.NewFromInt(120)
+	setPrice(decimal.NewFromInt(120))
 
 	err = trader.ExecuteAction(ctx, entity.ActionCloseShort, decimal.NewFromInt(1), "short-close")
 	require.NoError(t, err)
@@ -304,7 +311,7 @@ func TestSimulateTrader_ShortTrade_NotAllowedInSpot(t *testing.T) {
 	setupSimStateDir(t)
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
-	pricer := &mockPricer{price: decimal.NewFromInt(100)}
+	pricer, _ := newSimulatePricer(t, pair, decimal.NewFromInt(100))
 	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, t.Name())
 	require.NoError(t, err)
 
@@ -320,7 +327,7 @@ func TestSimulateTrader_StateIsolationByKey(t *testing.T) {
 	ctx := context.Background()
 	pair := entity.Pair{From: "BTC", To: "USDT"}
 	logger := zap.NewNop()
-	pricer := &mockPricer{price: decimal.NewFromInt(10000)}
+	pricer, _ := newSimulatePricer(t, pair, decimal.NewFromInt(10000))
 
 	traderA, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, "model_a")
 	require.NoError(t, err)
