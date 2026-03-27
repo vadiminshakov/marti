@@ -9,10 +9,10 @@ import (
 	"github.com/pkg/errors"
 	"github.com/vadiminshakov/gowal"
 	"github.com/vadiminshakov/marti/internal/domain"
+	"github.com/vadiminshakov/marti/pkg/statepath"
 )
 
 const (
-	defaultAIDecisionDir   = "./wal/aidecisions"
 	aiDecisionSegmentLimit = 100
 	aiDecisionMaxSegments  = 10
 	aiDecisionKeyPrefix    = "ai_decision_"
@@ -26,8 +26,14 @@ type WALStore struct {
 
 // NewWALStore initializes a WAL-backed AI decision store.
 func NewWALStore(dir string) (*WALStore, error) {
+	var err error
 	if dir == "" {
-		dir = defaultAIDecisionDir
+		dir, err = statepath.WALDir("aidecisions")
+	} else {
+		dir, err = statepath.ExpandUser(dir)
+	}
+	if err != nil {
+		return nil, errors.Wrap(err, "resolve AI decision WAL dir")
 	}
 
 	cfg := gowal.Config{

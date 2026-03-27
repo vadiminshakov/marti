@@ -9,10 +9,10 @@ import (
 	"github.com/pkg/errors"
 	"github.com/vadiminshakov/gowal"
 	"github.com/vadiminshakov/marti/internal/domain"
+	"github.com/vadiminshakov/marti/pkg/statepath"
 )
 
 const (
-	defaultSnapshotDir   = "./wal/balance"
 	snapshotSegmentLimit = 1000
 	snapshotMaxSegments  = 100
 	snapshotKeyPrefix    = "balance_snapshot_"
@@ -26,8 +26,14 @@ type WALStore struct {
 
 // NewWALStore initializes a WAL-backed snapshot store.
 func NewWALStore(dir string) (*WALStore, error) {
+	var err error
 	if dir == "" {
-		dir = defaultSnapshotDir
+		dir, err = statepath.WALDir("balance")
+	} else {
+		dir, err = statepath.ExpandUser(dir)
+	}
+	if err != nil {
+		return nil, errors.Wrap(err, "resolve balance snapshot WAL dir")
 	}
 
 	cfg := gowal.Config{

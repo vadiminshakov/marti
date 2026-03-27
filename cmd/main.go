@@ -33,9 +33,9 @@ import (
 	"github.com/pkg/errors"
 	"github.com/vadiminshakov/marti/config"
 	"github.com/vadiminshakov/marti/dashboard"
-	"github.com/vadiminshakov/marti/internal/setup"
-	"github.com/vadiminshakov/marti/internal/storage/balancesnapshots"
-	"github.com/vadiminshakov/marti/internal/storage/decisions"
+	"github.com/vadiminshakov/marti/internal/repository/balancesnapshots"
+	"github.com/vadiminshakov/marti/internal/repository/decisions"
+	"github.com/vadiminshakov/marti/pkg/setup"
 	"github.com/vadiminshakov/marti/pkg/telegram"
 	"go.uber.org/zap"
 )

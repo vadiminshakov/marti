@@ -46,7 +46,7 @@ func (s *NotifyingStore) SaveDCA(event domain.DCADecisionEvent) error {
 	}
 
 	go s.notify(formatDCAMessage(event))
-	
+
 	return nil
 }
 

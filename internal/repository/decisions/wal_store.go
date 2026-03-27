@@ -9,10 +9,10 @@ import (
 	"github.com/pkg/errors"
 	"github.com/vadiminshakov/gowal"
 	"github.com/vadiminshakov/marti/internal/domain"
+	"github.com/vadiminshakov/marti/pkg/statepath"
 )
 
 const (
-	DefaultDir   = "./wal/aidecisions" // Keep using the same dir to preserve history
 	segmentLimit = 100
 	maxSegments  = 10
 
@@ -28,8 +28,14 @@ type WALStore struct {
 
 // NewWALStore initializes a WAL-backed decision store.
 func NewWALStore(dir string) (*WALStore, error) {
+	var err error
 	if dir == "" {
-		dir = DefaultDir
+		dir, err = statepath.WALDir("aidecisions")
+	} else {
+		dir, err = statepath.ExpandUser(dir)
+	}
+	if err != nil {
+		return nil, errors.Wrap(err, "resolve decision WAL dir")
 	}
 
 	cfg := gowal.Config{

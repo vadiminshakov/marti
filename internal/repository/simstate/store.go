@@ -11,25 +11,39 @@ import (
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/vadiminshakov/marti/internal/domain"
+	"github.com/vadiminshakov/marti/pkg/statepath"
 )
-
-const defaultStateDir = "./wal/simulate"
 
 // Store persists simulator state per trading pair.
 type Store struct {
 	path string
 }
 
-func getStateDir() string {
+func getStateDir() (string, error) {
 	if stateDir := os.Getenv("MARTI_SIMULATE_STATE_DIR"); stateDir != "" {
-		return stateDir
+		resolved, err := statepath.ExpandUser(stateDir)
+		if err != nil {
+			return "", errors.Wrap(err, "resolve MARTI_SIMULATE_STATE_DIR")
+		}
+
+		return resolved, nil
 	}
-	return defaultStateDir
+
+	resolved, err := statepath.SimulateDir()
+	if err != nil {
+		return "", errors.Wrap(err, "resolve simulate state dir")
+	}
+
+	return resolved, nil
 }
 
 // NewStore creates a simulator state store.
 func NewStore(pair domain.Pair, scope string) (*Store, error) {
-	stateDir := getStateDir()
+	stateDir, err := getStateDir()
+	if err != nil {
+		return nil, err
+	}
+
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return nil, errors.Wrap(err, "create simulate state dir")
 	}
