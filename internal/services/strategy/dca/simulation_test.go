@@ -6,25 +6,18 @@ import (
 
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/vadiminshakov/marti/internal/domain"
-	"github.com/vadiminshakov/marti/internal/services/trader"
+	"github.com/vadiminshakov/marti/internal/services/exchange/trader"
+	pricerMock "github.com/vadiminshakov/marti/mocks/pricer"
 )
 
 func setupSimStateDir(t *testing.T) {
 	t.Helper()
 	t.Setenv("MARTI_SIMULATE_STATE_DIR", t.TempDir())
-}
-
-// mockSimulatePricer is a simple pricer for testing simulation.
-type mockSimulatePricer struct {
-	price decimal.Decimal
-}
-
-func (m *mockSimulatePricer) GetPrice(_ context.Context, _ domain.Pair) (decimal.Decimal, error) {
-	return m.price, nil
 }
 
 func TestDCAStrategy_WithSimulationTrader(t *testing.T) {
@@ -35,7 +28,10 @@ func TestDCAStrategy_WithSimulationTrader(t *testing.T) {
 
 	// pricer for simulation
 	price := decimal.NewFromInt(50000)
-	pr := &mockSimulatePricer{price: price}
+	pr := pricerMock.NewPricer(t)
+	pr.On("GetPrice", mock.Anything, pair).Return(func(context.Context, domain.Pair) decimal.Decimal {
+		return price
+	}, nil)
 
 	// create simulation trader with unique stateKey
 	simTrader, err := trader.NewSimulateTrader(pair, domain.MarketTypeSpot, 1, logger, pr, t.Name())
@@ -76,14 +72,18 @@ func TestDCAStrategy_SimulationApplyTrade(t *testing.T) {
 	logger := zap.NewNop()
 
 	// pricer for simulation
-	pr := &mockSimulatePricer{}
+	price := decimal.Zero
+	pr := pricerMock.NewPricer(t)
+	pr.On("GetPrice", mock.Anything, pair).Return(func(context.Context, domain.Pair) decimal.Decimal {
+		return price
+	}, nil)
 
 	simTrader, err := trader.NewSimulateTrader(pair, domain.MarketTypeSpot, 1, logger, pr, t.Name())
 	require.NoError(t, err)
 
 	// test buy with 5000 USDT (0.1 BTC at 50000)
 	buyPrice := decimal.NewFromInt(50000)
-	pr.price = buyPrice
+	price = buyPrice
 	buyUSDT := decimal.NewFromInt(5000)
 	buyBase := buyUSDT.Div(buyPrice) // 0.1
 	err = simTrader.ExecuteAction(context.Background(), domain.ActionOpenLong, buyBase, "order-buy")
@@ -100,7 +100,7 @@ func TestDCAStrategy_SimulationApplyTrade(t *testing.T) {
 
 	// test sell 0.05 BTC at 60000
 	sellPrice := decimal.NewFromInt(60000)
-	pr.price = sellPrice
+	price = sellPrice
 	sellAmount := decimal.NewFromFloat(0.05)
 	err = simTrader.ExecuteAction(context.Background(), domain.ActionCloseLong, sellAmount, "order-sell")
 	require.NoError(t, err)
