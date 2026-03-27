@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	entity "github.com/vadiminshakov/marti/internal/domain"
+	"github.com/vadiminshakov/marti/pkg/statepath"
 )
 
 const (
@@ -634,7 +634,11 @@ func (d *Strategy) saveDCASeries() error {
 }
 
 func createWAL(stateKey string) (*gowal.Wal, error) {
-	walDir := filepath.Join("wal", sanitizeStateKey(stateKey))
+	walDir, err := statepath.WALDir(sanitizeStateKey(stateKey))
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to resolve WAL directory")
+	}
+
 	if err := os.MkdirAll(walDir, walDirPermissions); err != nil {
 		return nil, errors.Wrapf(err, "failed to ensure WAL directory %s", walDir)
 	}
