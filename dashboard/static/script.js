@@ -38,10 +38,6 @@ function renderAvailability() {
     return;
   }
 
-  if (lastBalanceEventAt > 0 && Date.now() - lastBalanceEventAt > 15000) {
-    setStatusPill(availabilityStatusEl, 'Status: no recent data', 'danger');
-    return;
-  }
 
   if (streamState.balance === 'connected' && streamState.decisions === 'connected') {
     setStatusPill(availabilityStatusEl, 'Status: connected', 'ok');
