@@ -1156,8 +1156,8 @@ const DEFAULT_PAIR_DATA = {
   pollInterval: '5m', amount: '10', maxDcaTrades: '15', buyThreshold: '3.5',
   sellThreshold: '0.75', apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
   apiKey: '', model: 'deepseek/deepseek-v3-0324', primaryTimeframe: '3m',
-  higherTimeframe: '', lookbackPeriods: '', higherLookbackPeriods: '',
-  maxLeverage: '', leverage: '', llmProxyUrl: '',
+  higherTimeframe: '15m', lookbackPeriods: '50', higherLookbackPeriods: '60',
+  maxLeverage: '10', leverage: '', llmProxyUrl: '',
   telegramBotToken: '', telegramChatID: ''
 };
 
@@ -1184,6 +1184,8 @@ function createPairCard(index, data, onRemove, onChange) {
     el.addEventListener('change', onChange);
     return el;
   };
+
+  const timeframeOptions = ['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d'];
 
   // Strategy & exchange
   const group1Title = document.createElement('h3');
@@ -1298,13 +1300,23 @@ function createPairCard(index, data, onRemove, onChange) {
   const modelInput = listen(document.createElement('input'));
   modelInput.type = 'text';
   modelInput.value = data.model || 'deepseek/deepseek-v3-0324';
+  const proxyUrlInput = listen(document.createElement('input'));
+  proxyUrlInput.type = 'text';
+  proxyUrlInput.value = data.llmProxyUrl || '';
   const primaryTfSelect = listen(document.createElement('select'));
-  ['1m', '3m', '5m', '15m', '1h'].forEach((v) => {
+  timeframeOptions.forEach((v) => {
     const opt = document.createElement('option');
     opt.value = v; opt.textContent = v;
     primaryTfSelect.appendChild(opt);
   });
   primaryTfSelect.value = data.primaryTimeframe || '3m';
+  const higherTfSelect = listen(document.createElement('select'));
+  timeframeOptions.forEach((v) => {
+    const opt = document.createElement('option');
+    opt.value = v; opt.textContent = v;
+    higherTfSelect.appendChild(opt);
+  });
+  higherTfSelect.value = data.higherTimeframe || '15m';
   aiRow1.append(
     createSetupField('setupApiUrl_' + index, 'LLM API URL', 'OpenAI-compatible endpoint.', apiUrlInput),
     createSetupField('setupApiKey_' + index, 'LLM API key', 'Stored only in generated config file.', apiKeyInput)
@@ -1313,9 +1325,35 @@ function createPairCard(index, data, onRemove, onChange) {
   aiRow2.className = 'setup-row';
   aiRow2.append(
     createSetupField('setupModel_' + index, 'Model', 'LLM model identifier (e.g. deepseek/deepseek-v3-0324).', modelInput),
-    createSetupField('setupPrimaryTimeframe_' + index, 'Primary timeframe', 'Main timeframe to analyse.', primaryTfSelect)
+    createSetupField('setupLlmProxyUrl_' + index, 'LLM proxy URL', 'Optional proxy for the OpenAI-compatible endpoint.', proxyUrlInput)
   );
-  aiSection.append(group4Title, aiRow1, aiRow2);
+  const aiRow3 = document.createElement('div');
+  aiRow3.className = 'setup-row';
+  const lookbackInput = listen(document.createElement('input'));
+  lookbackInput.type = 'text';
+  lookbackInput.value = data.lookbackPeriods || '50';
+  const higherLookbackInput = listen(document.createElement('input'));
+  higherLookbackInput.type = 'text';
+  higherLookbackInput.value = data.higherLookbackPeriods || '60';
+  aiRow3.append(
+    createSetupField('setupPrimaryTimeframe_' + index, 'Primary timeframe', 'Main timeframe to analyse.', primaryTfSelect),
+    createSetupField('setupHigherTimeframe_' + index, 'Higher timeframe', 'Broader timeframe used for trend context.', higherTfSelect)
+  );
+  const aiRow4 = document.createElement('div');
+  aiRow4.className = 'setup-row';
+  const maxLeverageInput = listen(document.createElement('input'));
+  maxLeverageInput.type = 'text';
+  maxLeverageInput.value = data.maxLeverage || '10';
+  aiRow4.append(
+    createSetupField('setupLookbackPeriods_' + index, 'Primary lookback', 'Candles to analyse on primary timeframe (minimum 50).', lookbackInput),
+    createSetupField('setupHigherLookbackPeriods_' + index, 'Higher lookback', 'Candles to analyse on higher timeframe (minimum 20).', higherLookbackInput)
+  );
+  const aiRow5 = document.createElement('div');
+  aiRow5.className = 'setup-row';
+  aiRow5.append(
+    createSetupField('setupMaxLeverage_' + index, 'Max leverage', 'Upper leverage bound used by AI sizing in margin mode.', maxLeverageInput)
+  );
+  aiSection.append(group4Title, aiRow1, aiRow2, aiRow3, aiRow4, aiRow5);
 
   // Telegram notifications
   const tgSection = document.createElement('div');
@@ -1383,12 +1421,12 @@ function createPairCard(index, data, onRemove, onChange) {
     apiKey: apiKeyInput.value,
     model: modelInput.value.trim(),
     primaryTimeframe: primaryTfSelect.value,
-    higherTimeframe: '',
-    lookbackPeriods: '',
-    higherLookbackPeriods: '',
-    maxLeverage: '',
+    higherTimeframe: higherTfSelect.value,
+    lookbackPeriods: lookbackInput.value.trim(),
+    higherLookbackPeriods: higherLookbackInput.value.trim(),
+    maxLeverage: maxLeverageInput.value.trim(),
     leverage: '',
-    llmProxyUrl: '',
+    llmProxyUrl: proxyUrlInput.value.trim(),
     telegramBotToken: tgToggle.checked ? tgTokenInput.value : '',
     telegramChatID: tgToggle.checked ? tgChatInput.value.trim() : ''
   });
