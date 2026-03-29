@@ -115,14 +115,11 @@ func formatAIMessage(e domain.AIDecisionEvent) string {
 		msg += fmt.Sprintf("\nPosition: %s %s @ %s",
 			e.PositionAmount, baseCurrency(e.Pair), e.PositionEntryPrice)
 	}
-	if e.Reasoning != "" {
-		r := e.Reasoning
-		if len(r) > 200 {
-			r = r[:197] + "..."
-		}
-		msg += "\nReason: " + r
+	if e.Reasoning != "" {		
+		msg += "\nReason: " + e.Reasoning
 	}
 	msg += "\n" + e.Timestamp.UTC().Format("2006-01-02 15:04:05 UTC")
+	
 	return msg
 }
 
