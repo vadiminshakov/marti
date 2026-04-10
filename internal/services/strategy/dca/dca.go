@@ -511,6 +511,7 @@ func (d *Strategy) executeSell(ctx context.Context, price decimal.Decimal, sell 
 
 	amountBaseCurrency := sell.Amount
 	amountQuoteProceeds := amountBaseCurrency.Mul(price)
+	tradePartValue := d.dcaSeries.CurrentSellTradePart()
 
 	amountQuoteCost := amountBaseCurrency.Mul(d.dcaSeries.AvgEntryPrice).Round(8)
 	if sell.IsFullSell {
@@ -519,7 +520,7 @@ func (d *Strategy) executeSell(ctx context.Context, price decimal.Decimal, sell 
 
 	operationTime := time.Now()
 
-	intent, err := d.journal.Prepare(intentActionSell, price, amountQuoteCost, amountBaseCurrency, operationTime, 0, sell.IsFullSell)
+	intent, err := d.journal.Prepare(intentActionSell, price, amountQuoteCost, amountBaseCurrency, operationTime, tradePartValue, sell.IsFullSell)
 	if err != nil {
 		return nil, err
 	}
@@ -557,6 +558,7 @@ func (d *Strategy) executeSell(ctx context.Context, price decimal.Decimal, sell 
 
 	profit := entity.PercentageDiff(price, d.dcaSeries.AvgEntryPrice)
 	d.logBalances(ctx, "sell executed",
+		zap.Int("trade_part", tradePartValue),
 		zap.String("price", price.String()),
 		zap.String("amountBase", amountBaseCurrency.String()),
 		zap.String("amountQuoteProceeds", amountQuoteProceeds.String()),
@@ -569,7 +571,7 @@ func (d *Strategy) executeSell(ctx context.Context, price decimal.Decimal, sell 
 		Action:            "sell",
 		CurrentPrice:      price,
 		AverageEntryPrice: d.dcaSeries.AvgEntryPrice,
-		TradePart:         0,
+		TradePart:         tradePartValue,
 		QuoteBalance:      amountQuoteProceeds,
 	}); err != nil {
 		d.l.Error("failed to save DCA decision", zap.Error(err))

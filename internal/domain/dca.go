@@ -96,6 +96,15 @@ func (s *DCASeries) TotalBaseAmount() decimal.Decimal {
 	return s.TotalAmount.Div(s.AvgEntryPrice)
 }
 
+// CurrentSellTradePart returns the trade part that would be sold next.
+func (s *DCASeries) CurrentSellTradePart() int {
+	if len(s.Purchases) == 0 {
+		return 0
+	}
+
+	return s.Purchases[len(s.Purchases)-1].TradePart
+}
+
 // RemoveAmount removes amount from purchases (FIFO from end).
 func (s *DCASeries) RemoveAmount(amount decimal.Decimal) {
 	if amount.LessThanOrEqual(decimal.Zero) || len(s.Purchases) == 0 {

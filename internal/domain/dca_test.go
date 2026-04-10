@@ -250,6 +250,24 @@ func TestAddPurchase_UpdatesLastBuyPrice(t *testing.T) {
 	require.Equal(t, price3, series.LastBuyPrice)
 }
 
+func TestCurrentSellTradePart(t *testing.T) {
+	t.Run("empty series", func(t *testing.T) {
+		series := NewDCASeries()
+
+		require.Equal(t, 0, series.CurrentSellTradePart())
+	})
+
+	t.Run("returns last purchase trade part", func(t *testing.T) {
+		series := NewDCASeries()
+
+		require.NoError(t, series.AddPurchase("buy1", decimal.NewFromInt(100), decimal.NewFromInt(1000), time.Now(), 1))
+		require.NoError(t, series.AddPurchase("buy2", decimal.NewFromInt(95), decimal.NewFromInt(1000), time.Now(), 2))
+		require.NoError(t, series.AddPurchase("buy3", decimal.NewFromInt(90), decimal.NewFromInt(1000), time.Now(), 3))
+
+		require.Equal(t, 3, series.CurrentSellTradePart())
+	})
+}
+
 func TestCalculateSellAmountInternal(t *testing.T) {
 	tests := []struct {
 		name          string

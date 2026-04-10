@@ -321,6 +321,55 @@ func TestDCAStrategy_Trade_Sell_FullSellOnDoubleThreshold(t *testing.T) {
 	require.True(t, tradeEvent.Amount.Equal(expectedSellBTC), "expected full sell amount %v BTC, got %v", expectedSellBTC, tradeEvent.Amount)
 }
 
+func TestDCAStrategy_Trade_Sell_SavesTradePartForSoldLayer(t *testing.T) {
+	mockPricer := pricerMock.NewPricer(t)
+	mockTrader := traderMock.NewTrader(t)
+	pair := domain.Pair{From: "BTC", To: "USDT"}
+
+	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(55500), nil).Once()
+	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(62000), nil).Once()
+	mockPricer.On("GetPrice", mock.Anything, pair).Return(decimal.NewFromInt(69000), nil).Once()
+
+	mockStandardBalances(mockTrader)
+	mockTrader.On("ExecuteAction", mock.Anything, domain.ActionCloseLong, mock.Anything, mock.AnythingOfType("string")).Return(nil).Times(3)
+
+	ts, recorder := createTestDCAStrategy(t, mockPricer, mockTrader)
+	recorder.On("SaveDCA", mock.MatchedBy(func(event domain.DCADecisionEvent) bool {
+		return event.Action == "sell" && event.TradePart == 3
+	})).Return(nil).Once()
+	recorder.On("SaveDCA", mock.MatchedBy(func(event domain.DCADecisionEvent) bool {
+		return event.Action == "sell" && event.TradePart == 2
+	})).Return(nil).Once()
+	recorder.On("SaveDCA", mock.MatchedBy(func(event domain.DCADecisionEvent) bool {
+		return event.Action == "sell" && event.TradePart == 1
+	})).Return(nil).Once()
+	defer ts.Close()
+
+	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 1)
+	require.NoError(t, err, "failed to add purchase 1")
+	err = ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 2)
+	require.NoError(t, err, "failed to add purchase 2")
+	err = ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 3)
+	require.NoError(t, err, "failed to add purchase 3")
+
+	ctx := context.Background()
+
+	tradeEvent, err := ts.Trade(ctx)
+	require.NoError(t, err, "unexpected error on first sell")
+	require.NotNil(t, tradeEvent, "expected first sell trade event")
+	require.Equal(t, 2, len(ts.GetDCASeries().Purchases), "expected to remove top layer after first sell")
+
+	tradeEvent, err = ts.Trade(ctx)
+	require.NoError(t, err, "unexpected error on second sell")
+	require.NotNil(t, tradeEvent, "expected second sell trade event")
+	require.Equal(t, 1, len(ts.GetDCASeries().Purchases), "expected to remove second layer after second sell")
+
+	tradeEvent, err = ts.Trade(ctx)
+	require.NoError(t, err, "unexpected error on final sell")
+	require.NotNil(t, tradeEvent, "expected final sell trade event")
+	require.Len(t, ts.GetDCASeries().Purchases, 0, "expected series to reset after final sell")
+}
+
 func TestDCAStrategy_Trade_NoAction_PriceInRange(t *testing.T) {
 	mockPricer := pricerMock.NewPricer(t)
 	mockTrader := traderMock.NewTrader(t)
