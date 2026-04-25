@@ -13,6 +13,7 @@ import (
 	"github.com/vadiminshakov/marti/internal/services/market"
 	"github.com/vadiminshakov/marti/internal/services/strategy/ai"
 	"github.com/vadiminshakov/marti/internal/services/strategy/dca"
+	"github.com/vadiminshakov/marti/internal/services/strategy/martingale"
 )
 
 // strategyFactory creates trading strategies.
@@ -44,6 +45,19 @@ func (f *strategyFactory) createTradingStrategy(
 			conf.MaxDcaTrades,
 			conf.DcaPercentThresholdBuy,
 			conf.DcaPercentThresholdSell,
+			decisions,
+		)
+	case "martingale":
+		return f.createMartingaleStrategy(
+			conf.StateKey(),
+			conf.Pair,
+			conf.AmountPercent,
+			pricer,
+			tradeSvc,
+			conf.MaxDcaTrades,
+			conf.DcaPercentThresholdBuy,
+			conf.DcaPercentThresholdSell,
+			conf.MartingaleMultiplier,
 			decisions,
 		)
 	case "ai":
@@ -82,6 +96,39 @@ func (f *strategyFactory) createDCAStrategy(
 	}
 
 	return dcaStrategy, nil
+}
+
+// createMartingaleStrategy creates a Martingale trading strategy.
+func (f *strategyFactory) createMartingaleStrategy(
+	stateKey string,
+	pair entity.Pair,
+	amountPercent decimal.Decimal,
+	pricer priceService,
+	tradeSvc traderService,
+	maxTrades int,
+	buyThreshold decimal.Decimal,
+	sellThreshold decimal.Decimal,
+	multiplier decimal.Decimal,
+	decisions decisionStore,
+) (tradingStrategy, error) {
+	mgStrategy, err := martingale.NewMartingaleStrategy(
+		f.logger,
+		stateKey,
+		pair,
+		amountPercent,
+		pricer,
+		tradeSvc,
+		decisions,
+		maxTrades,
+		buyThreshold,
+		sellThreshold,
+		multiplier,
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create Martingale strategy")
+	}
+
+	return mgStrategy, nil
 }
 
 // createAIStrategy creates an AI trading strategy.

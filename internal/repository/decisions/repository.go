@@ -16,8 +16,11 @@ const (
 	segmentLimit = 100
 	maxSegments  = 10
 
-	aiDecisionKeyPrefix  = "ai_decision_"
-	dcaDecisionKeyPrefix = "dca_decision_"
+	aiDecisionKeyPrefix        = "ai_decision_"
+	averagingDecisionKeyPrefix = "averaging_decision_"
+	// legacyDCADecisionKeyPrefix keeps old WAL records readable after the
+	// DCADecisionEvent → AveragingDecisionEvent rename.
+	legacyDCADecisionKeyPrefix = "dca_decision_"
 )
 
 // WALStore persists decision events in a WAL.
@@ -77,21 +80,21 @@ func (s *WALStore) SaveAI(event domain.AIDecisionEvent) error {
 	return s.wal.Write(nextIndex, key, payload)
 }
 
-// SaveDCA writes the DCA decision event to WAL.
-func (s *WALStore) SaveDCA(event domain.DCADecisionEvent) error {
+// SaveAveraging writes an averaging-strategy decision event (DCA, Martingale) to WAL.
+func (s *WALStore) SaveAveraging(event domain.AveragingDecisionEvent) error {
 	if s == nil || s.wal == nil {
 		return errors.New("decision store is not initialized")
 	}
 	if event.Pair == "" {
-		return fmt.Errorf("DCA decision event pair is required")
+		return fmt.Errorf("averaging decision event pair is required")
 	}
 
 	payload, err := json.Marshal(event)
 	if err != nil {
-		return errors.Wrap(err, "marshal DCA decision event")
+		return errors.Wrap(err, "marshal averaging decision event")
 	}
 
-	key := fmt.Sprintf("%s%s", dcaDecisionKeyPrefix, event.Pair)
+	key := fmt.Sprintf("%s%s", averagingDecisionKeyPrefix, event.Pair)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -121,7 +124,8 @@ func (s *WALStore) EventsAfter(index uint64) ([]domain.DecisionEventRecord, erro
 			continue
 		}
 
-		if strings.HasPrefix(key, aiDecisionKeyPrefix) {
+		switch {
+		case strings.HasPrefix(key, aiDecisionKeyPrefix):
 			var event domain.AIDecisionEvent
 			if err := json.Unmarshal(payload, &event); err != nil {
 				return nil, errors.Wrap(err, "decode AI decision event")
@@ -131,14 +135,18 @@ func (s *WALStore) EventsAfter(index uint64) ([]domain.DecisionEventRecord, erro
 				Type:  domain.DecisionTypeAI,
 				Event: event,
 			})
-		} else if strings.HasPrefix(key, dcaDecisionKeyPrefix) {
-			var event domain.DCADecisionEvent
+		case strings.HasPrefix(key, averagingDecisionKeyPrefix),
+			strings.HasPrefix(key, legacyDCADecisionKeyPrefix):
+			var event domain.AveragingDecisionEvent
 			if err := json.Unmarshal(payload, &event); err != nil {
-				return nil, errors.Wrap(err, "decode DCA decision event")
+				return nil, errors.Wrap(err, "decode averaging decision event")
+			}
+			if event.Strategy == "" && strings.HasPrefix(key, legacyDCADecisionKeyPrefix) {
+				event.Strategy = "dca"
 			}
 			records = append(records, domain.DecisionEventRecord{
 				Index: idx,
-				Type:  domain.DecisionTypeDCA,
+				Type:  domain.DecisionTypeAveraging,
 				Event: event,
 			})
 		}

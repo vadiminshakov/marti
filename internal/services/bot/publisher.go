@@ -95,8 +95,11 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 
 	model := b.Config.Model
 
-	if b.Config.StrategyType == "dca" {
+	switch b.Config.StrategyType {
+	case "dca":
 		model = "DCA"
+	case "martingale":
+		model = "Martingale"
 	}
 
 	err = b.balanceStore.Save(entity.NewBalanceSnapshot(

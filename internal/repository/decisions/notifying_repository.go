@@ -39,13 +39,13 @@ func (s *NotifyingStore) SaveAI(event domain.AIDecisionEvent) error {
 	return nil
 }
 
-// SaveDCA delegates to inner and always notifies (DCA events are always buy or sell).
-func (s *NotifyingStore) SaveDCA(event domain.DCADecisionEvent) error {
-	if err := s.inner.SaveDCA(event); err != nil {
+// SaveAveraging delegates to inner and always notifies (averaging events are always buy or sell).
+func (s *NotifyingStore) SaveAveraging(event domain.AveragingDecisionEvent) error {
+	if err := s.inner.SaveAveraging(event); err != nil {
 		return err
 	}
 
-	go s.notify(formatDCAMessage(event))
+	go s.notify(formatAveragingMessage(event))
 
 	return nil
 }
@@ -76,11 +76,17 @@ func (s *NotifyingStore) notify(text string) {
 	}
 }
 
-func formatDCAMessage(e domain.DCADecisionEvent) string {
+func formatAveragingMessage(e domain.AveragingDecisionEvent) string {
 	action := strings.ToUpper(e.Action)
 	quote := quoteCurrency(e.Pair)
 
-	msg := fmt.Sprintf("[DCA] %s %s\nPrice: %s\nAvg Entry: %s\nTrade #%d\nBalance: %s %s\n%s",
+	label := "DCA"
+	if e.Strategy == "martingale" {
+		label = "Martingale"
+	}
+
+	msg := fmt.Sprintf("[%s] %s %s\nPrice: %s\nAvg Entry: %s\nTrade #%d\nBalance: %s %s\n%s",
+		label,
 		action,
 		e.Pair,
 		e.CurrentPrice.StringFixed(2),

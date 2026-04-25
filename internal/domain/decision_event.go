@@ -4,14 +4,14 @@ package domain
 type DecisionType string
 
 const (
-	DecisionTypeAI  DecisionType = "ai"
-	DecisionTypeDCA DecisionType = "dca"
+	DecisionTypeAI        DecisionType = "ai"
+	DecisionTypeAveraging DecisionType = "averaging"
 )
 
-// DecisionEventRecord bundles a decision event (AI or DCA) with its index.
+// DecisionEventRecord bundles a decision event (AI or Averaging) with its index.
 type DecisionEventRecord struct {
 	Index uint64
 	Type  DecisionType
-	// Event is either AIDecisionEvent or DCADecisionEvent
+	// Event is either AIDecisionEvent or AveragingDecisionEvent
 	Event any
 }

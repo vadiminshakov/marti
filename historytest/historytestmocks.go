@@ -188,6 +188,6 @@ func (t *traderCsv) ExecuteAction(ctx context.Context, action domain.Action, amo
 
 type dummyRecorder struct{}
 
-func (d *dummyRecorder) SaveDCA(event domain.DCADecisionEvent) error {
+func (d *dummyRecorder) SaveAveraging(event domain.AveragingDecisionEvent) error {
 	return nil
 }

@@ -17,7 +17,7 @@ import (
 
 type decisionStoreWriter interface {
 	SaveAI(event domain.AIDecisionEvent) error
-	SaveDCA(event domain.DCADecisionEvent) error
+	SaveAveraging(event domain.AveragingDecisionEvent) error
 }
 
 type managedBot struct {

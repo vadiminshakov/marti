@@ -58,7 +58,7 @@ type balanceSnapshotWriter interface {
 
 type decisionStore interface {
 	SaveAI(event entity.AIDecisionEvent) error
-	SaveDCA(event entity.DCADecisionEvent) error
+	SaveAveraging(event entity.AveragingDecisionEvent) error
 }
 
 // NewTradingBot creates a new trading bot instance with the specified configuration, exchange client, and logger.
