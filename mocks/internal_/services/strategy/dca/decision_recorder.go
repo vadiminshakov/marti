@@ -12,16 +12,16 @@ type decisionRecorder struct {
 	mock.Mock
 }
 
-// SaveDCA provides a mock function with given fields: event
-func (_m *decisionRecorder) SaveDCA(event domain.DCADecisionEvent) error {
+// SaveAveraging provides a mock function with given fields: event
+func (_m *decisionRecorder) SaveAveraging(event domain.AveragingDecisionEvent) error {
 	ret := _m.Called(event)
 
 	if len(ret) == 0 {
-		panic("no return value specified for SaveDCA")
+		panic("no return value specified for SaveAveraging")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(domain.DCADecisionEvent) error); ok {
+	if rf, ok := ret.Get(0).(func(domain.AveragingDecisionEvent) error); ok {
 		r0 = rf(event)
 	} else {
 		r0 = ret.Error(0)

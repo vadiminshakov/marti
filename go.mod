@@ -6,6 +6,7 @@ require (
 	github.com/adshao/go-binance/v2 v2.8.2
 	github.com/bytedance/gopkg v0.1.3
 	github.com/charmbracelet/huh v0.8.0
+	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/cinar/indicator/v2 v2.1.22
 	github.com/ethereum/go-ethereum v1.16.7
 	github.com/hirokisan/bybit/v2 v2.36.0
@@ -13,7 +14,7 @@ require (
 	github.com/shopspring/decimal v1.4.0
 	github.com/sonirico/go-hyperliquid v0.22.0
 	github.com/stretchr/testify v1.11.1
-	github.com/vadiminshakov/gowal v0.0.4
+	github.com/vadiminshakov/gowal v0.0.6-0.20260421214922-fc7a287fbd95
 	go.uber.org/zap v1.24.0
 	golang.org/x/crypto v0.45.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -29,7 +30,6 @@ require (
 	github.com/charmbracelet/bubbles v0.21.1-0.20250623103423-23b8fd6302d7 // indirect
 	github.com/charmbracelet/bubbletea v1.3.6 // indirect
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect
-	github.com/charmbracelet/lipgloss v1.1.0 // indirect
 	github.com/charmbracelet/x/ansi v0.9.3 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.13 // indirect
 	github.com/charmbracelet/x/exp/strings v0.0.0-20240722160745-212f7b056ed0 // indirect
