@@ -87,19 +87,41 @@ const normalizeModel = (value) => {
 };
 
 const dcaGroupPrefix = 'DCA:';
+const martingaleGroupPrefix = 'Martingale:';
 
 const buildAggregateKey = (model, pair) => {
   if (model === 'DCA') {
     return `${dcaGroupPrefix}${pair || '—'}`;
   }
+  if (model === 'Martingale') {
+    return `${martingaleGroupPrefix}${pair || '—'}`;
+  }
   return model || '—';
 };
 
 const formatAggregateLabel = (aggregateKey) => {
-  if (typeof aggregateKey === 'string' && aggregateKey.startsWith(dcaGroupPrefix)) {
-    return aggregateKey.slice(dcaGroupPrefix.length);
+  if (typeof aggregateKey === 'string') {
+    if (aggregateKey.startsWith(dcaGroupPrefix)) {
+      return aggregateKey.slice(dcaGroupPrefix.length);
+    }
+    if (aggregateKey.startsWith(martingaleGroupPrefix)) {
+      return aggregateKey.slice(martingaleGroupPrefix.length);
+    }
   }
   return shortenModelName(aggregateKey);
+};
+
+const strategyBadgeFromAggregate = (aggregateKey) => {
+  if (typeof aggregateKey !== 'string') {
+    return 'AI';
+  }
+  if (aggregateKey.startsWith(dcaGroupPrefix)) {
+    return 'DCA';
+  }
+  if (aggregateKey.startsWith(martingaleGroupPrefix)) {
+    return 'Martingale';
+  }
+  return 'AI';
 };
 
 const extractQuoteCurrency = (pair) => {
@@ -633,10 +655,13 @@ function ensureModelView(model) {
   const title = document.createElement('h2');
   title.className = 'pair-name';
   title.textContent = formatAggregateLabel(safeModel);
+  const strategyBadge = document.createElement('span');
+  strategyBadge.className = 'pill strategy-badge';
+  strategyBadge.textContent = strategyBadgeFromAggregate(safeModel);
   const updated = document.createElement('span');
   updated.className = 'pill muted';
   updated.textContent = 'Waiting…';
-  labelsWrap.append(title);
+  labelsWrap.append(title, strategyBadge);
   header.append(labelsWrap, updated);
 
   const equity = document.createElement('div');
@@ -895,7 +920,7 @@ let currentFilter = null;
 
 const knownModels = [
   'yandex', 'deepseek', 'qwen', 'moonshot',
-  'openai', 'google', 'anthropic', 'xai', 'dca'
+  'openai', 'google', 'anthropic', 'xai', 'dca', 'martingale'
 ];
 
 function filterDecisions(model) {
@@ -1103,8 +1128,8 @@ function connectAIDecisionSSE() {
       const decision = payload.data;
       const type = payload.type;
 
-      if (type === 'dca') {
-        decision.model = 'DCA';
+      if (type === 'averaging' || type === 'dca') {
+        decision.model = decision.strategy === 'martingale' ? 'Martingale' : 'DCA';
       }
 
       streamState.decisions = 'connected';
@@ -1154,7 +1179,8 @@ function createSetupField(id, label, hint, inputElement) {
 const DEFAULT_PAIR_DATA = {
   strategy: 'dca', platform: 'binance', pair: 'BTC_USDT', marketType: 'spot',
   pollInterval: '5m', amount: '10', maxDcaTrades: '15', buyThreshold: '3.5',
-  sellThreshold: '0.75', apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
+  sellThreshold: '0.75', martingaleMultiplier: '2',
+  apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
   apiKey: '', model: 'deepseek/deepseek-v3-0324', primaryTimeframe: '3m',
   higherTimeframe: '15m', lookbackPeriods: '50', higherLookbackPeriods: '60',
   maxLeverage: '10', leverage: '', llmProxyUrl: '',
@@ -1196,7 +1222,11 @@ function createPairCard(index, data, onRemove, onChange) {
   row1.className = 'setup-row';
 
   const strategySelect = listen(document.createElement('select'));
-  [['dca', 'DCA \u2014 rule-based averaging'], ['ai', 'AI \u2014 LLM-based trading']].forEach(([v, t]) => {
+  [
+    ['dca', 'DCA \u2014 rule-based averaging'],
+    ['martingale', 'Martingale \u2014 DCA with increasing position sizes'],
+    ['ai', 'AI \u2014 LLM-based trading']
+  ].forEach(([v, t]) => {
     const opt = document.createElement('option');
     opt.value = v; opt.textContent = t;
     strategySelect.appendChild(opt);
@@ -1212,7 +1242,7 @@ function createPairCard(index, data, onRemove, onChange) {
   platformSelect.value = data.platform || 'binance';
 
   row1.append(
-    createSetupField('setupStrategy_' + index, 'Strategy', 'Choose between DCA or AI strategy.', strategySelect),
+    createSetupField('setupStrategy_' + index, 'Strategy', 'Choose between DCA, Martingale or AI strategy.', strategySelect),
     createSetupField('setupPlatform_' + index, 'Exchange', 'Binance, Bybit, Hyperliquid or simulation.', platformSelect)
   );
 
@@ -1252,7 +1282,7 @@ function createPairCard(index, data, onRemove, onChange) {
     createSetupField('setupPollInterval_' + index, 'Price check interval', 'How often to fetch price (e.g. 30s, 1m, 5m).', pollInput)
   );
 
-  // DCA settings
+  // DCA / Martingale settings
   const dcaSection = document.createElement('div');
   const group3Title = document.createElement('h3');
   group3Title.className = 'setup-group-title';
@@ -1281,7 +1311,15 @@ function createPairCard(index, data, onRemove, onChange) {
     createSetupField('setupBuyThreshold_' + index, 'Price drop to buy, %', 'New buy when price drops by this percent.', buyThrInput),
     createSetupField('setupSellThreshold_' + index, 'Take-profit %', 'Close position when price rises by this percent.', sellThrInput)
   );
-  dcaSection.append(group3Title, dcaRow1, dcaRow2);
+  const martingaleRow = document.createElement('div');
+  martingaleRow.className = 'setup-row';
+  const multiplierInput = listen(document.createElement('input'));
+  multiplierInput.type = 'text';
+  multiplierInput.value = data.martingaleMultiplier || '2';
+  martingaleRow.append(
+    createSetupField('setupMartingaleMultiplier_' + index, 'Martingale multiplier', 'Each subsequent buy is this many times larger (e.g. 2 means 2\u00D7). Must be > 1.', multiplierInput)
+  );
+  dcaSection.append(group3Title, dcaRow1, dcaRow2, martingaleRow);
 
   // AI settings
   const aiSection = document.createElement('div');
@@ -1398,9 +1436,12 @@ function createPairCard(index, data, onRemove, onChange) {
 
   // Strategy toggle
   const toggleSections = () => {
-    const useAi = strategySelect.value === 'ai';
+    const strategy = strategySelect.value;
+    const useAi = strategy === 'ai';
     dcaSection.style.display = useAi ? 'none' : 'block';
     aiSection.style.display = useAi ? 'block' : 'none';
+    martingaleRow.style.display = strategy === 'martingale' ? 'flex' : 'none';
+    group3Title.textContent = strategy === 'martingale' ? 'Martingale settings' : 'DCA settings';
   };
   strategySelect.addEventListener('change', toggleSections);
   toggleSections();
@@ -1417,6 +1458,7 @@ function createPairCard(index, data, onRemove, onChange) {
     maxDcaTrades: maxTradesInput.value.trim(),
     buyThreshold: buyThrInput.value.trim(),
     sellThreshold: sellThrInput.value.trim(),
+    martingaleMultiplier: multiplierInput.value.trim(),
     apiUrl: apiUrlInput.value.trim(),
     apiKey: apiKeyInput.value,
     model: modelInput.value.trim(),

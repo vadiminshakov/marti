@@ -375,6 +375,13 @@ header {
   border-color: var(--ink-mid);
 }
 
+.pill.strategy-badge {
+  background: var(--ink);
+  color: #fefefe;
+  border-color: var(--ink);
+  font-weight: 700;
+}
+
 .empty-state {
   border: 2px dashed var(--ink-soft);
   padding: 2rem;

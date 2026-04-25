@@ -362,7 +362,7 @@ func (s *Server) handleDecisionStream(w http.ResponseWriter, r *http.Request) {
 				Type string      `json:"type"`
 				Data interface{} `json:"data"`
 			}{
-				Type: string(record.Type), // "ai" or "dca"
+				Type: string(record.Type), // "ai" or "averaging"
 				Data: record.Event,
 			}
 
@@ -548,9 +548,10 @@ type configEntry struct {
 	PollInterval          string `json:"pollInterval"`
 	Amount                string `json:"amount"`
 	MaxDcaTrades          string `json:"maxDcaTrades"`
-	BuyThreshold          string `json:"buyThreshold"`
-	SellThreshold         string `json:"sellThreshold"`
-	APIURL                string `json:"apiUrl"`
+	BuyThreshold         string `json:"buyThreshold"`
+	SellThreshold        string `json:"sellThreshold"`
+	MartingaleMultiplier string `json:"martingaleMultiplier"`
+	APIURL               string `json:"apiUrl"`
 	APIKey                string `json:"apiKey"`
 	Model                 string `json:"model"`
 	PrimaryTimeframe      string `json:"primaryTimeframe"`
@@ -573,9 +574,10 @@ func configTmpToEntry(c config.ConfigTmp, maskSecrets bool) configEntry {
 		PollInterval:          c.PollPriceInterval.String(),
 		Amount:                c.Amount,
 		MaxDcaTrades:          c.MaxDcaTradesStr,
-		BuyThreshold:          c.DcaPercentThresholdBuyStr,
-		SellThreshold:         c.DcaPercentThresholdSellStr,
-		APIURL:                c.LLMAPIURL,
+		BuyThreshold:         c.DcaPercentThresholdBuyStr,
+		SellThreshold:        c.DcaPercentThresholdSellStr,
+		MartingaleMultiplier: c.MartingaleMultiplierStr,
+		APIURL:               c.LLMAPIURL,
 		APIKey:                c.LLMAPIKey,
 		Model:                 c.Model,
 		PrimaryTimeframe:      c.PrimaryTimeframe,
@@ -706,6 +708,12 @@ func (s *Server) handleSetupConfig(w http.ResponseWriter, r *http.Request) {
 			cfgTmp.MaxDcaTradesStr = p.MaxDcaTrades
 			cfgTmp.DcaPercentThresholdBuyStr = p.BuyThreshold
 			cfgTmp.DcaPercentThresholdSellStr = p.SellThreshold
+		case "martingale":
+			cfgTmp.Amount = p.Amount
+			cfgTmp.MaxDcaTradesStr = p.MaxDcaTrades
+			cfgTmp.DcaPercentThresholdBuyStr = p.BuyThreshold
+			cfgTmp.DcaPercentThresholdSellStr = p.SellThreshold
+			cfgTmp.MartingaleMultiplierStr = p.MartingaleMultiplier
 		case "ai":
 			cfgTmp.LLMAPIURL = p.APIURL
 			cfgTmp.LLMAPIKey = p.APIKey
@@ -732,7 +740,7 @@ func (s *Server) handleSetupConfig(w http.ResponseWriter, r *http.Request) {
 				cfgTmp.MaxLeverageStr = "10"
 			}
 		default:
-			http.Error(w, fmt.Sprintf("pair #%d: unsupported strategy (must be 'dca' or 'ai')", i+1), http.StatusBadRequest)
+			http.Error(w, fmt.Sprintf("pair #%d: unsupported strategy (must be 'dca', 'martingale' or 'ai')", i+1), http.StatusBadRequest)
 			return
 		}
 
