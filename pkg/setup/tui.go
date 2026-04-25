@@ -45,22 +45,23 @@ func RunTUI() error {
 	fmt.Println(mutedStyle.Render("  Use ↑/↓ to navigate, Enter to confirm, ESC to go back.\n"))
 
 	var (
-		strategy         = "dca"
-		platform         = "binance"
-		pair             = "BTC_USDT"
-		marketType       = "spot"
-		pollIntervalStr  = "5m"
-		amountStr        = "10"
-		maxDcaTradesStr  = "15"
-		buyThresholdStr  = "3.5"
-		sellThresholdStr = "0.75"
-		apiURL           = "https://openrouter.ai/api/v1/chat/completions"
-		apiKey           string
-		model            = "deepseek/deepseek-v3-0324"
-		primaryTimeframe = "3m"
-		enableTelegram   bool
-		telegramToken    string
-		telegramChatID   string
+		strategy             = "dca"
+		platform             = "binance"
+		pair                 = "BTC_USDT"
+		marketType           = "spot"
+		pollIntervalStr      = "5m"
+		amountStr            = "10"
+		maxDcaTradesStr      = "15"
+		buyThresholdStr      = "3.5"
+		sellThresholdStr     = "0.75"
+		multiplierStr        = "2"
+		apiURL               = "https://openrouter.ai/api/v1/chat/completions"
+		apiKey               string
+		model                = "deepseek/deepseek-v3-0324"
+		primaryTimeframe     = "3m"
+		enableTelegram       bool
+		telegramToken        string
+		telegramChatID       string
 	)
 
 	mainForm := huh.NewForm(
@@ -68,10 +69,11 @@ func RunTUI() error {
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("Trading strategy").
-				Description("DCA: rule-based averaging down. AI: LLM makes buy/sell decisions.").
+				Description("DCA: rule-based averaging down. Martingale: DCA with increasing position sizes. AI: LLM makes buy/sell decisions.").
 				Options(
-					huh.NewOption("DCA  — Dollar-Cost Averaging (recommended for beginners)", "dca"),
-					huh.NewOption("AI   — LLM-based autonomous trading", "ai"),
+					huh.NewOption("DCA        — Dollar-Cost Averaging (recommended for beginners)", "dca"),
+					huh.NewOption("Martingale — DCA with increasing position sizes", "martingale"),
+					huh.NewOption("AI         — LLM-based autonomous trading", "ai"),
 				).
 				Value(&strategy),
 
@@ -148,6 +150,17 @@ func RunTUI() error {
 				Description("Close the position when average entry is exceeded by this % (e.g. 0.75).").
 				Value(&sellThresholdStr).
 				Validate(validatePositiveDecimal),
+
+			huh.NewInput().
+				Title("Martingale multiplier").
+				Description("Each subsequent buy is this many times larger (e.g. 2 means 2×). Only used for Martingale strategy.").
+				Value(&multiplierStr).
+				Validate(func(s string) error {
+					if strategy != "martingale" {
+						return nil
+					}
+					return validatePositiveDecimal(s)
+				}),
 		).WithHideFunc(func() bool { return strategy == "ai" }),
 
 		// ── Group 3b: AI settings (hidden when strategy == "dca") ────────────
@@ -197,7 +210,7 @@ func RunTUI() error {
 					huh.NewOption("1h  — 1 hour", "1h"),
 				).
 				Value(&primaryTimeframe),
-		).WithHideFunc(func() bool { return strategy == "dca" }),
+		).WithHideFunc(func() bool { return strategy == "dca" || strategy == "martingale" }),
 
 		// ── Group 4: Telegram notifications (optional) ────────────────────────
 		huh.NewGroup(
@@ -241,7 +254,7 @@ func RunTUI() error {
 
 	// ── Build summary after all fields are filled ─────────────────────────────
 	summary := buildSummary(strategy, platform, pair, marketType, pollIntervalStr,
-		amountStr, maxDcaTradesStr, buyThresholdStr, sellThresholdStr,
+		amountStr, maxDcaTradesStr, buyThresholdStr, sellThresholdStr, multiplierStr,
 		apiURL, model, primaryTimeframe)
 
 	confirm := true
@@ -281,6 +294,12 @@ func RunTUI() error {
 		cfgTmp.MaxDcaTradesStr = maxDcaTradesStr
 		cfgTmp.DcaPercentThresholdBuyStr = buyThresholdStr
 		cfgTmp.DcaPercentThresholdSellStr = sellThresholdStr
+	case "martingale":
+		cfgTmp.Amount = amountStr
+		cfgTmp.MaxDcaTradesStr = maxDcaTradesStr
+		cfgTmp.DcaPercentThresholdBuyStr = buyThresholdStr
+		cfgTmp.DcaPercentThresholdSellStr = sellThresholdStr
+		cfgTmp.MartingaleMultiplierStr = multiplierStr
 	case "ai":
 		cfgTmp.LLMAPIURL = apiURL
 		cfgTmp.LLMAPIKey = apiKey
@@ -329,7 +348,7 @@ func RunTUI() error {
 // buildSummary returns a human-readable config summary for the confirmation screen.
 // All string arguments are plain values (not format verbs), so % chars are safe.
 func buildSummary(strategy, platform, pair, marketType, pollInterval,
-	amount, maxTrades, buyThr, sellThr,
+	amount, maxTrades, buyThr, sellThr, multiplier,
 	apiURL, model, primaryTF string,
 ) string {
 	base := "Strategy: " + strategy +
@@ -345,6 +364,13 @@ func buildSummary(strategy, platform, pair, marketType, pollInterval,
 			"   Max orders: " + maxTrades +
 			"   Buy at: -" + buyThr + "%" +
 			"   Sell at: +" + sellThr + "%"
+	case "martingale":
+		return base +
+			"Amount: " + amount + "%" +
+			"   Max orders: " + maxTrades +
+			"   Buy at: -" + buyThr + "%" +
+			"   Sell at: +" + sellThr + "%" +
+			"   Multiplier: " + multiplier + "x"
 	case "ai":
 		return base +
 			"Model: " + model +

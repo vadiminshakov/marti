@@ -40,6 +40,10 @@ type Config struct {
 	DcaPercentThresholdBuy decimal.Decimal
 	// DcaPercentThresholdSell triggers sell when percent rise reached.
 	DcaPercentThresholdSell decimal.Decimal
+	// MartingaleMultiplier is the position-size multiplier for Martingale strategy.
+	// Each subsequent buy is MartingaleMultiplier times larger than the previous one.
+	// Must be > 1. Default 2.
+	MartingaleMultiplier decimal.Decimal
 
 	// LLMAPIURL endpoint for LLM service.
 	LLMAPIURL string
@@ -102,6 +106,7 @@ type ConfigTmp struct {
 	MaxDcaTradesStr            string `yaml:"max_dca_trades,omitempty"`
 	DcaPercentThresholdBuyStr  string `yaml:"dca_percent_threshold_buy,omitempty"`
 	DcaPercentThresholdSellStr string `yaml:"dca_percent_threshold_sell,omitempty"`
+	MartingaleMultiplierStr   string `yaml:"martingale_multiplier,omitempty"`
 
 	// AI strategy fields
 	LLMAPIURL                 string `yaml:"llm_api_url,omitempty"`
@@ -245,12 +250,16 @@ func parseConfig(c ConfigTmp) (*Config, error) {
 		if err := parseDCAConfig(&c, newConfig); err != nil {
 			return nil, err
 		}
+	case "martingale":
+		if err := parseMartingaleConfig(&c, newConfig); err != nil {
+			return nil, err
+		}
 	case "ai":
 		if err := parseAIConfig(&c, newConfig); err != nil {
 			return nil, err
 		}
 	default:
-		return nil, fmt.Errorf("unsupported strategy type: %s (must be 'dca' or 'ai')", strategyType)
+		return nil, fmt.Errorf("unsupported strategy type: %s (must be 'dca', 'martingale' or 'ai')", strategyType)
 	}
 
 	return newConfig, nil
@@ -298,6 +307,28 @@ func parseDCAConfig(c *ConfigTmp, cfg *Config) error {
 		}
 		cfg.DcaPercentThresholdSell = sellThreshold
 	}
+	return nil
+}
+
+func parseMartingaleConfig(c *ConfigTmp, cfg *Config) error {
+	// Martingale shares all DCA fields (amount, max trades, thresholds).
+	if err := parseDCAConfig(c, cfg); err != nil {
+		return err
+	}
+
+	if c.MartingaleMultiplierStr == "" {
+		cfg.MartingaleMultiplier = decimal.NewFromInt(2)
+	} else {
+		mult, err := decimal.NewFromString(c.MartingaleMultiplierStr)
+		if err != nil {
+			return errors.Wrap(err, "incorrect 'martingale_multiplier' param in yaml config (must be a decimal)")
+		}
+		if mult.LessThanOrEqual(decimal.NewFromInt(1)) {
+			return fmt.Errorf("martingale_multiplier must be greater than 1, got %s", mult.String())
+		}
+		cfg.MartingaleMultiplier = mult
+	}
+
 	return nil
 }
 
