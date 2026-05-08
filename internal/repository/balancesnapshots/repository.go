@@ -72,7 +72,7 @@ func (s *WALStore) Save(snapshot domain.BalanceSnapshot) error {
 	defer s.mu.Unlock()
 
 	nextIndex := s.wal.CurrentIndex() + 1
-	return s.wal.Write(nextIndex, key, payload)
+	return s.wal.Write(gowal.Record{Index: nextIndex, Key: key, Value: payload})
 }
 
 // SnapshotsAfter returns all balance snapshots written after the provided WAL index.
@@ -91,12 +91,12 @@ func (s *WALStore) SnapshotsAfter(index uint64) ([]domain.BalanceSnapshotRecord,
 
 	records := make([]domain.BalanceSnapshotRecord, 0, current-index)
 	for idx := index + 1; idx <= current; idx++ {
-		key, payload, err := s.wal.Get(idx)
-		if err != nil || !strings.HasPrefix(key, snapshotKeyPrefix) {
+		record, err := s.wal.Get(idx)
+		if err != nil || !strings.HasPrefix(record.Key, snapshotKeyPrefix) {
 			continue
 		}
 		var snapshot domain.BalanceSnapshot
-		if err := json.Unmarshal(payload, &snapshot); err != nil {
+		if err := json.Unmarshal(record.Value, &snapshot); err != nil {
 			return nil, errors.Wrap(err, "decode balance snapshot")
 		}
 		records = append(records, domain.BalanceSnapshotRecord{

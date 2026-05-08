@@ -72,7 +72,7 @@ func (s *WALStore) Save(event domain.AIDecisionEvent) error {
 	defer s.mu.Unlock()
 
 	nextIndex := s.wal.CurrentIndex() + 1
-	return s.wal.Write(nextIndex, key, payload)
+	return s.wal.Write(gowal.Record{Index: nextIndex, Key: key, Value: payload})
 }
 
 // EventsAfter returns all AI decision events written after the provided WAL index.
@@ -91,12 +91,12 @@ func (s *WALStore) EventsAfter(index uint64) ([]domain.AIDecisionEventRecord, er
 
 	records := make([]domain.AIDecisionEventRecord, 0, current-index)
 	for idx := index + 1; idx <= current; idx++ {
-		key, payload, err := s.wal.Get(idx)
-		if err != nil || !strings.HasPrefix(key, aiDecisionKeyPrefix) {
+		record, err := s.wal.Get(idx)
+		if err != nil || !strings.HasPrefix(record.Key, aiDecisionKeyPrefix) {
 			continue
 		}
 		var event domain.AIDecisionEvent
-		if err := json.Unmarshal(payload, &event); err != nil {
+		if err := json.Unmarshal(record.Value, &event); err != nil {
 			return nil, errors.Wrap(err, "decode AI decision event")
 		}
 		records = append(records, domain.AIDecisionEventRecord{

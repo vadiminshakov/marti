@@ -108,9 +108,9 @@ func NewStrategy(
 
 	tradeIntents := make([]*tradeIntentRecord, 0)
 
-	for msg := range wal.Iterator() {
-		if msg.Key == seriesKey {
-			if unmarshalErr := json.Unmarshal(msg.Value, dcaSeries); unmarshalErr != nil {
+	for record := range wal.Iterator() {
+		if record.Key == seriesKey {
+			if unmarshalErr := json.Unmarshal(record.Value, dcaSeries); unmarshalErr != nil {
 				l.Error("failed to unmarshal DCA series", zap.Error(unmarshalErr))
 
 				continue
@@ -124,10 +124,10 @@ func NewStrategy(
 			continue
 		}
 
-		if strings.HasPrefix(msg.Key, tradeIntentKeyPrefix) {
+		if strings.HasPrefix(record.Key, tradeIntentKeyPrefix) {
 			var intent tradeIntentRecord
-			if unmarshalErr := json.Unmarshal(msg.Value, &intent); unmarshalErr != nil {
-				l.Error("failed to unmarshal trade intent", zap.Error(unmarshalErr), zap.String("key", msg.Key))
+			if unmarshalErr := json.Unmarshal(record.Value, &intent); unmarshalErr != nil {
+				l.Error("failed to unmarshal trade intent", zap.Error(unmarshalErr), zap.String("key", record.Key))
 
 				continue
 			}
@@ -643,7 +643,7 @@ func (d *Strategy) saveDCASeries() error {
 	}
 
 	nextIndex := d.wal.CurrentIndex() + 1
-	if err := d.wal.Write(nextIndex, d.seriesKey, data); err != nil {
+	if err := d.wal.Write(gowal.Record{Index: nextIndex, Key: d.seriesKey, Value: data}); err != nil {
 		return errors.Wrap(err, "failed to write DCA series")
 	}
 

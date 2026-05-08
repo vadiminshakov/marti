@@ -77,7 +77,7 @@ func (s *WALStore) SaveAI(event domain.AIDecisionEvent) error {
 	defer s.mu.Unlock()
 
 	nextIndex := s.wal.CurrentIndex() + 1
-	return s.wal.Write(nextIndex, key, payload)
+	return s.wal.Write(gowal.Record{Index: nextIndex, Key: key, Value: payload})
 }
 
 // SaveAveraging writes an averaging-strategy decision event (DCA, Martingale) to WAL.
@@ -100,7 +100,7 @@ func (s *WALStore) SaveAveraging(event domain.AveragingDecisionEvent) error {
 	defer s.mu.Unlock()
 
 	nextIndex := s.wal.CurrentIndex() + 1
-	return s.wal.Write(nextIndex, key, payload)
+	return s.wal.Write(gowal.Record{Index: nextIndex, Key: key, Value: payload})
 }
 
 // EventsAfter returns all decision events written after the provided WAL index.
@@ -119,15 +119,15 @@ func (s *WALStore) EventsAfter(index uint64) ([]domain.DecisionEventRecord, erro
 
 	records := make([]domain.DecisionEventRecord, 0, current-index)
 	for idx := index + 1; idx <= current; idx++ {
-		key, payload, err := s.wal.Get(idx)
+		record, err := s.wal.Get(idx)
 		if err != nil {
 			continue
 		}
 
 		switch {
-		case strings.HasPrefix(key, aiDecisionKeyPrefix):
+		case strings.HasPrefix(record.Key, aiDecisionKeyPrefix):
 			var event domain.AIDecisionEvent
-			if err := json.Unmarshal(payload, &event); err != nil {
+			if err := json.Unmarshal(record.Value, &event); err != nil {
 				return nil, errors.Wrap(err, "decode AI decision event")
 			}
 			records = append(records, domain.DecisionEventRecord{
@@ -135,13 +135,13 @@ func (s *WALStore) EventsAfter(index uint64) ([]domain.DecisionEventRecord, erro
 				Type:  domain.DecisionTypeAI,
 				Event: event,
 			})
-		case strings.HasPrefix(key, averagingDecisionKeyPrefix),
-			strings.HasPrefix(key, legacyDCADecisionKeyPrefix):
+		case strings.HasPrefix(record.Key, averagingDecisionKeyPrefix),
+			strings.HasPrefix(record.Key, legacyDCADecisionKeyPrefix):
 			var event domain.AveragingDecisionEvent
-			if err := json.Unmarshal(payload, &event); err != nil {
+			if err := json.Unmarshal(record.Value, &event); err != nil {
 				return nil, errors.Wrap(err, "decode averaging decision event")
 			}
-			if event.Strategy == "" && strings.HasPrefix(key, legacyDCADecisionKeyPrefix) {
+			if event.Strategy == "" && strings.HasPrefix(record.Key, legacyDCADecisionKeyPrefix) {
 				event.Strategy = "dca"
 			}
 			records = append(records, domain.DecisionEventRecord{

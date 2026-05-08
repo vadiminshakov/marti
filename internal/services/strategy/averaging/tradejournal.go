@@ -129,7 +129,7 @@ func (j *tradeJournal) persist(intent *tradeIntentRecord) error {
 	key := fmt.Sprintf("%s%s", tradeIntentKeyPrefix, intent.ID)
 	nextIndex := j.wal.CurrentIndex() + 1
 
-	if err := j.wal.Write(nextIndex, key, data); err != nil {
+	if err := j.wal.Write(gowal.Record{Index: nextIndex, Key: key, Value: data}); err != nil {
 		return errors.Wrap(err, "failed to write trade intent")
 	}
 
