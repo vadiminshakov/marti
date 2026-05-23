@@ -100,6 +100,33 @@ func (_m *Trader) OrderExecuted(ctx context.Context, clientOrderID string) (bool
 	return r0, r1, r2
 }
 
+// OrderExists provides a mock function with given fields: ctx, clientOrderID
+func (_m *Trader) OrderExists(ctx context.Context, clientOrderID string) (bool, error) {
+	ret := _m.Called(ctx, clientOrderID)
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (bool, error)); ok {
+		return rf(ctx, clientOrderID)
+	}
+	if len(ret) > 0 {
+		if rf, ok := ret.Get(0).(func(context.Context, string) bool); ok {
+			r0 = rf(ctx, clientOrderID)
+		} else {
+			r0 = ret.Bool(0)
+		}
+	}
+	if len(ret) > 1 {
+		if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+			r1 = rf(ctx, clientOrderID)
+		} else {
+			r1 = ret.Error(1)
+		}
+	}
+
+	return r0, r1
+}
+
 // GetBalance provides a mock function with given fields: ctx, currency
 func (_m *Trader) GetBalance(ctx context.Context, currency string) (decimal.Decimal, error) {
 	ret := _m.Called(ctx, currency)

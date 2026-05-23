@@ -237,6 +237,44 @@ func (t *BybitTrader) OrderExecuted(ctx context.Context, clientOrderID string) (
 	return false, decimal.Zero, nil
 }
 
+func (t *BybitTrader) OrderExists(ctx context.Context, clientOrderID string) (bool, error) {
+	orderLinkID := clientOrderID
+	symbol := bybit.SymbolV5(t.pair.Symbol())
+	category := t.mapMarketTypeToCategory()
+
+	openResp, err := t.client.V5().Order().GetOpenOrders(bybit.V5GetOpenOrdersParam{
+		Category:    category,
+		Symbol:      &symbol,
+		OrderLinkID: &orderLinkID,
+	})
+	if err != nil {
+		return false, errors.Wrap(err, "failed to get bybit open orders for existence check")
+	}
+
+	for _, order := range openResp.Result.List {
+		if order.OrderLinkID == clientOrderID {
+			return true, nil
+		}
+	}
+
+	historyResp, err := t.client.V5().Order().GetHistoryOrders(bybit.V5GetHistoryOrdersParam{
+		Category:    category,
+		Symbol:      &symbol,
+		OrderLinkID: &orderLinkID,
+	})
+	if err != nil {
+		return false, errors.Wrap(err, "failed to get bybit order history for existence check")
+	}
+
+	for _, order := range historyResp.Result.List {
+		if order.OrderLinkID == clientOrderID {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 func (t *BybitTrader) GetBalance(ctx context.Context, currency string) (decimal.Decimal, error) {
 	// choose the correct account type based on market type
 	accountType := bybit.AccountTypeV5SPOT

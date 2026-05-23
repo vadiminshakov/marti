@@ -148,6 +148,24 @@ func (t *HyperliquidTrader) OrderExecuted(ctx context.Context, clientOrderID str
 	}
 }
 
+func (t *HyperliquidTrader) OrderExists(ctx context.Context, clientOrderID string) (bool, error) {
+	if clientOrderID == "" {
+		return false, nil
+	}
+
+	cloid := t.cloidFromID(clientOrderID)
+	res, err := t.info.QueryOrderByCloid(ctx, t.accountAddr, cloid)
+	if err != nil {
+		return false, errors.Wrap(err, "query order existence by cloid")
+	}
+
+	if res == nil || res.Status != hyperliquid.OrderQueryStatusSuccess {
+		return false, nil
+	}
+
+	return true, nil
+}
+
 func (t *HyperliquidTrader) GetBalance(ctx context.Context, currency string) (decimal.Decimal, error) {
 	if t.marketType == domain.MarketTypeMargin {
 		// margin: approximate quote as total account value in USD; base is not modeled

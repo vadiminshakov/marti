@@ -20,6 +20,7 @@ import (
 type traderService interface {
 	ExecuteAction(ctx context.Context, action entity.Action, amount decimal.Decimal, clientOrderID string) error
 	OrderExecuted(ctx context.Context, clientOrderID string) (bool, decimal.Decimal, error)
+	OrderExists(ctx context.Context, clientOrderID string) (bool, error)
 	GetBalance(ctx context.Context, currency string) (decimal.Decimal, error)
 	GetPosition(ctx context.Context, pair entity.Pair) (*entity.Position, error)
 	SetPositionStops(ctx context.Context, pair entity.Pair, takeProfit, stopLoss decimal.Decimal) error

@@ -129,6 +129,31 @@ func (t *BinanceTrader) OrderExecuted(ctx context.Context, clientOrderID string)
 	}
 }
 
+func (t *BinanceTrader) OrderExists(ctx context.Context, clientOrderID string) (bool, error) {
+	var err error
+
+	if t.marketType == domain.MarketTypeMargin {
+		_, err = t.client.NewGetMarginOrderService().
+			Symbol(t.pair.Symbol()).
+			OrigClientOrderID(clientOrderID).
+			Do(ctx)
+	} else {
+		_, err = t.client.NewGetOrderService().
+			Symbol(t.pair.Symbol()).
+			OrigClientOrderID(clientOrderID).
+			Do(ctx)
+	}
+
+	if err != nil {
+		if apiErr, ok := err.(*common.APIError); ok && apiErr.Code == -2013 {
+			return false, nil
+		}
+		return false, errors.Wrap(err, "failed to query binance order existence")
+	}
+
+	return true, nil
+}
+
 func (t *BinanceTrader) GetBalance(ctx context.Context, currency string) (decimal.Decimal, error) {
 	if t.marketType == domain.MarketTypeMargin {
 		// get margin account balance

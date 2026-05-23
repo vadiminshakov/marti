@@ -172,6 +172,14 @@ func (t *traderCsv) GetPosition(ctx context.Context, pair domain.Pair) (*domain.
 	return nil, nil
 }
 
+func (t *traderCsv) OrderExists(_ context.Context, clientOrderID string) (bool, error) {
+	if t.executed == nil {
+		return false, nil
+	}
+	_, ok := t.executed[clientOrderID]
+	return ok, nil
+}
+
 // ExecuteAction routes the action to Buy/Sell methods for testing.
 func (t *traderCsv) ExecuteAction(ctx context.Context, action domain.Action, amount decimal.Decimal, clientOrderID string) error {
 	switch action {

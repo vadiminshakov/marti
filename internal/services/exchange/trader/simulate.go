@@ -113,6 +113,13 @@ func (t *SimulateTrader) OrderExecuted(ctx context.Context, id string) (bool, de
 	return true, o.amount, nil
 }
 
+func (t *SimulateTrader) OrderExists(_ context.Context, id string) (bool, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	_, ok := t.orders[id]
+	return ok, nil
+}
+
 func (t *SimulateTrader) GetBalance(ctx context.Context, currency string) (decimal.Decimal, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
