@@ -12,10 +12,11 @@ import (
 )
 
 const (
-	tradeIntentKeyPrefix     = "dca_trade_intent_"
-	tradeIntentStatusPending = "pending"
-	tradeIntentStatusDone    = "done"
-	tradeIntentStatusFailed  = "failed"
+	tradeIntentKeyPrefix      = "dca_trade_intent_"
+	tradeIntentStatusPrepare  = "prepare"
+	tradeIntentStatusPending  = "pending"
+	tradeIntentStatusDone     = "done"
+	tradeIntentStatusFailed   = "failed"
 )
 
 type tradeIntentAction string
@@ -107,7 +108,7 @@ func newTradeJournal(wal *gowal.Wal, intents []*tradeIntentRecord) *tradeJournal
 func (j *tradeJournal) Prepare(action tradeIntentAction, price, amountQuote, amountBase decimal.Decimal, eventTime time.Time, tradePart int, isFullSell bool) (*tradeIntentRecord, error) {
 	intent := &tradeIntentRecord{
 		ID:         uuid.New().String(),
-		Status:     tradeIntentStatusPending,
+		Status:     tradeIntentStatusPrepare,
 		Action:     action,
 		Amount:     amountQuote,
 		BaseAmount: amountBase,
@@ -125,6 +126,19 @@ func (j *tradeJournal) Prepare(action tradeIntentAction, price, amountQuote, amo
 	j.index[intent.ID] = intent
 
 	return intent, nil
+}
+
+// MarkSubmitted transitions the intent from "prepare" to "pending", meaning the
+// order has been successfully sent to the exchange and is now awaiting execution.
+// Called immediately after ExecuteAction returns nil.
+func (j *tradeJournal) MarkSubmitted(intent *tradeIntentRecord) error {
+	if intent == nil {
+		return nil
+	}
+
+	intent.Status = tradeIntentStatusPending
+
+	return j.persist(intent)
 }
 
 // MarkFailed sets the intent status to "failed", records the error message, and

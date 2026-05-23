@@ -317,6 +317,76 @@ func TestStrategy_ReconcileMultiplePendingIntents(t *testing.T) {
 	require.True(t, ts.cycle.TotalAmount.Equal(testBuyAmount.Mul(decimal.NewFromInt(3))), "total should be sum of all purchases")
 }
 
+// TestStrategy_ReconcilePrepareIntentNeverSubmitted verifies that an intent in
+// "prepare" status where the exchange has no record of the order is marked failed
+// without polling OrderExecuted at all.
+func TestStrategy_ReconcilePrepareIntentNeverSubmitted(t *testing.T) {
+	mockPricer := pricerMock.NewPricer(t)
+	mockTrader := traderMock.NewTrader(t)
+	mockStandardBalances(mockTrader)
+
+	ts, _ := createTestStrategy(t, mockPricer, mockTrader)
+	defer ts.Close()
+
+	intent := &tradeIntentRecord{
+		ID:        "intent-never-submitted",
+		Status:    tradeIntentStatusPrepare,
+		Action:    intentActionBuy,
+		Amount:    testBuyAmount,
+		Price:     decimal.NewFromInt(48000),
+		Time:      time.Now(),
+		TradePart: 1,
+	}
+	ts.journal.intents = append(ts.journal.intents, intent)
+	ts.journal.index[intent.ID] = intent
+
+	// exchange has no record of this order
+	mockTrader.On("OrderExists", mock.Anything, intent.ID).Return(false, nil).Once()
+	// OrderExecuted must NOT be called — testify mock will fail the test if it is
+
+	err := ts.reconcileTradeIntents(context.Background())
+	require.NoError(t, err)
+
+	require.Equal(t, tradeIntentStatusFailed, ts.journal.index[intent.ID].Status, "pre-submit intent should be marked failed")
+	require.Len(t, ts.cycle.Purchases, 0, "no purchase should be added for a never-submitted intent")
+	require.False(t, ts.isTradeProcessed(intent.ID), "intent should not be marked processed")
+}
+
+// TestStrategy_ReconcilePrepareIntentSubmittedButCrashed verifies that an intent
+// in "prepare" status where the exchange DOES have the order (crash after
+// ExecuteAction, before MarkSubmitted) is promoted to pending and its fill applied.
+func TestStrategy_ReconcilePrepareIntentSubmittedButCrashed(t *testing.T) {
+	mockPricer := pricerMock.NewPricer(t)
+	mockTrader := traderMock.NewTrader(t)
+	mockStandardBalances(mockTrader)
+
+	ts, _ := createTestStrategy(t, mockPricer, mockTrader)
+	defer ts.Close()
+
+	intent := &tradeIntentRecord{
+		ID:        "intent-submitted-crashed",
+		Status:    tradeIntentStatusPrepare,
+		Action:    intentActionBuy,
+		Amount:    testBuyAmount,
+		Price:     decimal.NewFromInt(48000),
+		Time:      time.Now(),
+		TradePart: 1,
+	}
+	ts.journal.intents = append(ts.journal.intents, intent)
+	ts.journal.index[intent.ID] = intent
+
+	filledBaseAmount := testBuyAmount.Div(intent.Price)
+	mockTrader.On("OrderExists", mock.Anything, intent.ID).Return(true, nil).Once()
+	mockTrader.On("OrderExecuted", mock.Anything, intent.ID).Return(true, filledBaseAmount, nil).Once()
+
+	err := ts.reconcileTradeIntents(context.Background())
+	require.NoError(t, err)
+
+	require.Equal(t, tradeIntentStatusDone, ts.journal.index[intent.ID].Status, "intent promoted from prepare should be marked done after fill")
+	require.Len(t, ts.cycle.Purchases, 1, "fill should be applied to cycle")
+	require.True(t, ts.isTradeProcessed(intent.ID), "intent should be marked processed")
+}
+
 func TestStrategy_ReconcilePartialSellLeadingToZeroBalance(t *testing.T) {
 	mockPricer := pricerMock.NewPricer(t)
 	mockTrader := traderMock.NewTrader(t)

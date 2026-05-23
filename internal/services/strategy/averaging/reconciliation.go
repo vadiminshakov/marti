@@ -28,7 +28,7 @@ func (d *Strategy) reconcileTradeIntents(ctx context.Context) error {
 	pending := make([]*tradeIntentRecord, 0, len(intents))
 
 	for _, it := range intents {
-		if it != nil && it.Status == tradeIntentStatusPending {
+		if it != nil && (it.Status == tradeIntentStatusPending || it.Status == tradeIntentStatusPrepare) {
 			pending = append(pending, it)
 		}
 	}
@@ -64,6 +64,32 @@ func (d *Strategy) reconcileTradeIntents(ctx context.Context) error {
 // The polling loop blocks the caller and respects ctx cancellation.  Each
 // iteration sleeps for orderCheckInterval before re-querying the exchange.
 func (d *Strategy) processPendingIntent(ctx context.Context, intent *tradeIntentRecord) error {
+	// intent is in "prepare" state: ExecuteAction may or may not have been called
+	// before the crash. Ask the exchange to resolve the ambiguity.
+	if intent.Status == tradeIntentStatusPrepare {
+		exists, err := d.trader.OrderExists(ctx, intent.ID)
+		if err != nil {
+			return errors.Wrapf(err, "failed to check order existence for prepare intent %s", intent.ID)
+		}
+
+		if !exists {
+			// order was never sent — safe to mark failed; next Trade tick creates a new one.
+			d.l.Warn("Intent never submitted to exchange, marking failed",
+				zap.String("intent_id", intent.ID),
+				zap.String("action", string(intent.Action)))
+
+			return d.journal.MarkFailed(intent, errors.New("order never submitted to exchange (pre-submit crash)"))
+		}
+
+		// order exists on exchange — promote to pending and fall through to normal poll.
+		d.l.Info("Prepare intent found on exchange, promoting to pending",
+			zap.String("intent_id", intent.ID))
+
+		if err := d.journal.MarkSubmitted(intent); err != nil {
+			return errors.Wrapf(err, "failed to promote prepare intent %s to pending", intent.ID)
+		}
+	}
+
 	// if already applied to series, ensure journal reflects done and return
 	if d.isTradeProcessed(intent.ID) {
 		_ = d.journal.MarkDone(intent)

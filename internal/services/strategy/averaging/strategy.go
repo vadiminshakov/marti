@@ -35,6 +35,10 @@ type Tradersvc interface {
 	// OrderExecuted checks if an order is fully executed.
 	// Returns filledAmount in BASE currency (e.g., how many BTC were bought/sold).
 	OrderExecuted(ctx context.Context, clientOrderID string) (executed bool, filledAmount decimal.Decimal, err error)
+	// OrderExists reports whether an order with clientOrderID exists on the exchange
+	// (open, partially filled, filled, or cancelled). Returns false only when the
+	// exchange definitively has no record of the order.
+	OrderExists(ctx context.Context, clientOrderID string) (bool, error)
 	GetBalance(ctx context.Context, currency string) (decimal.Decimal, error)
 	GetPosition(ctx context.Context, pair entity.Pair) (*entity.Position, error)
 }
@@ -300,6 +304,10 @@ func (d *Strategy) Initialize(ctx context.Context) error {
 		d.l.Error("Initial buy execution failed", zap.Error(err))
 
 		return errors.Wrapf(err, "initial buy execution failed for %s", d.pair.String())
+	}
+
+	if err := d.journal.MarkSubmitted(intent); err != nil {
+		return errors.Wrap(err, "failed to mark initial buy intent as submitted")
 	}
 
 	if err := d.AddPurchase(intent.ID, currentPrice, initialBuyQuoteAmount, operationTime, 1); err != nil {
@@ -573,6 +581,10 @@ func (d *Strategy) executeBuy(ctx context.Context, price decimal.Decimal) (*enti
 		return nil, errors.Wrapf(err, "trader buy failed for pair %s with base amount %s", d.pair.String(), buyBaseAmount.String())
 	}
 
+	if err := d.journal.MarkSubmitted(intent); err != nil {
+		return nil, errors.Wrap(err, "failed to mark buy intent as submitted")
+	}
+
 	if err := d.AddPurchase(intent.ID, price, buyQuoteAmount, operationTime, tradePartValue); err != nil {
 		d.l.Error("failed to save DCA purchase",
 			zap.Error(err),
@@ -653,6 +665,10 @@ func (d *Strategy) executeSell(ctx context.Context, price decimal.Decimal, sell 
 		d.markIntentFailed(intent, err)
 
 		return nil, errors.Wrapf(err, "trader sell failed for pair %s, amount %s", d.pair.String(), amountBaseCurrency.String())
+	}
+
+	if err := d.journal.MarkSubmitted(intent); err != nil {
+		return nil, errors.Wrap(err, "failed to mark sell intent as submitted")
 	}
 
 	if err := d.applyExecutedSell(intent); err != nil {
