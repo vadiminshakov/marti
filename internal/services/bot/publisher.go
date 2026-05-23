@@ -81,8 +81,8 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 	}
 
 	if b.Config.MarketType == entity.MarketTypeSpot {
-		if provider, ok := b.tradingStrategy.(dcaCostBasisProvider); ok {
-			avgPrice, amt := provider.GetDcaCostBasis()
+		if provider, ok := b.tradingStrategy.(costBasisProvider); ok {
+			avgPrice, amt := provider.GetCostBasis()
 			if amt.GreaterThan(decimal.Zero) && avgPrice.GreaterThan(decimal.Zero) {
 				entryPrice = avgPrice.String()
 				positionAmount = amt.String()

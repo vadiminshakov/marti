@@ -10,8 +10,8 @@ import (
 )
 
 func TestShouldBuyAtPrice_EmptySeries(t *testing.T) {
-	series := NewDCASeries()
-	thresholds := DCAThresholds{
+	series := NewAveragingSeries()
+	thresholds := AveragingThresholds{
 		BuyThresholdPercent:  decimal.NewFromInt(5),
 		SellThresholdPercent: decimal.NewFromInt(10),
 		MaxTrades:            5,
@@ -25,12 +25,12 @@ func TestShouldBuyAtPrice_EmptySeries(t *testing.T) {
 }
 
 func TestShouldBuyAtPrice_NoLastBuyPrice(t *testing.T) {
-	series := NewDCASeries()
+	series := NewAveragingSeries()
 	require.NoError(t, series.AddPurchase("buy1", decimal.NewFromInt(100), decimal.NewFromInt(1000), time.Now(), 1))
 
 	series.LastBuyPrice = decimal.Zero
 
-	thresholds := DCAThresholds{
+	thresholds := AveragingThresholds{
 		BuyThresholdPercent:  decimal.NewFromInt(5),
 		SellThresholdPercent: decimal.NewFromInt(10),
 		MaxTrades:            5,
@@ -44,10 +44,10 @@ func TestShouldBuyAtPrice_NoLastBuyPrice(t *testing.T) {
 }
 
 func TestShouldBuyAtPrice_DipBelowLastBuy(t *testing.T) {
-	series := NewDCASeries()
+	series := NewAveragingSeries()
 	require.NoError(t, series.AddPurchase("buy1", decimal.NewFromInt(100), decimal.NewFromInt(1000), time.Now(), 1))
 
-	thresholds := DCAThresholds{
+	thresholds := AveragingThresholds{
 		BuyThresholdPercent:  decimal.NewFromInt(5), // 5% dip required
 		SellThresholdPercent: decimal.NewFromInt(10),
 		MaxTrades:            5,
@@ -62,10 +62,10 @@ func TestShouldBuyAtPrice_DipBelowLastBuy(t *testing.T) {
 }
 
 func TestShouldBuyAtPrice_NoDipBelowLastBuy(t *testing.T) {
-	series := NewDCASeries()
+	series := NewAveragingSeries()
 	require.NoError(t, series.AddPurchase("buy1", decimal.NewFromInt(100), decimal.NewFromInt(1000), time.Now(), 1))
 
-	thresholds := DCAThresholds{
+	thresholds := AveragingThresholds{
 		BuyThresholdPercent:  decimal.NewFromInt(5), // 5% dip required
 		SellThresholdPercent: decimal.NewFromInt(10),
 		MaxTrades:            5,
@@ -80,10 +80,10 @@ func TestShouldBuyAtPrice_NoDipBelowLastBuy(t *testing.T) {
 }
 
 func TestShouldBuyAtPrice_PriceNotBelowLastBuy(t *testing.T) {
-	series := NewDCASeries()
+	series := NewAveragingSeries()
 	require.NoError(t, series.AddPurchase("buy1", decimal.NewFromInt(100), decimal.NewFromInt(1000), time.Now(), 1))
 
-	thresholds := DCAThresholds{
+	thresholds := AveragingThresholds{
 		BuyThresholdPercent:  decimal.NewFromInt(5),
 		SellThresholdPercent: decimal.NewFromInt(10),
 		MaxTrades:            5,
@@ -98,7 +98,7 @@ func TestShouldBuyAtPrice_PriceNotBelowLastBuy(t *testing.T) {
 }
 
 func TestShouldBuyAtPrice_MaxTradesReached(t *testing.T) {
-	series := NewDCASeries()
+	series := NewAveragingSeries()
 	// Add 5 purchases (maxTrades = 5)
 	for i := 1; i <= 5; i++ {
 		price := decimal.NewFromInt(100 - int64(5*i))
@@ -111,7 +111,7 @@ func TestShouldBuyAtPrice_MaxTradesReached(t *testing.T) {
 		))
 	}
 
-	thresholds := DCAThresholds{
+	thresholds := AveragingThresholds{
 		BuyThresholdPercent:  decimal.NewFromInt(5),
 		SellThresholdPercent: decimal.NewFromInt(10),
 		MaxTrades:            5,
@@ -126,10 +126,10 @@ func TestShouldBuyAtPrice_MaxTradesReached(t *testing.T) {
 }
 
 func TestShouldTakeProfitAtPrice_FirstSellFromAvg(t *testing.T) {
-	series := NewDCASeries()
+	series := NewAveragingSeries()
 	require.NoError(t, series.AddPurchase("buy1", decimal.NewFromInt(100), decimal.NewFromInt(1000), time.Now(), 1))
 
-	thresholds := DCAThresholds{
+	thresholds := AveragingThresholds{
 		BuyThresholdPercent:  decimal.NewFromInt(5),
 		SellThresholdPercent: decimal.NewFromInt(10), // 10% gain required
 		MaxTrades:            5,
@@ -149,14 +149,14 @@ func TestShouldTakeProfitAtPrice_FirstSellFromAvg(t *testing.T) {
 }
 
 func TestShouldTakeProfitAtPrice_SecondSellFromLastSell(t *testing.T) {
-	series := NewDCASeries()
+	series := NewAveragingSeries()
 	require.NoError(t, series.AddPurchase("buy1", decimal.NewFromInt(100), decimal.NewFromInt(1000), time.Now(), 1))
 	require.NoError(t, series.AddPurchase("buy2", decimal.NewFromInt(95), decimal.NewFromInt(1000), time.Now(), 2))
 
 	// Simulate first sell: set LastSellPrice
 	series.LastSellPrice, _ = decimal.NewFromString("110")
 
-	thresholds := DCAThresholds{
+	thresholds := AveragingThresholds{
 		BuyThresholdPercent:  decimal.NewFromInt(5),
 		SellThresholdPercent: decimal.NewFromInt(10),
 		MaxTrades:            5,
@@ -180,10 +180,10 @@ func TestShouldTakeProfitAtPrice_SecondSellFromLastSell(t *testing.T) {
 }
 
 func TestShouldTakeProfitAtPrice_NoGainAboveAvg(t *testing.T) {
-	series := NewDCASeries()
+	series := NewAveragingSeries()
 	require.NoError(t, series.AddPurchase("buy1", decimal.NewFromInt(100), decimal.NewFromInt(1000), time.Now(), 1))
 
-	thresholds := DCAThresholds{
+	thresholds := AveragingThresholds{
 		BuyThresholdPercent:  decimal.NewFromInt(5),
 		SellThresholdPercent: decimal.NewFromInt(10),
 		MaxTrades:            5,
@@ -198,10 +198,10 @@ func TestShouldTakeProfitAtPrice_NoGainAboveAvg(t *testing.T) {
 }
 
 func TestShouldTakeProfitAtPrice_FullSellByCap(t *testing.T) {
-	series := NewDCASeries()
+	series := NewAveragingSeries()
 	require.NoError(t, series.AddPurchase("buy1", decimal.NewFromInt(100), decimal.NewFromInt(1000), time.Now(), 1))
 
-	thresholds := DCAThresholds{
+	thresholds := AveragingThresholds{
 		BuyThresholdPercent:  decimal.NewFromInt(5),
 		SellThresholdPercent: decimal.NewFromInt(10),
 		MaxTrades:            5,
@@ -217,10 +217,10 @@ func TestShouldTakeProfitAtPrice_FullSellByCap(t *testing.T) {
 }
 
 func TestShouldTakeProfitAtPrice_NotEnoughGain(t *testing.T) {
-	series := NewDCASeries()
+	series := NewAveragingSeries()
 	require.NoError(t, series.AddPurchase("buy1", decimal.NewFromInt(100), decimal.NewFromInt(1000), time.Now(), 1))
 
-	thresholds := DCAThresholds{
+	thresholds := AveragingThresholds{
 		BuyThresholdPercent:  decimal.NewFromInt(5),
 		SellThresholdPercent: decimal.NewFromInt(10),
 		MaxTrades:            5,
@@ -235,7 +235,7 @@ func TestShouldTakeProfitAtPrice_NotEnoughGain(t *testing.T) {
 }
 
 func TestAddPurchase_UpdatesLastBuyPrice(t *testing.T) {
-	series := NewDCASeries()
+	series := NewAveragingSeries()
 
 	price1 := decimal.NewFromInt(100)
 	require.NoError(t, series.AddPurchase("buy1", price1, decimal.NewFromInt(1000), time.Now(), 1))
@@ -252,13 +252,13 @@ func TestAddPurchase_UpdatesLastBuyPrice(t *testing.T) {
 
 func TestCurrentSellTradePart(t *testing.T) {
 	t.Run("empty series", func(t *testing.T) {
-		series := NewDCASeries()
+		series := NewAveragingSeries()
 
 		require.Equal(t, 0, series.CurrentSellTradePart())
 	})
 
 	t.Run("returns last purchase trade part", func(t *testing.T) {
-		series := NewDCASeries()
+		series := NewAveragingSeries()
 
 		require.NoError(t, series.AddPurchase("buy1", decimal.NewFromInt(100), decimal.NewFromInt(1000), time.Now(), 1))
 		require.NoError(t, series.AddPurchase("buy2", decimal.NewFromInt(95), decimal.NewFromInt(1000), time.Now(), 2))
@@ -301,7 +301,7 @@ func TestCalculateSellAmountInternal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			series := NewDCASeries()
+			series := NewAveragingSeries()
 			for i := 0; i < tt.purchases; i++ {
 				require.NoError(t, series.AddPurchase(fmt.Sprintf("buy%d", i+1), tt.prices[i], tt.amounts[i], time.Now(), i+1))
 			}

@@ -20,9 +20,9 @@ func NewDCAStrategy(
 	pricer averaging.Pricer,
 	trader averaging.Tradersvc,
 	recorder averaging.DecisionRecorder,
-	maxDcaTrades int,
-	dcaPercentThresholdBuy decimal.Decimal,
-	dcaPercentThresholdSell decimal.Decimal,
+	maxTrades int,
+	percentThresholdBuy decimal.Decimal,
+	percentThresholdSell decimal.Decimal,
 ) (*averaging.Strategy, error) {
 	return averaging.NewStrategy(
 		l,
@@ -32,9 +32,9 @@ func NewDCAStrategy(
 		pricer,
 		trader,
 		recorder,
-		maxDcaTrades,
-		dcaPercentThresholdBuy,
-		dcaPercentThresholdSell,
+		maxTrades,
+		percentThresholdBuy,
+		percentThresholdSell,
 		averaging.EqualSizer,
 		"dca",
 	)

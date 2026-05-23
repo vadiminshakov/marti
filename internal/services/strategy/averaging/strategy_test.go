@@ -62,7 +62,7 @@ func createStrategyWithWALDir(l *zap.Logger, pair domain.Pair, amountPercent dec
 	}
 
 	stateKey := sanitizeStateKey(pair.String())
-	seriesKey := fmt.Sprintf("%s%s", dcaSeriesKeyPrefix, stateKey)
+	seriesKey := fmt.Sprintf("%s%s", seriesKeyPrefix, stateKey)
 
 	walCfg := gowal.Config{
 		Dir:              walDir,
@@ -77,9 +77,9 @@ func createStrategyWithWALDir(l *zap.Logger, pair domain.Pair, amountPercent dec
 		return nil, fmt.Errorf("failed to create WAL: %w", err)
 	}
 
-	dcaSeries := domain.NewDCASeries()
+	dcaSeries := domain.NewAveragingSeries()
 
-	thresholds, err := domain.NewDCAThresholds(dcaPercentThresholdBuy, dcaPercentThresholdSell, maxDcaTrades)
+	thresholds, err := domain.NewAveragingThresholds(dcaPercentThresholdBuy, dcaPercentThresholdSell, maxDcaTrades)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create thresholds: %w", err)
 	}
@@ -96,7 +96,7 @@ func createStrategyWithWALDir(l *zap.Logger, pair domain.Pair, amountPercent dec
 		l:                  l,
 		wal:                wal,
 		journal:            newTradeJournal(wal, []*tradeIntentRecord{}),
-		dcaSeries:          dcaSeries,
+		series:             dcaSeries,
 		thresholds:         &thresholdsCopy,
 		orderCheckInterval: time.Millisecond,
 		seriesKey:          seriesKey,
@@ -124,7 +124,7 @@ func TestStrategy_Initialize(t *testing.T) {
 	ctx := context.Background()
 	err := ts.Initialize(ctx)
 	require.NoError(t, err, "Initialize should succeed")
-	require.Equal(t, 1, len(ts.GetDCASeries().Purchases), "Should have one purchase after initialize")
+	require.Equal(t, 1, len(ts.GetSeries().Purchases), "Should have one purchase after initialize")
 }
 
 func TestStrategy_Trade_NoPriceData(t *testing.T) {
@@ -227,7 +227,7 @@ func TestStrategy_Trade_DCABuy_PriceSignificantlyLower(t *testing.T) {
 	recorder.On("SaveAveraging", mock.Anything).Return(nil)
 	defer ts.Close()
 
-	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 1)
+	err := ts.AddPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 1)
 	require.NoError(t, err, "Failed to add initial DCA purchase")
 
 	ts.tradePart = decimal.NewFromInt(1)
@@ -251,13 +251,13 @@ func TestStrategy_Trade_DCABuy_MaxTradesReached(t *testing.T) {
 	defer ts.Close()
 
 	// add 4 purchases to reach max trades (maxDcaTrades = 4)
-	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 1)
+	err := ts.AddPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 1)
 	require.NoError(t, err)
-	err = ts.AddDCAPurchase("", decimal.NewFromInt(49000), decimal.NewFromInt(1000), time.Now(), 2)
+	err = ts.AddPurchase("", decimal.NewFromInt(49000), decimal.NewFromInt(1000), time.Now(), 2)
 	require.NoError(t, err)
-	err = ts.AddDCAPurchase("", decimal.NewFromInt(48000), decimal.NewFromInt(1000), time.Now(), 3)
+	err = ts.AddPurchase("", decimal.NewFromInt(48000), decimal.NewFromInt(1000), time.Now(), 3)
 	require.NoError(t, err)
-	err = ts.AddDCAPurchase("", decimal.NewFromInt(47000), decimal.NewFromInt(1000), time.Now(), 4)
+	err = ts.AddPurchase("", decimal.NewFromInt(47000), decimal.NewFromInt(1000), time.Now(), 4)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -283,7 +283,7 @@ func TestStrategy_Trade_Sell_PriceSignificantlyHigher(t *testing.T) {
 	recorder.On("SaveAveraging", mock.Anything).Return(nil)
 	defer ts.Close()
 
-	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 1)
+	err := ts.AddPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 1)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -309,7 +309,7 @@ func TestStrategy_Trade_Sell_FullSellOnDoubleThreshold(t *testing.T) {
 	recorder.On("SaveAveraging", mock.Anything).Return(nil)
 	defer ts.Close()
 
-	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 1)
+	err := ts.AddPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 1)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -344,11 +344,11 @@ func TestStrategy_Trade_Sell_SavesTradePartForSoldLayer(t *testing.T) {
 	})).Return(nil).Once()
 	defer ts.Close()
 
-	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 1)
+	err := ts.AddPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 1)
 	require.NoError(t, err)
-	err = ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 2)
+	err = ts.AddPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 2)
 	require.NoError(t, err)
-	err = ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 3)
+	err = ts.AddPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 3)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -356,17 +356,17 @@ func TestStrategy_Trade_Sell_SavesTradePartForSoldLayer(t *testing.T) {
 	tradeEvent, err := ts.Trade(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, tradeEvent)
-	require.Equal(t, 2, len(ts.GetDCASeries().Purchases))
+	require.Equal(t, 2, len(ts.GetSeries().Purchases))
 
 	tradeEvent, err = ts.Trade(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, tradeEvent)
-	require.Equal(t, 1, len(ts.GetDCASeries().Purchases))
+	require.Equal(t, 1, len(ts.GetSeries().Purchases))
 
 	tradeEvent, err = ts.Trade(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, tradeEvent)
-	require.Len(t, ts.GetDCASeries().Purchases, 0)
+	require.Len(t, ts.GetSeries().Purchases, 0)
 }
 
 func TestStrategy_Trade_NoAction_PriceInRange(t *testing.T) {
@@ -379,7 +379,7 @@ func TestStrategy_Trade_NoAction_PriceInRange(t *testing.T) {
 	ts, _ := createTestStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 1)
+	err := ts.AddPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 1)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -402,7 +402,7 @@ func TestStrategy_Trade_BuyError(t *testing.T) {
 	ts, _ := createTestStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 1)
+	err := ts.AddPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 1)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -424,7 +424,7 @@ func TestStrategy_Trade_SellError(t *testing.T) {
 	ts, _ := createTestStrategy(t, mockPricer, mockTrader)
 	defer ts.Close()
 
-	err := ts.AddDCAPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 1)
+	err := ts.AddPurchase("", decimal.NewFromInt(50000), decimal.NewFromInt(1000), time.Now(), 1)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -450,12 +450,12 @@ func TestStrategy_Initialize_WaitingForDip(t *testing.T) {
 	strategy, err := createStrategyWithWALDir(zap.NewNop(), pair, decimal.NewFromInt(10), mockPricer, mockTrader, recorderMock.NewDecisionRecorder(t), 10, decimal.NewFromInt(1), decimal.NewFromInt(5), tmpDir)
 	require.NoError(t, err)
 
-	strategy.dcaSeries.WaitingForDip = true
-	strategy.dcaSeries.LastSellPrice = currentPrice
+	strategy.series.WaitingForDip = true
+	strategy.series.LastSellPrice = currentPrice
 
 	err = strategy.Initialize(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, 0, len(strategy.dcaSeries.Purchases))
+	require.Equal(t, 0, len(strategy.series.Purchases))
 }
 
 func TestStrategy_SellAll_NoPosition_ReturnsError(t *testing.T) {
@@ -477,7 +477,7 @@ func TestStrategy_SellAll_NoPosition_ReturnsError(t *testing.T) {
 	err = strategy.SellAll(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no position to sell")
-	require.False(t, strategy.dcaSeries.WaitingForDip)
+	require.False(t, strategy.series.WaitingForDip)
 }
 
 func TestStrategy_SellAll_OutOfSync_FixesWAL(t *testing.T) {
@@ -496,12 +496,12 @@ func TestStrategy_SellAll_OutOfSync_FixesWAL(t *testing.T) {
 	strategy, err := createStrategyWithWALDir(zap.NewNop(), pair, decimal.NewFromInt(10), mockPricer, mockTrader, recorderMock.NewDecisionRecorder(t), 10, decimal.NewFromInt(1), decimal.NewFromInt(5), tmpDir)
 	require.NoError(t, err)
 
-	err = strategy.AddDCAPurchase("intent-1", currentPrice, decimal.NewFromInt(100), time.Now(), 1)
+	err = strategy.AddPurchase("intent-1", currentPrice, decimal.NewFromInt(100), time.Now(), 1)
 	require.NoError(t, err)
-	require.Equal(t, 1, len(strategy.dcaSeries.Purchases))
+	require.Equal(t, 1, len(strategy.series.Purchases))
 
 	err = strategy.SellAll(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, 0, len(strategy.dcaSeries.Purchases))
-	require.True(t, strategy.dcaSeries.WaitingForDip)
+	require.Equal(t, 0, len(strategy.series.Purchases))
+	require.True(t, strategy.series.WaitingForDip)
 }

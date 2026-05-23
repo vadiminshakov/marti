@@ -11,8 +11,8 @@ const (
 	percentageMultiplier = 100
 )
 
-// DCAPurchase represents a single DCA purchase.
-type DCAPurchase struct {
+// AveragingPurchase represents a single purchase in an averaging series.
+type AveragingPurchase struct {
 	ID        string          `json:"id"`
 	Price     decimal.Decimal `json:"price"`
 	Amount    decimal.Decimal `json:"amount"`
@@ -20,19 +20,19 @@ type DCAPurchase struct {
 	TradePart int             `json:"trade_part"`
 }
 
-// newDCAPurchase creates a validated DCAPurchase.
-func newDCAPurchase(id string, price, amount decimal.Decimal, purchaseTime time.Time, tradePart int) (DCAPurchase, error) {
+// newAveragingPurchase creates a validated AveragingPurchase.
+func newAveragingPurchase(id string, price, amount decimal.Decimal, purchaseTime time.Time, tradePart int) (AveragingPurchase, error) {
 	if price.LessThanOrEqual(decimal.Zero) {
-		return DCAPurchase{}, fmt.Errorf("price must be positive, got %s", price.String())
+		return AveragingPurchase{}, fmt.Errorf("price must be positive, got %s", price.String())
 	}
 	if amount.LessThanOrEqual(decimal.Zero) {
-		return DCAPurchase{}, fmt.Errorf("amount must be positive, got %s", amount.String())
+		return AveragingPurchase{}, fmt.Errorf("amount must be positive, got %s", amount.String())
 	}
 	if tradePart < 1 {
-		return DCAPurchase{}, fmt.Errorf("tradePart must be >= 1, got %d", tradePart)
+		return AveragingPurchase{}, fmt.Errorf("tradePart must be >= 1, got %d", tradePart)
 	}
 
-	return DCAPurchase{
+	return AveragingPurchase{
 		ID:        id,
 		Price:     price,
 		Amount:    amount,
@@ -41,25 +41,25 @@ func newDCAPurchase(id string, price, amount decimal.Decimal, purchaseTime time.
 	}, nil
 }
 
-// DCASeries is the current DCA series state.
-type DCASeries struct {
-	Purchases         []DCAPurchase   `json:"purchases"`
-	AvgEntryPrice     decimal.Decimal `json:"avg_entry_price"`
-	FirstBuyTime      time.Time       `json:"first_buy_time"`
-	TotalAmount       decimal.Decimal `json:"total_amount"`
-	LastSellPrice     decimal.Decimal `json:"last_sell_price"`
-	LastBuyPrice      decimal.Decimal `json:"last_buy_price"`
-	WaitingForDip     bool            `json:"waiting_for_dip"`
-	ProcessedTradeIDs map[string]bool `json:"processed_trade_ids"`
-	// AllocatedQuoteAmount is the total allocated quote currency amount for this DCA series.
-	// Individual trades are calculated as AllocatedQuoteAmount / MaxDcaTrades.
+// AveragingSeries is the current averaging series state.
+type AveragingSeries struct {
+	Purchases         []AveragingPurchase `json:"purchases"`
+	AvgEntryPrice     decimal.Decimal     `json:"avg_entry_price"`
+	FirstBuyTime      time.Time           `json:"first_buy_time"`
+	TotalAmount       decimal.Decimal     `json:"total_amount"`
+	LastSellPrice     decimal.Decimal     `json:"last_sell_price"`
+	LastBuyPrice      decimal.Decimal     `json:"last_buy_price"`
+	WaitingForDip     bool                `json:"waiting_for_dip"`
+	ProcessedTradeIDs map[string]bool     `json:"processed_trade_ids"`
+	// AllocatedQuoteAmount is the total allocated quote currency amount for this series.
+	// Individual trades are calculated as AllocatedQuoteAmount / MaxTrades.
 	AllocatedQuoteAmount decimal.Decimal `json:"allocated_quote_amount"`
 }
 
-// NewDCASeries creates a new empty DCASeries with initialized collections.
-func NewDCASeries() *DCASeries {
-	return &DCASeries{
-		Purchases:            make([]DCAPurchase, 0),
+// NewAveragingSeries creates a new empty AveragingSeries with initialized collections.
+func NewAveragingSeries() *AveragingSeries {
+	return &AveragingSeries{
+		Purchases:            make([]AveragingPurchase, 0),
 		ProcessedTradeIDs:    make(map[string]bool),
 		AvgEntryPrice:        decimal.Zero,
 		TotalAmount:          decimal.Zero,
@@ -70,13 +70,13 @@ func NewDCASeries() *DCASeries {
 }
 
 // IsEmpty checks if series has no purchases.
-func (s *DCASeries) IsEmpty() bool {
+func (s *AveragingSeries) IsEmpty() bool {
 	return len(s.Purchases) == 0
 }
 
 // AddPurchase adds a validated purchase to the series and recalculates stats.
-func (s *DCASeries) AddPurchase(id string, price, amount decimal.Decimal, purchaseTime time.Time, tradePart int) error {
-	purchase, err := newDCAPurchase(id, price, amount, purchaseTime, tradePart)
+func (s *AveragingSeries) AddPurchase(id string, price, amount decimal.Decimal, purchaseTime time.Time, tradePart int) error {
+	purchase, err := newAveragingPurchase(id, price, amount, purchaseTime, tradePart)
 	if err != nil {
 		return fmt.Errorf("invalid purchase: %w", err)
 	}
@@ -89,7 +89,7 @@ func (s *DCASeries) AddPurchase(id string, price, amount decimal.Decimal, purcha
 }
 
 // TotalBaseAmount returns total base currency amount.
-func (s *DCASeries) TotalBaseAmount() decimal.Decimal {
+func (s *AveragingSeries) TotalBaseAmount() decimal.Decimal {
 	if s.AvgEntryPrice.IsZero() {
 		return decimal.Zero
 	}
@@ -97,7 +97,7 @@ func (s *DCASeries) TotalBaseAmount() decimal.Decimal {
 }
 
 // CurrentSellTradePart returns the trade part that would be sold next.
-func (s *DCASeries) CurrentSellTradePart() int {
+func (s *AveragingSeries) CurrentSellTradePart() int {
 	if len(s.Purchases) == 0 {
 		return 0
 	}
@@ -106,7 +106,7 @@ func (s *DCASeries) CurrentSellTradePart() int {
 }
 
 // RemoveAmount removes amount from purchases (FIFO from end).
-func (s *DCASeries) RemoveAmount(amount decimal.Decimal) {
+func (s *AveragingSeries) RemoveAmount(amount decimal.Decimal) {
 	if amount.LessThanOrEqual(decimal.Zero) || len(s.Purchases) == 0 {
 		return
 	}
@@ -131,7 +131,7 @@ func (s *DCASeries) RemoveAmount(amount decimal.Decimal) {
 }
 
 // RemoveBaseAmount removes a base currency amount by adjusting purchase amounts proportionally.
-func (s *DCASeries) RemoveBaseAmount(amountBase decimal.Decimal) {
+func (s *AveragingSeries) RemoveBaseAmount(amountBase decimal.Decimal) {
 	if amountBase.LessThanOrEqual(decimal.Zero) || len(s.Purchases) == 0 {
 		return
 	}
@@ -159,7 +159,7 @@ func (s *DCASeries) RemoveBaseAmount(amountBase decimal.Decimal) {
 }
 
 // recalculateStats recalculates series statistics.
-func (s *DCASeries) recalculateStats() {
+func (s *AveragingSeries) recalculateStats() {
 	if len(s.Purchases) == 0 {
 		s.TotalAmount = decimal.Zero
 		s.AvgEntryPrice = decimal.Zero
@@ -189,7 +189,7 @@ func (s *DCASeries) recalculateStats() {
 
 // ShouldBuyAtPrice evaluates buy conditions at given price.
 // Only considers additional buys within an active series (not for WaitingForDip logic).
-func (s *DCASeries) ShouldBuyAtPrice(price decimal.Decimal, thresholds DCAThresholds) BuyDecision {
+func (s *AveragingSeries) ShouldBuyAtPrice(price decimal.Decimal, thresholds AveragingThresholds) BuyDecision {
 	// guard: empty series (should not happen in active series context)
 	if s.IsEmpty() {
 		return BuyDecision{ShouldBuy: false, Reason: "empty_series"}
@@ -219,7 +219,7 @@ func (s *DCASeries) ShouldBuyAtPrice(price decimal.Decimal, thresholds DCAThresh
 
 // ShouldTakeProfitAtPrice evaluates sell conditions at given price.
 // First sell is relative to AvgEntryPrice, subsequent sells are relative to LastSellPrice.
-func (s *DCASeries) ShouldTakeProfitAtPrice(price decimal.Decimal, thresholds DCAThresholds) SellDecision {
+func (s *AveragingSeries) ShouldTakeProfitAtPrice(price decimal.Decimal, thresholds AveragingThresholds) SellDecision {
 	// guard: no average price
 	if s.AvgEntryPrice.IsZero() {
 		return SellDecision{ShouldSell: false, Reason: "no_avg_price"}
@@ -271,7 +271,7 @@ func (s *DCASeries) ShouldTakeProfitAtPrice(price decimal.Decimal, thresholds DC
 
 // calculateSellAmountInternal calculates amount to sell.
 // Returns the base amount for one step in the staircase sell strategy.
-func (s *DCASeries) calculateSellAmountInternal() decimal.Decimal {
+func (s *AveragingSeries) calculateSellAmountInternal() decimal.Decimal {
 	totalBase := s.TotalBaseAmount()
 	if totalBase.LessThanOrEqual(decimal.Zero) {
 		return decimal.Zero
@@ -293,26 +293,26 @@ func (s *DCASeries) calculateSellAmountInternal() decimal.Decimal {
 	return partBase
 }
 
-// DCAThresholds encapsulates DCA decision thresholds.
-type DCAThresholds struct {
+// AveragingThresholds encapsulates averaging decision thresholds.
+type AveragingThresholds struct {
 	BuyThresholdPercent  decimal.Decimal
 	SellThresholdPercent decimal.Decimal
 	MaxTrades            int
 }
 
-// NewDCAThresholds creates validated DCA thresholds.
-func NewDCAThresholds(buyThresholdPercent, sellThresholdPercent decimal.Decimal, maxTrades int) (DCAThresholds, error) {
+// NewAveragingThresholds creates validated averaging thresholds.
+func NewAveragingThresholds(buyThresholdPercent, sellThresholdPercent decimal.Decimal, maxTrades int) (AveragingThresholds, error) {
 	if buyThresholdPercent.LessThanOrEqual(decimal.Zero) {
-		return DCAThresholds{}, fmt.Errorf("buyThresholdPercent must be positive, got %s", buyThresholdPercent.String())
+		return AveragingThresholds{}, fmt.Errorf("buyThresholdPercent must be positive, got %s", buyThresholdPercent.String())
 	}
 	if sellThresholdPercent.LessThanOrEqual(decimal.Zero) {
-		return DCAThresholds{}, fmt.Errorf("sellThresholdPercent must be positive, got %s", sellThresholdPercent.String())
+		return AveragingThresholds{}, fmt.Errorf("sellThresholdPercent must be positive, got %s", sellThresholdPercent.String())
 	}
 	if maxTrades < 1 {
-		return DCAThresholds{}, fmt.Errorf("maxTrades must be >= 1, got %d", maxTrades)
+		return AveragingThresholds{}, fmt.Errorf("maxTrades must be >= 1, got %d", maxTrades)
 	}
 
-	return DCAThresholds{
+	return AveragingThresholds{
 		BuyThresholdPercent:  buyThresholdPercent,
 		SellThresholdPercent: sellThresholdPercent,
 		MaxTrades:            maxTrades,

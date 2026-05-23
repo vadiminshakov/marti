@@ -159,7 +159,7 @@ func (d *Strategy) applyExecutedBuy(intent *tradeIntentRecord) error {
 		zap.String("amount", amountQuoteCurrency.String()),
 		zap.Int("trade_part", intent.TradePart))
 
-	if err := d.AddDCAPurchase(intent.ID, intent.Price, amountQuoteCurrency, intent.Time, intent.TradePart); err != nil {
+	if err := d.AddPurchase(intent.ID, intent.Price, amountQuoteCurrency, intent.Time, intent.TradePart); err != nil {
 		return errors.Wrap(err, "failed to add DCA purchase")
 	}
 
@@ -173,7 +173,7 @@ func (d *Strategy) applyExecutedSell(intent *tradeIntentRecord) error {
 	}
 
 	amountBaseCurrency := intent.BaseAmount
-	totalBaseAmount := d.dcaSeries.TotalBaseAmount()
+	totalBaseAmount := d.series.TotalBaseAmount()
 	if amountBaseCurrency.GreaterThan(totalBaseAmount) {
 		amountBaseCurrency = totalBaseAmount
 	}
@@ -181,7 +181,7 @@ func (d *Strategy) applyExecutedSell(intent *tradeIntentRecord) error {
 	if amountBaseCurrency.LessThanOrEqual(decimal.Zero) {
 		d.markTradeProcessed(intent.ID)
 
-		return d.saveDCASeries()
+		return d.saveSeries()
 	}
 
 	isFullSell := intent.IsFullSell || amountBaseCurrency.Equal(totalBaseAmount)
@@ -189,42 +189,42 @@ func (d *Strategy) applyExecutedSell(intent *tradeIntentRecord) error {
 	if isFullSell {
 		d.l.Info("Full sell executed",
 			zap.String("amountSoldBase", amountBaseCurrency.String()))
-		d.resetDCASeries(intent.Price)
+		d.resetSeries(intent.Price)
 	} else {
 		d.l.Info("Partial sell executed",
 			zap.String("amountSoldBase", amountBaseCurrency.String()))
-		d.dcaSeries.RemoveBaseAmount(amountBaseCurrency)
-		d.tradePart = decimal.NewFromInt(int64(len(d.dcaSeries.Purchases)))
+		d.series.RemoveBaseAmount(amountBaseCurrency)
+		d.tradePart = decimal.NewFromInt(int64(len(d.series.Purchases)))
 
 		// update LastSellPrice for step-by-step sell strategy
 		d.updateSellState(intent.Price, false)
 
 		// check if series is now empty after partial sell
-		if len(d.dcaSeries.Purchases) == 0 || d.dcaSeries.TotalAmount.LessThanOrEqual(decimal.Zero) {
+		if len(d.series.Purchases) == 0 || d.series.TotalAmount.LessThanOrEqual(decimal.Zero) {
 			d.l.Info("Total amount became zero after partial sell",
-				zap.String("remainingTotalAmount", d.dcaSeries.TotalAmount.String()))
-			d.resetDCASeries(intent.Price)
+				zap.String("remainingTotalAmount", d.series.TotalAmount.String()))
+			d.resetSeries(intent.Price)
 		}
 	}
 
 	d.markTradeProcessed(intent.ID)
 
-	return d.saveDCASeries()
+	return d.saveSeries()
 }
 
-// resetDCASeries clears series.
-func (d *Strategy) resetDCASeries(sellPrice decimal.Decimal) {
-	d.l.Info("Resetting DCA series and waiting for price drop",
+// resetSeries clears the averaging series.
+func (d *Strategy) resetSeries(sellPrice decimal.Decimal) {
+	d.l.Info("Resetting series and waiting for price drop",
 		zap.String("lastSellPrice", sellPrice.String()),
 		zap.String("requiredDropPercent", d.thresholds.BuyThresholdPercent.String()))
 
-	processedIDs := d.dcaSeries.ProcessedTradeIDs
+	processedIDs := d.series.ProcessedTradeIDs
 	if processedIDs == nil {
 		processedIDs = make(map[string]bool)
 	}
 
-	d.dcaSeries = entity.NewDCASeries()
-	d.dcaSeries.ProcessedTradeIDs = processedIDs
+	d.series = entity.NewAveragingSeries()
+	d.series.ProcessedTradeIDs = processedIDs
 	d.tradePart = decimal.Zero
 	d.updateSellState(sellPrice, true)
 }

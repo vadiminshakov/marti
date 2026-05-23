@@ -26,12 +26,12 @@ type tradingStrategy interface {
 	SellAll(ctx context.Context) error
 }
 
-// dcaCostBasisProvider is an optional interface that DCA strategies implement
+// costBasisProvider is an optional interface that averaging strategies implement
 // to provide cost basis for PnL calculation.
-type dcaCostBasisProvider interface {
-	// GetDcaCostBasis returns average entry price and amount for PnL calculation.
+type costBasisProvider interface {
+	// GetCostBasis returns average entry price and amount for PnL calculation.
 	// Returns zeros if no position is open.
-	GetDcaCostBasis() (entryPrice, amount decimal.Decimal)
+	GetCostBasis() (entryPrice, amount decimal.Decimal)
 }
 
 // TradingBot represents a single trading instance that manages the execution
