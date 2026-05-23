@@ -96,7 +96,7 @@ func createStrategyWithWALDir(l *zap.Logger, pair domain.Pair, amountPercent dec
 		l:                  l,
 		wal:                wal,
 		journal:            newTradeJournal(wal, []*tradeIntentRecord{}),
-		series:             dcaSeries,
+		cycle:              dcaSeries,
 		thresholds:         &thresholdsCopy,
 		orderCheckInterval: time.Millisecond,
 		seriesKey:          seriesKey,
@@ -124,7 +124,7 @@ func TestStrategy_Initialize(t *testing.T) {
 	ctx := context.Background()
 	err := ts.Initialize(ctx)
 	require.NoError(t, err, "Initialize should succeed")
-	require.Equal(t, 1, len(ts.GetSeries().Purchases), "Should have one purchase after initialize")
+	require.Equal(t, 1, len(ts.cycle.Purchases), "Should have one purchase after initialize")
 }
 
 func TestStrategy_Trade_NoPriceData(t *testing.T) {
@@ -356,17 +356,17 @@ func TestStrategy_Trade_Sell_SavesTradePartForSoldLayer(t *testing.T) {
 	tradeEvent, err := ts.Trade(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, tradeEvent)
-	require.Equal(t, 2, len(ts.GetSeries().Purchases))
+	require.Equal(t, 2, len(ts.cycle.Purchases))
 
 	tradeEvent, err = ts.Trade(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, tradeEvent)
-	require.Equal(t, 1, len(ts.GetSeries().Purchases))
+	require.Equal(t, 1, len(ts.cycle.Purchases))
 
 	tradeEvent, err = ts.Trade(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, tradeEvent)
-	require.Len(t, ts.GetSeries().Purchases, 0)
+	require.Len(t, ts.cycle.Purchases, 0)
 }
 
 func TestStrategy_Trade_NoAction_PriceInRange(t *testing.T) {
@@ -450,12 +450,12 @@ func TestStrategy_Initialize_WaitingForDip(t *testing.T) {
 	strategy, err := createStrategyWithWALDir(zap.NewNop(), pair, decimal.NewFromInt(10), mockPricer, mockTrader, recorderMock.NewDecisionRecorder(t), 10, decimal.NewFromInt(1), decimal.NewFromInt(5), tmpDir)
 	require.NoError(t, err)
 
-	strategy.series.WaitingForDip = true
-	strategy.series.LastSellPrice = currentPrice
+	strategy.cycle.WaitingForDip = true
+	strategy.cycle.LastSellPrice = currentPrice
 
 	err = strategy.Initialize(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, 0, len(strategy.series.Purchases))
+	require.Equal(t, 0, len(strategy.cycle.Purchases))
 }
 
 func TestStrategy_SellAll_NoPosition_ReturnsError(t *testing.T) {
@@ -477,7 +477,7 @@ func TestStrategy_SellAll_NoPosition_ReturnsError(t *testing.T) {
 	err = strategy.SellAll(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no position to sell")
-	require.False(t, strategy.series.WaitingForDip)
+	require.False(t, strategy.cycle.WaitingForDip)
 }
 
 func TestStrategy_SellAll_OutOfSync_FixesWAL(t *testing.T) {
@@ -498,10 +498,10 @@ func TestStrategy_SellAll_OutOfSync_FixesWAL(t *testing.T) {
 
 	err = strategy.AddPurchase("intent-1", currentPrice, decimal.NewFromInt(100), time.Now(), 1)
 	require.NoError(t, err)
-	require.Equal(t, 1, len(strategy.series.Purchases))
+	require.Equal(t, 1, len(strategy.cycle.Purchases))
 
 	err = strategy.SellAll(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, 0, len(strategy.series.Purchases))
-	require.True(t, strategy.series.WaitingForDip)
+	require.Equal(t, 0, len(strategy.cycle.Purchases))
+	require.True(t, strategy.cycle.WaitingForDip)
 }

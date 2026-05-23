@@ -11,7 +11,13 @@ import (
 	entity "github.com/vadiminshakov/marti/internal/domain"
 )
 
-// reconcileTradeIntents applies pending trade intents.
+// reconcileTradeIntents finds all intents still in "pending" status and calls
+// processPendingIntent for each one.  It is called at the start of Initialize
+// and at the start of every Trade tick to catch fills that arrived while the
+// process was stopped or between ticks.
+//
+// If any intent fails to reconcile, the error is returned and no further
+// intents are processed that tick — the caller retries on the next tick.
 func (d *Strategy) reconcileTradeIntents(ctx context.Context) error {
 	if d.journal == nil {
 		return nil
@@ -47,7 +53,16 @@ func (d *Strategy) reconcileTradeIntents(ctx context.Context) error {
 	return nil
 }
 
-// processPendingIntent waits for intent execution and applies it.
+// processPendingIntent polls the exchange until the order for intent is fully
+// executed, then applies the fill to the cycle.
+//
+// If the intent was already applied to the cycle (isTradeProcessed returns
+// true) it simply marks it done in the journal and returns — this handles the
+// case where the process crashed after applying the fill but before writing
+// "done" to the WAL.
+//
+// The polling loop blocks the caller and respects ctx cancellation.  Each
+// iteration sleeps for orderCheckInterval before re-querying the exchange.
 func (d *Strategy) processPendingIntent(ctx context.Context, intent *tradeIntentRecord) error {
 	// if already applied to series, ensure journal reflects done and return
 	if d.isTradeProcessed(intent.ID) {
@@ -144,7 +159,9 @@ func (d *Strategy) processPendingIntent(ctx context.Context, intent *tradeIntent
 	}
 }
 
-// applyExecutedBuy applies executed buy.
+// applyExecutedBuy records the confirmed buy fill in the cycle by calling
+// AddPurchase.  The call is idempotent: if the intent ID is already in
+// cycle.ProcessedTradeIDs it returns immediately without modifying the cycle.
 func (d *Strategy) applyExecutedBuy(intent *tradeIntentRecord) error {
 	if d.isTradeProcessed(intent.ID) {
 		return nil
@@ -166,14 +183,25 @@ func (d *Strategy) applyExecutedBuy(intent *tradeIntentRecord) error {
 	return nil
 }
 
-// applyExecutedSell applies executed sell.
+// applyExecutedSell removes the sold base amount from the cycle and persists
+// the updated snapshot.
+//
+// Full sell (intent.IsFullSell or sold amount == total held): calls
+// resetSeries, which clears all purchases and sets WaitingForDip = true.
+//
+// Partial sell: calls cycle.RemoveBaseAmount, updates tradePart, and sets
+// LastSellPrice so the next sell threshold is calculated from the new price.
+// If after the removal the cycle is empty (rounding exhausted the position),
+// it also calls resetSeries to avoid a ghost cycle with zero balance.
+//
+// Like applyExecutedBuy, the call is idempotent via ProcessedTradeIDs.
 func (d *Strategy) applyExecutedSell(intent *tradeIntentRecord) error {
 	if d.isTradeProcessed(intent.ID) {
 		return nil
 	}
 
 	amountBaseCurrency := intent.BaseAmount
-	totalBaseAmount := d.series.TotalBaseAmount()
+	totalBaseAmount := d.cycle.TotalBaseAmount()
 	if amountBaseCurrency.GreaterThan(totalBaseAmount) {
 		amountBaseCurrency = totalBaseAmount
 	}
@@ -193,16 +221,16 @@ func (d *Strategy) applyExecutedSell(intent *tradeIntentRecord) error {
 	} else {
 		d.l.Info("Partial sell executed",
 			zap.String("amountSoldBase", amountBaseCurrency.String()))
-		d.series.RemoveBaseAmount(amountBaseCurrency)
-		d.tradePart = decimal.NewFromInt(int64(len(d.series.Purchases)))
+		d.cycle.RemoveBaseAmount(amountBaseCurrency)
+		d.tradePart = decimal.NewFromInt(int64(len(d.cycle.Purchases)))
 
 		// update LastSellPrice for step-by-step sell strategy
 		d.updateSellState(intent.Price, false)
 
 		// check if series is now empty after partial sell
-		if len(d.series.Purchases) == 0 || d.series.TotalAmount.LessThanOrEqual(decimal.Zero) {
+		if len(d.cycle.Purchases) == 0 || d.cycle.TotalAmount.LessThanOrEqual(decimal.Zero) {
 			d.l.Info("Total amount became zero after partial sell",
-				zap.String("remainingTotalAmount", d.series.TotalAmount.String()))
+				zap.String("remainingTotalAmount", d.cycle.TotalAmount.String()))
 			d.resetSeries(intent.Price)
 		}
 	}
@@ -212,19 +240,24 @@ func (d *Strategy) applyExecutedSell(intent *tradeIntentRecord) error {
 	return d.saveSeries()
 }
 
-// resetSeries clears the averaging series.
+// resetSeries clears all purchases and starts the post-sell waiting phase.
+//
+// It preserves ProcessedTradeIDs across the reset so that fills from the just-
+// finished cycle are not re-applied if the WAL is replayed again.  After the
+// reset, cycle.WaitingForDip == true and cycle.LastSellPrice == sellPrice, so
+// the next Trade tick will wait for a dip before opening a new cycle.
 func (d *Strategy) resetSeries(sellPrice decimal.Decimal) {
 	d.l.Info("Resetting series and waiting for price drop",
 		zap.String("lastSellPrice", sellPrice.String()),
 		zap.String("requiredDropPercent", d.thresholds.BuyThresholdPercent.String()))
 
-	processedIDs := d.series.ProcessedTradeIDs
+	processedIDs := d.cycle.ProcessedTradeIDs
 	if processedIDs == nil {
 		processedIDs = make(map[string]bool)
 	}
 
-	d.series = entity.NewAveragingSeries()
-	d.series.ProcessedTradeIDs = processedIDs
+	d.cycle = entity.NewAveragingSeries()
+	d.cycle.ProcessedTradeIDs = processedIDs
 	d.tradePart = decimal.Zero
 	d.updateSellState(sellPrice, true)
 }

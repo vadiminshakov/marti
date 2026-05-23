@@ -41,18 +41,69 @@ func newAveragingPurchase(id string, price, amount decimal.Decimal, purchaseTime
 	}, nil
 }
 
-// AveragingSeries is the current averaging series state.
+// AveragingSeries holds the mutable state of one averaging cycle — a sequence
+// of buy steps followed by a (possibly step-by-step) sell phase.
+//
+// Lifecycle:
+//  1. A new cycle starts when the strategy executes its first buy for a pair.
+//  2. Subsequent buys are appended via AddPurchase; AvgEntryPrice and
+//     TotalAmount are recalculated after every addition.
+//  3. When the price rises enough above AvgEntryPrice the strategy begins
+//     selling.  Partial sells call RemoveBaseAmount; a full sell calls
+//     resetSeries which clears Purchases and sets WaitingForDip = true.
+//  4. While WaitingForDip is true the strategy does nothing until the price
+//     drops a configured percentage below LastSellPrice, at which point a
+//     fresh cycle starts.
+//
+// The struct is serialised to JSON and written to the WAL after every
+// mutation, so the cycle survives process restarts without losing state.
 type AveragingSeries struct {
-	Purchases         []AveragingPurchase `json:"purchases"`
-	AvgEntryPrice     decimal.Decimal     `json:"avg_entry_price"`
-	FirstBuyTime      time.Time           `json:"first_buy_time"`
-	TotalAmount       decimal.Decimal     `json:"total_amount"`
-	LastSellPrice     decimal.Decimal     `json:"last_sell_price"`
-	LastBuyPrice      decimal.Decimal     `json:"last_buy_price"`
-	WaitingForDip     bool                `json:"waiting_for_dip"`
-	ProcessedTradeIDs map[string]bool     `json:"processed_trade_ids"`
-	// AllocatedQuoteAmount is the total allocated quote currency amount for this series.
-	// Individual trades are calculated as AllocatedQuoteAmount / MaxTrades.
+	// Purchases is the ordered list of buys in the current cycle (oldest first).
+	// Each entry carries its own price, quote amount, and trade-part index so the
+	// strategy can reconstruct AvgEntryPrice exactly after a restart.
+	Purchases []AveragingPurchase `json:"purchases"`
+
+	// AvgEntryPrice is the weighted-average buy price across all Purchases,
+	// calculated as totalQuoteSpent / totalBaseBought.  Used as the reference
+	// price for deciding when to sell.
+	AvgEntryPrice decimal.Decimal `json:"avg_entry_price"`
+
+	// FirstBuyTime is the timestamp of the first purchase in the cycle.
+	// Informational; used in decision-event records.
+	FirstBuyTime time.Time `json:"first_buy_time"`
+
+	// TotalAmount is the total quote currency (e.g. USDT) invested across all
+	// Purchases in this cycle.  Decreases as partial sells are applied.
+	TotalAmount decimal.Decimal `json:"total_amount"`
+
+	// LastSellPrice is the execution price of the most recent sell in this
+	// cycle.  On a full sell it becomes the anchor for the WaitingForDip check:
+	// the strategy will not start a new cycle until the price dips below
+	// LastSellPrice by at least BuyThresholdPercent.
+	LastSellPrice decimal.Decimal `json:"last_sell_price"`
+
+	// LastBuyPrice is the execution price of the most recent buy.  Used by
+	// ShouldBuyAtPrice to gate additional averaging steps: a new buy is only
+	// triggered when the current price is below this value by at least
+	// BuyThresholdPercent.
+	LastBuyPrice decimal.Decimal `json:"last_buy_price"`
+
+	// WaitingForDip is true after a full sell, indicating that the strategy is
+	// paused and waiting for the price to drop below LastSellPrice before
+	// opening a fresh cycle.  Resets to false when the dip condition is met.
+	WaitingForDip bool `json:"waiting_for_dip"`
+
+	// ProcessedTradeIDs is a deduplication set of trade intent IDs that have
+	// already been applied to this cycle.  Prevents double-counting fills when
+	// the WAL is replayed on restart or during reconciliation.
+	ProcessedTradeIDs map[string]bool `json:"processed_trade_ids"`
+
+	// AllocatedQuoteAmount is the total budget (quote currency) reserved for
+	// this cycle on its first buy.  It is computed once as
+	// quoteBalance * amountPercent / 100 and then held constant so that all
+	// subsequent steps in the same cycle use the same capital base regardless
+	// of balance fluctuations.  Individual step sizes are derived by the
+	// PositionSizer as AllocatedQuoteAmount / MaxTrades.
 	AllocatedQuoteAmount decimal.Decimal `json:"allocated_quote_amount"`
 }
 

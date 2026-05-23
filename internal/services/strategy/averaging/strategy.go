@@ -50,30 +50,79 @@ type DecisionRecorder interface {
 }
 
 // Strategy executes position-averaging trades (DCA, Martingale, etc.).
+//
+// High-level flow:
+//  1. Initialize opens the first buy and recovers any interrupted intents from WAL.
+//  2. Trade is called on each tick: it reconciles pending intents, then either
+//     buys (price dipped), sells (price recovered), or does nothing.
+//  3. After a full sell the cycle resets and Strategy waits for a configurable
+//     dip below the last sell price before starting a new cycle.
+//
+// All state mutations are written to a WAL so the strategy can resume after a
+// process restart exactly where it left off.
 type Strategy struct {
-	pair          entity.Pair
+	// pair is the trading pair this strategy operates on (e.g. BTC/USDT).
+	pair entity.Pair
+
+	// amountPercent is the fraction of the available quote balance (1–100) that
+	// is allocated to each full cycle.  Allocated once at cycle start and stored
+	// in cycle.AllocatedQuoteAmount for the lifetime of the cycle.
 	amountPercent decimal.Decimal
-	tradePart     decimal.Decimal
-	pricer        Pricer
-	trader        Tradersvc
-	recorder      DecisionRecorder
-	l             *zap.Logger
-	wal           *gowal.Wal
-	journal       *tradeJournal
-	series        *entity.AveragingSeries
-	thresholds    *entity.AveragingThresholds
-	seriesKey     string
-	// interval for checking order status (can be overridden for testing)
+
+	// tradePart tracks the 1-indexed sequence number of the next buy step within
+	// the current cycle.  It is kept in sync with len(cycle.Purchases) so that
+	// decision events carry the correct step number.
+	tradePart decimal.Decimal
+
+	pricer    Pricer
+	trader    Tradersvc
+	// recorder persists AveragingDecisionEvents after every executed buy or sell.
+	// Used for analytics and audit; failures are logged but do not abort the trade.
+	recorder  DecisionRecorder
+	l         *zap.Logger
+
+	// wal is the write-ahead log used to persist both the cycle state and every
+	// trade intent so neither is lost on restart.
+	wal *gowal.Wal
+
+	// journal tracks every trade intent (buy/sell order submitted to the
+	// exchange) and its current status (pending/done/failed).  On startup
+	// reconcileTradeIntents replays any pending intents to ensure fills that
+	// arrived while the process was down are applied to the cycle.
+	journal *tradeJournal
+
+	// cycle is the live state of the current averaging cycle: the ordered list of
+	// purchases made so far, the weighted-average entry price, the total invested
+	// amount, and metadata needed to decide the next buy/sell step.  A new cycle
+	// begins after each full sell and ends when all positions are closed.  The
+	// cycle is persisted to WAL after every mutation so it can be recovered on
+	// restart without losing trade history.
+	cycle *entity.AveragingSeries
+
+	// thresholds holds the percentage drop required to trigger a buy, the
+	// percentage rise required to trigger a sell, and the maximum number of buy
+	// steps allowed per cycle.
+	thresholds *entity.AveragingThresholds
+
+	// seriesKey is the WAL key under which the cycle snapshot is stored.
+	// Format: "dca_series_<sanitised-stateKey>".
+	seriesKey string
+
+	// orderCheckInterval is the polling period used in reconcileTradeIntents
+	// when waiting for an exchange order to fill.  Defaults to 1 minute;
+	// overridden to a short value in tests.
 	orderCheckInterval time.Duration
-	// positionSizer determines how much to buy at each step.
+
+	// positionSizer determines how much quote currency to spend on each buy step.
+	// EqualSizer distributes evenly (DCA); MartingaleSizer doubles each step.
 	positionSizer PositionSizer
-	// strategyName identifies the concrete strategy ("dca", "martingale")
-	// and is written into emitted decision events.
+
+	// strategyName labels decision events emitted to the recorder ("dca",
+	// "martingale").  Has no effect on trade logic.
 	strategyName string
 }
 
-// NewStrategy returns a configured averaging strategy.
-// strategyName labels emitted decision events (e.g. "dca", "martingale").
+// NewStrategy returns a configured averaging strategy ready to call Initialize.
 func NewStrategy(
 	l *zap.Logger,
 	stateKey string,
@@ -103,22 +152,22 @@ func NewStrategy(
 		return nil, err
 	}
 
-	// try to recover DCA series from WAL
-	series := entity.NewAveragingSeries()
+	// try to recover DCA cycle from WAL
+	cycle := entity.NewAveragingSeries()
 
 	tradeIntents := make([]*tradeIntentRecord, 0)
 
 	for record := range wal.Iterator() {
 		if record.Key == seriesKey {
-			if unmarshalErr := json.Unmarshal(record.Value, series); unmarshalErr != nil {
+			if unmarshalErr := json.Unmarshal(record.Value, cycle); unmarshalErr != nil {
 				l.Error("failed to unmarshal DCA series", zap.Error(unmarshalErr))
 
 				continue
 			}
 
 			// ensure ProcessedTradeIDs is not nil after unmarshaling old WAL records.
-			if series.ProcessedTradeIDs == nil {
-				series.ProcessedTradeIDs = make(map[string]bool)
+			if cycle.ProcessedTradeIDs == nil {
+				cycle.ProcessedTradeIDs = make(map[string]bool)
 			}
 
 			continue
@@ -138,7 +187,7 @@ func NewStrategy(
 		}
 	}
 
-	initialTradePart := decimal.NewFromInt(int64(len(series.Purchases)))
+	initialTradePart := decimal.NewFromInt(int64(len(cycle.Purchases)))
 
 	thresholds, err := entity.NewAveragingThresholds(percentThresholdBuy, percentThresholdSell, maxTrades)
 	if err != nil {
@@ -155,7 +204,7 @@ func NewStrategy(
 		l:                  l,
 		wal:                wal,
 		journal:            newTradeJournal(wal, tradeIntents),
-		series:             series,
+		cycle:              cycle,
 		thresholds:         &thresholds,
 		orderCheckInterval: defaultOrderCheckInterval,
 		seriesKey:          seriesKey,
@@ -164,7 +213,22 @@ func NewStrategy(
 	}, nil
 }
 
-// Initialize loads WAL and reconciles intents.
+// Initialize prepares the strategy for trading.  It must be called once before
+// the first Trade call.
+//
+// Steps:
+//  1. Reconciles any trade intents that were pending when the process last
+//     stopped (fills that arrived while the bot was down are applied to the
+//     cycle now).
+//  2. Fetches the current price to validate connectivity and calculate the
+//     initial buy amount.
+//  3. If no cycle exists (empty WAL or fresh start) executes the first buy
+//     immediately.  If a cycle was recovered from WAL, or the strategy is
+//     waiting for a dip after a previous sell, the initial buy is skipped.
+//
+// Returns an error if the exchange is unreachable, the price is invalid, or
+// the calculated buy amount would be zero (which usually indicates that
+// amountPercent or the current balance is too small).
 func (d *Strategy) Initialize(ctx context.Context) error {
 	// reconcile any pending trade intents from WAL.
 	if err := d.reconcileTradeIntents(ctx); err != nil {
@@ -196,18 +260,18 @@ func (d *Strategy) Initialize(ctx context.Context) error {
 	}
 
 	// set initial reference price if not already set.
-	if d.series.LastSellPrice.IsZero() {
-		d.updateSellState(currentPrice, d.series.WaitingForDip)
+	if d.cycle.LastSellPrice.IsZero() {
+		d.updateSellState(currentPrice, d.cycle.WaitingForDip)
 	}
 
 	// check if we need to execute initial buy.
-	if len(d.series.Purchases) > 0 || d.series.WaitingForDip {
-		if d.series.WaitingForDip {
+	if len(d.cycle.Purchases) > 0 || d.cycle.WaitingForDip {
+		if d.cycle.WaitingForDip {
 			d.l.Info("Waiting for dip before starting new series.",
-				zap.String("lastSellPrice", d.series.LastSellPrice.String()))
+				zap.String("lastSellPrice", d.cycle.LastSellPrice.String()))
 		} else {
 			d.l.Info("Series already exists (loaded from WAL). Continuing with existing trades.",
-				zap.Int("existingPurchases", len(d.series.Purchases)))
+				zap.Int("existingPurchases", len(d.cycle.Purchases)))
 		}
 
 		return nil
@@ -258,7 +322,7 @@ func (d *Strategy) Initialize(ctx context.Context) error {
 		Strategy:          d.strategyName,
 		Action:            "buy",
 		CurrentPrice:      currentPrice,
-		AverageEntryPrice: d.series.AvgEntryPrice,
+		AverageEntryPrice: d.cycle.AvgEntryPrice,
 		TradePart:         1,
 		QuoteBalance:      initialBuyQuoteAmount,
 	}); err != nil {
@@ -268,7 +332,20 @@ func (d *Strategy) Initialize(ctx context.Context) error {
 	return nil
 }
 
-// Trade performs one evaluation cycle.
+// Trade performs one evaluation tick: evaluates market conditions and executes trades if needed. It should be called repeatedly on a
+// timer (e.g. every second or every minute).
+//
+// Each call:
+//  1. Reconciles any pending trade intents (handles fills that arrived between
+//     ticks).
+//  2. Fetches the current price.
+//  3. If WaitingForDip: delegates to handleWaitingForDip, which starts a new
+//     cycle when the price drops far enough below the last sell price.
+//  4. Otherwise evaluates buy/sell conditions against the active cycle and
+//     executes the appropriate action.
+//
+// Returns a TradeEvent describing the executed trade, or nil if no action was
+// taken this tick.
 func (d *Strategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 	if err := d.reconcileTradeIntents(ctx); err != nil {
 		return nil, err
@@ -280,22 +357,22 @@ func (d *Strategy) Trade(ctx context.Context) (*entity.TradeEvent, error) {
 	}
 
 	// check if we're waiting for a dip after a sell.
-	if d.series.WaitingForDip && !d.series.LastSellPrice.IsZero() {
+	if d.cycle.WaitingForDip && !d.cycle.LastSellPrice.IsZero() {
 		return d.handleWaitingForDip(ctx, price)
 	}
 
-	if d.series.IsEmpty() {
+	if d.cycle.IsEmpty() {
 		return nil, nil
 	}
 
-	buy := d.series.ShouldBuyAtPrice(price, *d.thresholds)
+	buy := d.cycle.ShouldBuyAtPrice(price, *d.thresholds)
 	if buy.ShouldBuy {
 		d.l.Info("Buy decision", zap.String("reason", buy.Reason))
 
 		return d.executeBuy(ctx, price)
 	}
 
-	sell := d.series.ShouldTakeProfitAtPrice(price, *d.thresholds)
+	sell := d.cycle.ShouldTakeProfitAtPrice(price, *d.thresholds)
 	if sell.ShouldSell {
 		d.l.Info("Sell decision",
 			zap.String("reason", sell.Reason),
@@ -315,7 +392,14 @@ func (d *Strategy) Close() error {
 	return nil
 }
 
-// SellAll closes all positions and resets strategy state.
+// SellAll force-closes the entire open position at the current market price.
+//
+// The actual amount sold is taken from the exchange position, not from the WAL
+// cycle, so it stays correct even if the two have drifted.  If the exchange
+// reports zero position but the WAL still has a non-empty cycle (e.g. the
+// position was closed manually on the exchange, liquidated, or a crash occurred
+// after the exchange executed the sell but before WAL was updated),
+// the cycle is reset and the WAL is written without executing a trade.
 func (d *Strategy) SellAll(ctx context.Context) error {
 	price, err := d.getValidatedPrice(ctx)
 	if err != nil {
@@ -332,7 +416,7 @@ func (d *Strategy) SellAll(ctx context.Context) error {
 		realAmount = pos.Amount.Abs()
 	}
 
-	if d.series.TotalBaseAmount().IsZero() && realAmount.IsZero() {
+	if d.cycle.TotalBaseAmount().IsZero() && realAmount.IsZero() {
 		return errors.New("no position to sell")
 	}
 
@@ -352,21 +436,26 @@ func (d *Strategy) SellAll(ctx context.Context) error {
 	return err
 }
 
-// GetSeries exposes the current averaging series.
-func (d *Strategy) GetSeries() *entity.AveragingSeries {
-	return d.series
-}
-
-// GetCostBasis returns average entry price and total amount for PnL calculation.
+// GetCostBasis returns the weighted-average entry price and the total base
+// currency amount currently held, suitable for PnL calculations by external
+// callers.  Returns zeros when no cycle is active.
 func (d *Strategy) GetCostBasis() (entryPrice, amount decimal.Decimal) {
-	if d.series == nil {
+	if d.cycle == nil {
 		return decimal.Zero, decimal.Zero
 	}
 
-	return d.series.AvgEntryPrice, d.series.TotalBaseAmount()
+	return d.cycle.AvgEntryPrice, d.cycle.TotalBaseAmount()
 }
 
-// AddPurchase records a purchase in the averaging series.
+// AddPurchase appends a confirmed buy fill to the active cycle and persists the
+// updated cycle snapshot to WAL.
+//
+// intentID is used for deduplication: if the same ID has already been applied
+// (e.g. the fill arrived twice during reconciliation) the call is a no-op.
+// Pass an empty string to skip dedup (used in tests and manual adjustments).
+//
+// tradePartValue sets the step index explicitly; if < 1 it defaults to
+// len(cycle.Purchases)+1.
 func (d *Strategy) AddPurchase(intentID string, price, amountQuote decimal.Decimal, purchaseTime time.Time, tradePartValue int) error {
 	if intentID != "" && d.isTradeProcessed(intentID) {
 		return nil
@@ -374,14 +463,14 @@ func (d *Strategy) AddPurchase(intentID string, price, amountQuote decimal.Decim
 
 	partNumber := tradePartValue
 	if partNumber < 1 {
-		partNumber = len(d.series.Purchases) + 1
+		partNumber = len(d.cycle.Purchases) + 1
 	}
 
-	if err := d.series.AddPurchase(intentID, price, amountQuote, purchaseTime, partNumber); err != nil {
+	if err := d.cycle.AddPurchase(intentID, price, amountQuote, purchaseTime, partNumber); err != nil {
 		return errors.Wrap(err, "failed to add purchase to series")
 	}
 
-	d.tradePart = decimal.NewFromInt(int64(len(d.series.Purchases)))
+	d.tradePart = decimal.NewFromInt(int64(len(d.cycle.Purchases)))
 	d.markTradeProcessed(intentID)
 
 	return d.saveSeries()
@@ -408,25 +497,31 @@ func (d *Strategy) validatePrice(price decimal.Decimal, operation string) error 
 	return nil
 }
 
-// handleWaitingForDip handles post-sell dip wait logic.
+// handleWaitingForDip is called on every tick while cycle.WaitingForDip is
+// true.  It compares the current price against cycle.LastSellPrice:
+//   - If the price has NOT dropped by at least BuyThresholdPercent, returns nil
+//     (stay idle).
+//   - If the dip threshold is reached, clears WaitingForDip and executes the
+//     first buy of a new cycle.  On buy failure, WaitingForDip is restored so
+//     the strategy retries on the next tick.
 func (d *Strategy) handleWaitingForDip(ctx context.Context, price decimal.Decimal) (*entity.TradeEvent, error) {
-	percentChange := entity.PercentageDiff(price, d.series.LastSellPrice)
+	percentChange := entity.PercentageDiff(price, d.cycle.LastSellPrice)
 	if percentChange.GreaterThan(d.thresholds.BuyThresholdPercent.Neg()) {
 		return nil, nil
 	}
 
 	d.l.Info("Price dropped from last sell price, initiating new DCA series.",
 		zap.String("currentPrice", price.String()),
-		zap.String("lastSellPrice", d.series.LastSellPrice.String()),
+		zap.String("lastSellPrice", d.cycle.LastSellPrice.String()),
 		zap.String("percentChange", percentChange.String()))
 
-	wasWaitingForDip := d.series.WaitingForDip
-	d.updateSellState(d.series.LastSellPrice, false)
+	wasWaitingForDip := d.cycle.WaitingForDip
+	d.updateSellState(d.cycle.LastSellPrice, false)
 
 	tradeEvent, err := d.executeBuy(ctx, price)
 	if err != nil {
 		d.l.Error("Failed to record initial purchase after price drop", zap.Error(err))
-		d.updateSellState(d.series.LastSellPrice, wasWaitingForDip)
+		d.updateSellState(d.cycle.LastSellPrice, wasWaitingForDip)
 
 		return tradeEvent, err
 	}
@@ -438,6 +533,13 @@ func (d *Strategy) handleWaitingForDip(ctx context.Context, price decimal.Decima
 	return tradeEvent, nil
 }
 
+// executeBuy calculates the step amount, persists a pending intent, submits
+// the buy order to the exchange, then records the fill in the cycle.
+//
+// Order of operations ensures crash-safety: the intent is written to WAL
+// before the order is sent, so if the process dies after the exchange accepts
+// the order but before the cycle is updated, reconcileTradeIntents will pick
+// up the pending intent on the next start and apply the fill.
 func (d *Strategy) executeBuy(ctx context.Context, price decimal.Decimal) (*entity.TradeEvent, error) {
 	if err := d.validatePrice(price, "buy"); err != nil {
 		return nil, err
@@ -455,7 +557,7 @@ func (d *Strategy) executeBuy(ctx context.Context, price decimal.Decimal) (*enti
 
 	d.l.Info("Price significantly lower than average, attempting DCA buy.",
 		zap.String("price", price.String()),
-		zap.String("avgEntryPrice", d.series.AvgEntryPrice.String()))
+		zap.String("avgEntryPrice", d.cycle.AvgEntryPrice.String()))
 
 	operationTime := time.Now()
 	tradePartValue := int(d.tradePart.IntPart()) + 1
@@ -493,7 +595,7 @@ func (d *Strategy) executeBuy(ctx context.Context, price decimal.Decimal) (*enti
 		zap.String("price", price.String()),
 		zap.String("amount_quote", buyQuoteAmount.String()),
 		zap.String("amount_base", buyBaseAmount.String()),
-		zap.String("avg_entry_price", d.series.AvgEntryPrice.String()))
+		zap.String("avg_entry_price", d.cycle.AvgEntryPrice.String()))
 
 	if err := d.recorder.SaveAveraging(entity.AveragingDecisionEvent{
 		Timestamp:         operationTime,
@@ -501,7 +603,7 @@ func (d *Strategy) executeBuy(ctx context.Context, price decimal.Decimal) (*enti
 		Strategy:          d.strategyName,
 		Action:            "buy",
 		CurrentPrice:      price,
-		AverageEntryPrice: d.series.AvgEntryPrice,
+		AverageEntryPrice: d.cycle.AvgEntryPrice,
 		TradePart:         tradePartValue,
 		QuoteBalance:      buyQuoteAmount,
 	}); err != nil {
@@ -516,18 +618,27 @@ func (d *Strategy) executeBuy(ctx context.Context, price decimal.Decimal) (*enti
 	}, nil
 }
 
+// executeSell submits a sell order for the amount described by sell, then
+// delegates cycle cleanup to applyExecutedSell.
+//
+// For a partial sell, only the step amount is sold and the cycle continues.
+// For a full sell (sell.IsFullSell == true), the cycle is reset via
+// resetSeries and the strategy enters WaitingForDip.
+//
+// Same WAL-first crash-safety pattern as executeBuy: the intent is persisted
+// before the order is sent to the exchange.
 func (d *Strategy) executeSell(ctx context.Context, price decimal.Decimal, sell entity.SellDecision) (*entity.TradeEvent, error) {
 	d.l.Info("Price significantly higher than average, attempting sell.",
 		zap.String("price", price.String()),
-		zap.String("avgEntryPrice", d.series.AvgEntryPrice.String()))
+		zap.String("avgEntryPrice", d.cycle.AvgEntryPrice.String()))
 
 	amountBaseCurrency := sell.Amount
 	amountQuoteProceeds := amountBaseCurrency.Mul(price)
-	tradePartValue := d.series.CurrentSellTradePart()
+	tradePartValue := d.cycle.CurrentSellTradePart()
 
-	amountQuoteCost := amountBaseCurrency.Mul(d.series.AvgEntryPrice).Round(8)
+	amountQuoteCost := amountBaseCurrency.Mul(d.cycle.AvgEntryPrice).Round(8)
 	if sell.IsFullSell {
-		amountQuoteCost = d.series.TotalAmount
+		amountQuoteCost = d.cycle.TotalAmount
 	}
 
 	operationTime := time.Now()
@@ -568,7 +679,7 @@ func (d *Strategy) executeSell(ctx context.Context, price decimal.Decimal, sell 
 		Price:  price,
 	}
 
-	profit := entity.PercentageDiff(price, d.series.AvgEntryPrice)
+	profit := entity.PercentageDiff(price, d.cycle.AvgEntryPrice)
 	d.logBalances(ctx, "sell executed",
 		zap.Int("trade_part", tradePartValue),
 		zap.String("price", price.String()),
@@ -583,7 +694,7 @@ func (d *Strategy) executeSell(ctx context.Context, price decimal.Decimal, sell 
 		Strategy:          d.strategyName,
 		Action:            "sell",
 		CurrentPrice:      price,
-		AverageEntryPrice: d.series.AvgEntryPrice,
+		AverageEntryPrice: d.cycle.AvgEntryPrice,
 		TradePart:         tradePartValue,
 		QuoteBalance:      amountQuoteProceeds,
 	}); err != nil {
@@ -604,15 +715,28 @@ func (d *Strategy) logBalances(ctx context.Context, action string, extraFields .
 	d.l.Info(action, extraFields...)
 }
 
+// updateSellState atomically sets LastSellPrice and WaitingForDip on the
+// active cycle.  Called both after a completed sell and on rollback when a
+// subsequent buy fails during WaitingForDip handling.
 func (d *Strategy) updateSellState(price decimal.Decimal, waitingForDip bool) {
-	d.series.LastSellPrice = price
-	d.series.WaitingForDip = waitingForDip
+	d.cycle.LastSellPrice = price
+	d.cycle.WaitingForDip = waitingForDip
 }
 
+// calculateBuyQuoteAmount returns the quote-currency amount to spend on the
+// current buy step.
+//
+// On the first buy of a cycle, the full balance allocation is calculated
+// (balance × amountPercent / 100) and stored in cycle.AllocatedQuoteAmount.
+// All subsequent steps within the same cycle reuse that stored value so the
+// step size is stable even if the balance changes between steps.
+//
+// The per-step amount is derived by passing the allocated total through
+// positionSizer, which applies the DCA or Martingale distribution logic.
 func (d *Strategy) calculateBuyQuoteAmount(ctx context.Context) (decimal.Decimal, error) {
 	// if ongoing series, use stored allocated balance
-	if d.series.AllocatedQuoteAmount.GreaterThan(decimal.Zero) {
-		return d.positionSizer(d.series.AllocatedQuoteAmount, d.thresholds.MaxTrades, len(d.series.Purchases)), nil
+	if d.cycle.AllocatedQuoteAmount.GreaterThan(decimal.Zero) {
+		return d.positionSizer(d.cycle.AllocatedQuoteAmount, d.thresholds.MaxTrades, len(d.cycle.Purchases)), nil
 	}
 
 	// new series: fetch current balance
@@ -626,16 +750,21 @@ func (d *Strategy) calculateBuyQuoteAmount(ctx context.Context) (decimal.Decimal
 	allocatedAmount := quoteBalance.Mul(d.amountPercent).Div(decimal.NewFromInt(percentageMultiplier))
 
 	// store it for subsequent steps in this series
-	d.series.AllocatedQuoteAmount = allocatedAmount
+	d.cycle.AllocatedQuoteAmount = allocatedAmount
 
 	// calculate individual trade amount using the position sizer
-	individualQuoteAmount := d.positionSizer(allocatedAmount, d.thresholds.MaxTrades, len(d.series.Purchases))
+	individualQuoteAmount := d.positionSizer(allocatedAmount, d.thresholds.MaxTrades, len(d.cycle.Purchases))
 
 	return individualQuoteAmount, nil
 }
 
+// saveSeries serialises the current cycle snapshot to JSON and appends it to
+// the WAL under seriesKey.  Called after every mutation that changes cycle
+// state (buy fill, sell fill, dip-wait transition).  On process restart the
+// last WAL record for seriesKey is replayed by NewStrategy to restore the
+// cycle exactly.
 func (d *Strategy) saveSeries() error {
-	data, err := json.Marshal(d.series)
+	data, err := json.Marshal(d.cycle)
 	if err != nil {
 		return errors.Wrap(err, "failed to marshal DCA series")
 	}
@@ -702,26 +831,34 @@ func sanitizeStateKey(value string) string {
 	return result
 }
 
+// isTradeProcessed reports whether the given intent ID has already been applied
+// to the cycle.  Used to prevent double-counting fills during reconciliation.
 func (d *Strategy) isTradeProcessed(intentID string) bool {
 	if intentID == "" {
 		return false
 	}
 
-	if len(d.series.ProcessedTradeIDs) == 0 {
+	if len(d.cycle.ProcessedTradeIDs) == 0 {
 		return false
 	}
 
-	return d.series.ProcessedTradeIDs[intentID]
+	return d.cycle.ProcessedTradeIDs[intentID]
 }
 
+// markTradeProcessed records intentID in the cycle's dedup set and is called
+// immediately after a fill is applied, before saveSeries, so the dedup set is
+// part of the persisted snapshot.
 func (d *Strategy) markTradeProcessed(intentID string) {
 	if intentID == "" {
 		return
 	}
 
-	d.series.ProcessedTradeIDs[intentID] = true
+	d.cycle.ProcessedTradeIDs[intentID] = true
 }
 
+// markIntentFailed persists the intent with status "failed" and logs the error.
+// Called when ExecuteAction returns an error so the failed order is visible in
+// the WAL and won't be mistaken for a pending intent on the next start.
 func (d *Strategy) markIntentFailed(intent *tradeIntentRecord, cause error) {
 	if d.journal == nil || intent == nil {
 		return
