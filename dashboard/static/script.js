@@ -822,6 +822,7 @@ function handlePayload(payload) {
   }
 
   const total = deriveTotal(payload);
+  const payloadInitialQuote = parseNum(payload.initial_quote);
   aggregate.pairs.set(pairLabel, {
     totalQuote: total.numeric,
     timestamp: payload.ts,
@@ -848,7 +849,13 @@ function handlePayload(payload) {
   aggregate.totalQuote = totalQuote;
   aggregate.totalUnrealizedPnL = totalUnrealizedPnL;
 
-  if (!aggregate.initialBalance && totalBalance > 0) {
+  // Prefer the authoritative initial_quote sent by the backend (e.g. the
+  // simulate trader's configured starting capital) over the first-observed
+  // heuristic. This keeps PnL consistent with "Total funds vs starting
+  // balance" even after restarts or when the first snapshot is post-trade.
+  if (payloadInitialQuote > 0) {
+    aggregate.initialBalance = payloadInitialQuote;
+  } else if (!aggregate.initialBalance && totalBalance > 0) {
     aggregate.initialBalance = totalBalance;
   }
 
@@ -923,12 +930,19 @@ const knownModels = [
   'openai', 'google', 'anthropic', 'xai', 'dca', 'martingale'
 ];
 
-function filterDecisions(model) {
-  if (currentFilter === model) {
-    currentFilter = null;
-  } else {
-    currentFilter = model;
+const filterTermForModel = (model) => model === 'xai' ? 'x-ai' : model;
+
+const filterKeyForModel = (model) => {
+  const normalizedModel = normalizeModel(model).toLowerCase();
+  if (!normalizedModel) {
+    return '';
   }
+
+  return knownModels.find((knownModel) => normalizedModel.includes(filterTermForModel(knownModel))) || '';
+};
+
+function applyDecisionFilter() {
+  if (!modelFiltersContainer || !aiDecisionsContainer) return;
 
   const buttons = modelFiltersContainer.querySelectorAll('.filter-btn');
   buttons.forEach(btn => {
@@ -940,10 +954,8 @@ function filterDecisions(model) {
   });
 
   const cards = aiDecisionsContainer.querySelectorAll('.ai-decision-card');
-  const filterTerm = currentFilter === 'xai' ? 'x-ai' : currentFilter;
   cards.forEach(card => {
-    const cardModel = card.dataset.model;
-    if (!currentFilter || (cardModel && cardModel.includes(filterTerm))) {
+    if (!currentFilter || card.dataset.filterKey === currentFilter) {
       card.style.display = 'block';
     } else {
       card.style.display = 'none';
@@ -951,10 +963,29 @@ function filterDecisions(model) {
   });
 }
 
-function renderFilterButtons() {
-  if (!modelFiltersContainer) return;
+function filterDecisions(model) {
+  currentFilter = currentFilter === model ? null : model;
+  applyDecisionFilter();
+}
+
+function syncFilterButtons() {
+  if (!modelFiltersContainer || !aiDecisionsContainer) return;
+
+  const availableFilters = new Set(
+    Array.from(aiDecisionsContainer.querySelectorAll('.ai-decision-card'))
+      .map(card => card.dataset.filterKey)
+      .filter(Boolean)
+  );
+
+  if (currentFilter && !availableFilters.has(currentFilter)) {
+    currentFilter = null;
+  }
+
+  modelFiltersContainer.replaceChildren();
 
   knownModels.forEach(model => {
+    if (!availableFilters.has(model)) return;
+
     const btn = document.createElement('button');
     btn.className = 'filter-btn';
     btn.textContent = model;
@@ -962,9 +993,11 @@ function renderFilterButtons() {
     btn.onclick = () => filterDecisions(model);
     modelFiltersContainer.appendChild(btn);
   });
+
+  applyDecisionFilter();
 }
 
-renderFilterButtons();
+syncFilterButtons();
 
 function formatTime(ts) {
   if (!ts) return '';
@@ -982,13 +1015,7 @@ function createDecisionCard(decision) {
   if (decision.model) {
     card.dataset.model = normalizeModel(decision.model).toLowerCase();
   }
-
-  if (currentFilter && card.dataset.model) {
-    const filterTerm = currentFilter === 'xai' ? 'x-ai' : currentFilter;
-    if (!card.dataset.model.includes(filterTerm)) {
-      card.style.display = 'none';
-    }
-  }
+  card.dataset.filterKey = filterKeyForModel(decision.model);
 
   const header = document.createElement('div');
   header.className = 'ai-decision-header';
@@ -1140,6 +1167,7 @@ function connectAIDecisionSSE() {
       while (aiDecisionsContainer.children.length > MAX_DECISIONS) {
         aiDecisionsContainer.removeChild(aiDecisionsContainer.lastChild);
       }
+      syncFilterButtons();
     } catch (err) {
       console.error('Decision parse error', err);
     }

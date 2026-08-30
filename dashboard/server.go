@@ -264,7 +264,7 @@ func (s *Server) handleBalanceStream(w http.ResponseWriter, r *http.Request) {
 
 		// apply exponential thinning on first load for large datasets
 		recordsToSend := records
-		if isFirstLoad && len(records) > 100 {
+		if isFirstLoad && len(records) > 2500 {
 			recordsToSend = thinRecords(records)
 		}
 
@@ -409,6 +409,11 @@ func (s *Server) staticHandler() http.Handler {
 			assetPath = "/index.html"
 		}
 
+		// Force revalidation so browsers always pick up the latest static
+		// assets (script.js, index.html). Without this, heuristic caching can
+		// serve stale JS and hide dashboard fixes.
+		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+
 		if !shouldCompress(assetPath) || !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 			fileServer.ServeHTTP(w, r)
 			return
@@ -471,29 +476,31 @@ func parseLastEventID(headerVal, queryVal string) uint64 {
 	return id
 }
 
-// thinRecords applies exponential thinning to keep last 100 records fully, thin the rest
+// thinRecords applies exponential thinning to keep last keepLast records fully, thin the rest.
 func thinRecords(records []entity.BalanceSnapshotRecord) []entity.BalanceSnapshotRecord {
-	if len(records) <= 100 {
+	const keepLast = 2500
+	if len(records) <= keepLast {
 		return records
 	}
 
-	keepLast := 100
 	older := records[:len(records)-keepLast]
 	var thinned []entity.BalanceSnapshotRecord
 
 	// exponentially thin older records
 	skip := 1 // start by skipping 1 (send every 2nd)
+	kept := 0
 	for i := len(older) - 1; i >= 0; i-- {
 		thinned = append([]entity.BalanceSnapshotRecord{older[i]}, thinned...)
-		// skip next 'skip' records
-		i -= skip
-		// double skip every 12 records (exponential)
-		if (len(older)-1-i)%12 == 0 {
+		kept++
+		// double skip every 12 kept records (exponential)
+		if kept%12 == 0 {
 			skip *= 2
 		}
+		// skip next 'skip' records
+		i -= skip
 	}
 
-	// append last 100 records as is
+	// append last keepLast records as is
 	return append(thinned, records[len(records)-keepLast:]...)
 }
 
