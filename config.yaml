@@ -35,6 +35,9 @@
   max_dca_trades: 8
   dca_percent_threshold_buy: 1
   dca_percent_threshold_sell: 2
+  # Starting quote-capital for the simulator (default: 10000). Used as the PnL
+  # baseline on the dashboard.
+  simulate_starting_balance: 10000
 
 # AI Strategy - spot
 - pair: BTC_USDT

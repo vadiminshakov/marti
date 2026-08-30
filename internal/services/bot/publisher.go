@@ -102,6 +102,8 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 		model = "Martingale"
 	}
 
+	initialQuote := b.resolveInitialQuote()
+
 	err = b.balanceStore.Save(entity.NewBalanceSnapshot(
 		time.Now().UTC(),
 		b.Config.Pair.String(),
@@ -114,7 +116,29 @@ func (b *TradingBot) publishBalanceSnapshot(ctx context.Context) error {
 		entryPrice,
 		positionAmount,
 		unrealizedPnL,
+		initialQuote,
 	))
 
 	return errors.Wrap(err, "failed to save balance snapshot")
+}
+
+// resolveInitialQuote returns the authoritative starting quote-capital for the
+// dashboard PnL baseline. It is resolved once from the trader (when it
+// implements initialBalanceProvider) and cached. Returns an empty string for
+// traders that do not expose a starting balance.
+func (b *TradingBot) resolveInitialQuote() string {
+	if b.initialQuoteResolved {
+		if b.initialQuote.GreaterThan(decimal.Zero) {
+			return b.initialQuote.StringFixed(2)
+		}
+		return ""
+	}
+	b.initialQuoteResolved = true
+	if provider, ok := b.trader.(initialBalanceProvider); ok {
+		b.initialQuote = provider.InitialQuoteBalance()
+	}
+	if b.initialQuote.GreaterThan(decimal.Zero) {
+		return b.initialQuote.StringFixed(2)
+	}
+	return ""
 }

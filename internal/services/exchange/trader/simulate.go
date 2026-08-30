@@ -33,7 +33,11 @@ type SimulateTrader struct {
 	// for open margin positions so that we can release the same amount plus
 	// realised PnL when the position is unwound.
 	marginUsed decimal.Decimal
-	stateStore *simstate.Store
+	// initialQuote is the configured starting quote-capital. It is the
+	// authoritative baseline for PnL on the dashboard and does not change
+	// when the wallet is restored from disk after a restart.
+	initialQuote decimal.Decimal
+	stateStore   *simstate.Store
 }
 
 type orderInfo struct {
@@ -41,8 +45,21 @@ type orderInfo struct {
 	side   string
 }
 
+// Option configures a SimulateTrader.
+type Option func(*SimulateTrader)
+
+// WithStartingBalance sets the initial quote-currency capital for the simulator.
+// Defaults to 10000 when not applied.
+func WithStartingBalance(balance decimal.Decimal) Option {
+	return func(t *SimulateTrader) {
+		if balance.GreaterThan(decimal.Zero) {
+			t.initialQuote = balance
+		}
+	}
+}
+
 // NewSimulateTrader creates a new SimulateTrader.
-func NewSimulateTrader(pair domain.Pair, marketType domain.MarketType, leverage int, logger *zap.Logger, pricer Pricer, stateKey string) (*SimulateTrader, error) {
+func NewSimulateTrader(pair domain.Pair, marketType domain.MarketType, leverage int, logger *zap.Logger, pricer Pricer, stateKey string, opts ...Option) (*SimulateTrader, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -52,21 +69,31 @@ func NewSimulateTrader(pair domain.Pair, marketType domain.MarketType, leverage 
 	if leverage < 1 {
 		leverage = 1
 	}
-	wallet := map[string]decimal.Decimal{pair.From: decimal.Zero, pair.To: decimal.NewFromInt(10000)}
+	initialQuote := decimal.NewFromInt(10000)
+	wallet := map[string]decimal.Decimal{pair.From: decimal.Zero, pair.To: initialQuote}
 	stateStore, err := simstate.NewStore(pair, stateKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "init simulate state store")
 	}
 	trader := &SimulateTrader{
-		pair:       pair,
-		logger:     logger,
-		wallet:     wallet,
-		orders:     make(map[string]orderInfo),
-		pricer:     pricer,
-		leverage:   leverage,
-		marketType: marketType,
-		marginUsed: decimal.Zero,
-		stateStore: stateStore,
+		pair:         pair,
+		logger:       logger,
+		wallet:       wallet,
+		orders:       make(map[string]orderInfo),
+		pricer:       pricer,
+		leverage:     leverage,
+		marketType:   marketType,
+		marginUsed:   decimal.Zero,
+		initialQuote: initialQuote,
+		stateStore:   stateStore,
+	}
+	for _, opt := range opts {
+		opt(trader)
+	}
+	// If an option changed the initial quote, reflect it in the wallet before
+	// any persisted state is restored.
+	if !trader.wallet[pair.To].Equal(trader.initialQuote) {
+		trader.wallet[pair.To] = trader.initialQuote
 	}
 	if err := trader.restoreState(); err != nil {
 		logger.Warn("failed to restore simulate state", zap.Error(err))
@@ -75,9 +102,18 @@ func NewSimulateTrader(pair domain.Pair, marketType domain.MarketType, leverage 
 		zap.String("pair", pair.String()),
 		zap.String("base", trader.wallet[pair.From].String()),
 		zap.String("quote", trader.wallet[pair.To].String()),
+		zap.String("initial_quote", trader.initialQuote.String()),
 		zap.String("market_type", string(marketType)),
 		zap.Int("leverage", leverage))
 	return trader, nil
+}
+
+// InitialQuoteBalance returns the configured starting quote-capital. It is the
+// authoritative baseline for PnL and stays constant across restarts.
+func (t *SimulateTrader) InitialQuoteBalance() decimal.Decimal {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.initialQuote
 }
 
 // ExecuteAction executes a trading action.

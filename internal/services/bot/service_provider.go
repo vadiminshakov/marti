@@ -10,6 +10,7 @@ import (
 	"github.com/shopspring/decimal"
 	"go.uber.org/zap"
 
+	"github.com/vadiminshakov/marti/config"
 	"github.com/vadiminshakov/marti/internal/clients"
 	entity "github.com/vadiminshakov/marti/internal/domain"
 	"github.com/vadiminshakov/marti/internal/services/exchange/kline"
@@ -43,14 +44,14 @@ type serviceProvider interface {
 
 // newServiceProvider creates a new service provider based on the client type.
 // This is the single point of truth for dispatching to platform-specific implementations.
-func newServiceProvider(client any, logger *zap.Logger) (serviceProvider, error) {
+func newServiceProvider(client any, logger *zap.Logger, conf config.Config) (serviceProvider, error) {
 	switch c := client.(type) {
 	case *binance.Client:
 		return &binanceProvider{client: c}, nil
 	case *bybit.Client:
 		return &bybitProvider{client: c}, nil
 	case *clients.SimulateClient:
-		return &simulateProvider{client: c, logger: logger}, nil
+		return &simulateProvider{client: c, logger: logger, startingBalance: conf.SimulateStartingBalance}, nil
 	case *clients.HyperliquidClient:
 		return &hyperliquidProvider{client: c}, nil
 	default:
@@ -101,10 +102,11 @@ func (p *bybitProvider) KlineProvider() (klineService, error) {
 }
 
 type simulateProvider struct {
-	client     *clients.SimulateClient
-	logger     *zap.Logger
-	pricer     priceService
-	pricerOnce sync.Once
+	client          *clients.SimulateClient
+	logger          *zap.Logger
+	pricer          priceService
+	pricerOnce      sync.Once
+	startingBalance decimal.Decimal
 }
 
 func (p *simulateProvider) getPricer() priceService {
@@ -116,7 +118,11 @@ func (p *simulateProvider) getPricer() priceService {
 }
 
 func (p *simulateProvider) Trader(pair entity.Pair, marketType entity.MarketType, leverage int, stateKey string) (traderService, error) {
-	t, err := trader.NewSimulateTrader(pair, marketType, leverage, p.logger, p.getPricer(), stateKey)
+	opts := []trader.Option{}
+	if p.startingBalance.GreaterThan(decimal.Zero) {
+		opts = append(opts, trader.WithStartingBalance(p.startingBalance))
+	}
+	t, err := trader.NewSimulateTrader(pair, marketType, leverage, p.logger, p.getPricer(), stateKey, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("new simulate trader: %w", err)
 	}

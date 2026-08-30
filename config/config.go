@@ -68,6 +68,9 @@ type Config struct {
 	TelegramBotToken string
 	// TelegramChatID is the target chat or group ID. Optional.
 	TelegramChatID string
+	// SimulateStartingBalance is the initial quote-currency capital for the
+	// simulate platform. Defaults to 10000 when not set. Ignored by real exchanges.
+	SimulateStartingBalance decimal.Decimal
 }
 
 // StateKey returns a stable identifier used for namespacing per-bot local state.
@@ -106,7 +109,7 @@ type ConfigTmp struct {
 	MaxDcaTradesStr            string `yaml:"max_dca_trades,omitempty"`
 	DcaPercentThresholdBuyStr  string `yaml:"dca_percent_threshold_buy,omitempty"`
 	DcaPercentThresholdSellStr string `yaml:"dca_percent_threshold_sell,omitempty"`
-	MartingaleMultiplierStr   string `yaml:"martingale_multiplier,omitempty"`
+	MartingaleMultiplierStr    string `yaml:"martingale_multiplier,omitempty"`
 
 	// AI strategy fields
 	LLMAPIURL                 string `yaml:"llm_api_url,omitempty"`
@@ -123,6 +126,9 @@ type ConfigTmp struct {
 	// Telegram notification fields (optional, apply to all bots when set on any entry)
 	TelegramBotToken string `yaml:"telegram_bot_token,omitempty"`
 	TelegramChatID   string `yaml:"telegram_chat_id,omitempty"`
+
+	// SimulateStartingBalanceStr is the YAML form of SimulateStartingBalance.
+	SimulateStartingBalanceStr string `yaml:"simulate_starting_balance,omitempty"`
 }
 
 var (
@@ -153,6 +159,7 @@ func Get() ([]Config, error) {
 			MaxDcaTrades:            3,
 			DcaPercentThresholdBuy:  decimal.NewFromFloat(3.5),
 			DcaPercentThresholdSell: decimal.NewFromInt(66),
+			SimulateStartingBalance: decimal.NewFromInt(10000),
 		},
 	}, nil
 }
@@ -243,6 +250,19 @@ func parseConfig(c ConfigTmp) (*Config, error) {
 		Leverage:          leverage,
 		TelegramBotToken:  c.TelegramBotToken,
 		TelegramChatID:    c.TelegramChatID,
+	}
+
+	if c.SimulateStartingBalanceStr != "" {
+		sb, err := decimal.NewFromString(c.SimulateStartingBalanceStr)
+		if err != nil {
+			return nil, fmt.Errorf("incorrect 'simulate_starting_balance' param in yaml config (must be a decimal): %w", err)
+		}
+		if sb.LessThanOrEqual(decimal.Zero) {
+			return nil, fmt.Errorf("simulate_starting_balance must be greater than 0, got %s", sb.String())
+		}
+		newConfig.SimulateStartingBalance = sb
+	} else {
+		newConfig.SimulateStartingBalance = decimal.NewFromInt(10000)
 	}
 
 	switch strategyType {

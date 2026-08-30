@@ -350,3 +350,70 @@ func TestSimulateTrader_StateIsolationByKey(t *testing.T) {
 	assert.True(t, balanceA.Equal(decimal.NewFromFloat(0.1)))
 	assert.True(t, balanceB.Equal(decimal.NewFromFloat(0.2)))
 }
+
+func TestSimulateTrader_WithStartingBalance(t *testing.T) {
+	setupSimStateDir(t)
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+	logger := zap.NewNop()
+	pricer, _ := newSimulatePricer(t, pair, decimal.NewFromInt(50000))
+
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, t.Name(),
+		WithStartingBalance(decimal.NewFromInt(5000)))
+	require.NoError(t, err)
+
+	usdt, err := trader.GetBalance(context.Background(), "USDT")
+	require.NoError(t, err)
+	assert.True(t, usdt.Equal(decimal.NewFromInt(5000)), "wallet should start at configured balance")
+
+	assert.True(t, trader.InitialQuoteBalance().Equal(decimal.NewFromInt(5000)),
+		"InitialQuoteBalance should return configured value")
+}
+
+func TestSimulateTrader_InitialQuoteBalanceDefault(t *testing.T) {
+	setupSimStateDir(t)
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+	logger := zap.NewNop()
+	pricer, _ := newSimulatePricer(t, pair, decimal.NewFromInt(50000))
+
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, t.Name())
+	require.NoError(t, err)
+
+	assert.True(t, trader.InitialQuoteBalance().Equal(decimal.NewFromInt(10000)),
+		"default starting balance should be 10000")
+}
+
+// TestSimulateTrader_InitialQuoteBalanceStableAcrossRestart ensures that
+// initialQuote stays at the configured value even when the wallet is restored
+// from disk below the starting capital after a prior drawdown.
+func TestSimulateTrader_InitialQuoteBalanceStableAcrossRestart(t *testing.T) {
+	setupSimStateDir(t)
+	ctx := context.Background()
+	pair := entity.Pair{From: "BTC", To: "USDT"}
+	logger := zap.NewNop()
+	pricer, setPrice := newSimulatePricer(t, pair, decimal.NewFromInt(10000))
+
+	trader, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, t.Name(),
+		WithStartingBalance(decimal.NewFromInt(10000)))
+	require.NoError(t, err)
+
+	// Buy at 10000, then price drops so the wallet is below 10000 on restart.
+	require.NoError(t, trader.ExecuteAction(ctx, entity.ActionOpenLong, decimal.NewFromFloat(1), "buy1"))
+	setPrice(decimal.NewFromInt(6000))
+	require.NoError(t, trader.ExecuteAction(ctx, entity.ActionCloseLong, decimal.NewFromFloat(1), "sell1"))
+
+	quoteAfter, err := trader.GetBalance(ctx, "USDT")
+	require.NoError(t, err)
+	require.True(t, quoteAfter.LessThan(decimal.NewFromInt(10000)), "wallet should be below start after loss")
+
+	// Restart: restore state from disk.
+	trader2, err := NewSimulateTrader(pair, entity.MarketTypeSpot, 1, logger, pricer, t.Name(),
+		WithStartingBalance(decimal.NewFromInt(10000)))
+	require.NoError(t, err)
+
+	quoteRestored, err := trader2.GetBalance(ctx, "USDT")
+	require.NoError(t, err)
+	assert.True(t, quoteRestored.Equal(quoteAfter), "wallet should be restored from disk")
+
+	assert.True(t, trader2.InitialQuoteBalance().Equal(decimal.NewFromInt(10000)),
+		"initialQuote must remain 10000 after restart, not the restored wallet")
+}

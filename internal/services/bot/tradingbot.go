@@ -34,6 +34,14 @@ type costBasisProvider interface {
 	GetCostBasis() (entryPrice, amount decimal.Decimal)
 }
 
+// initialBalanceProvider is an optional interface that traders may implement to
+// expose the authoritative starting quote-capital. The simulate trader uses it
+// so the dashboard can compute PnL relative to the true starting balance rather
+// than the first observed (possibly post-trade) snapshot.
+type initialBalanceProvider interface {
+	InitialQuoteBalance() decimal.Decimal
+}
+
 // TradingBot represents a single trading instance that manages the execution
 // of a specific trading strategy on a configured trading pair.
 type TradingBot struct {
@@ -48,6 +56,12 @@ type TradingBot struct {
 	klineProvider klineService
 	decisions     decisionStore
 	factory       *strategyFactory
+
+	// initialQuote is the cached starting quote-capital used as the PnL
+	// baseline in balance snapshots. Resolved lazily from the trader (when it
+	// implements initialBalanceProvider) on the first snapshot.
+	initialQuote         decimal.Decimal
+	initialQuoteResolved bool
 
 	restartChan chan struct{}
 }
@@ -65,7 +79,7 @@ type decisionStore interface {
 // It initializes the appropriate trader and pricer components based on the platform specified in the config,
 // and sets up the trading strategy with the provided parameters.
 func NewTradingBot(logger *zap.Logger, conf config.Config, client any, balanceStore balanceSnapshotWriter, decisions decisionStore) (*TradingBot, error) {
-	provider, err := newServiceProvider(client, logger)
+	provider, err := newServiceProvider(client, logger, conf)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create service provider")
 	}
