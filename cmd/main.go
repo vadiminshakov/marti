@@ -2,11 +2,12 @@
 // It supports multiple exchanges (Binance, Bybit, Hyperliquid) and can be configured
 // via YAML configuration files or command-line arguments.
 //
-// By default marti starts with web UI. Use --cli to run without it.
+// By default marti starts with web UI and prints its URL to the terminal.
+// Use --cli to run without it.
 //
 // Usage:
 //
-//	marti                       (web UI, opens browser)
+//	marti                       (web UI, prints URL)
 //	marti --config config.yaml  (web UI with explicit config)
 //	marti --cli                 (CLI-only, TUI wizard if no config)
 //
@@ -22,9 +23,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"os/signal"
-	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -203,16 +202,20 @@ func main() {
 			defer wg.Done()
 			webLogger := logger.With(zap.String("component", "web"))
 			if len(tlsDomains) > 0 {
+				tlsURL := "https://" + tlsDomains[0]
 				webLogger.Info("Starting web UI with automatic TLS",
+					zap.String("url", tlsURL),
 					zap.String("addr", webAddr),
 					zap.String("domains", strings.Join(tlsDomains, ",")),
 				)
+				printUILink(tlsURL)
 				if err := srv.StartWithAutoTLS(ctx, tlsDomains, tlsCacheDir); err != nil && ctx.Err() == nil {
 					webLogger.Fatal("Failed to start web server with automatic TLS", zap.Error(err))
 				}
 			} else {
-				webLogger.Info("Starting web UI", zap.String("addr", webAddr))
-				go openBrowser(webLogger, webAddr)
+				uiURL := webUIURL(webAddr)
+				webLogger.Info("Starting web UI", zap.String("url", uiURL))
+				printUILink(uiURL)
 				if err := srv.Start(ctx); err != nil && ctx.Err() == nil {
 					webLogger.Fatal("Failed to start web server", zap.Error(err))
 				}
@@ -228,26 +231,30 @@ func main() {
 	logger.Info("All trading bots have shut down gracefully")
 }
 
-func openBrowser(logger *zap.Logger, addr string) {
-	url := addr
+func printUILink(url string) {
+	fmt.Printf("\nOpen UI in your browser:\n  %s\n\n", url)
+	if fi, err := os.Stdout.Stat(); err == nil && fi.Mode()&os.ModeCharDevice != 0 {
+		fmt.Printf("\033]0;Marti UI: %s\a", url)
+	}
+}
+
+// webUIURL converts a listen address to a clickable URL for the terminal.
+// For example, ":8000" becomes "http://localhost:8000".
+func webUIURL(addr string) string {
+	url := strings.TrimSpace(addr)
+	if url == "" {
+		return "http://localhost:8000"
+	}
 	if strings.HasPrefix(url, ":") {
-		url = "http://localhost" + url
-	} else if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		url = fmt.Sprintf("http://%s", strings.TrimPrefix(url, "://"))
+		return "http://localhost" + url
 	}
-
-	var cmd *exec.Cmd
-
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-	default:
-		cmd = exec.Command("xdg-open", url)
+	if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+		return url
 	}
-
-	if err := cmd.Start(); err != nil {
-		logger.Warn("failed to open browser for setup ui", zap.Error(err), zap.String("url", url))
+	trimmed := strings.TrimPrefix(url, "://")
+	// 0.0.0.0 is not dialable from the terminal, show localhost instead.
+	if strings.HasPrefix(trimmed, "0.0.0.0") {
+		trimmed = "localhost" + strings.TrimPrefix(trimmed, "0.0.0.0")
 	}
+	return fmt.Sprintf("http://%s", trimmed)
 }
