@@ -1,0 +1,16 @@
+go.mod
+  h_786988a78af769 17
+go.sum
+  h_786988a78af769 199-200
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a0007327bcc0feef518485966a79aa0518efa0d9",
+  "prompts": {},
+  "humans": {
+    "h_786988a78af769": {
+      "author": "Vadim Inshakov <vadiminshakov@gmail.com>"
+    }
+  }
+}
